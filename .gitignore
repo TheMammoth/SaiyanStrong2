@@ -1,0 +1,8 @@
+.claude/
+.claude-flow/
+.gradle/
+.idea/
+.kotlin/
+build/
+local.properties
+*.iml
