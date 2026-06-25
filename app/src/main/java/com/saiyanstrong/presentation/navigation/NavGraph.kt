@@ -7,6 +7,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.saiyanstrong.presentation.screens.history.HistoryScreen
+import com.saiyanstrong.presentation.screens.home.HomeScreen
 import com.saiyanstrong.presentation.screens.session_complete.SessionCompleteScreen
 import com.saiyanstrong.presentation.screens.workout.ActiveWorkoutScreen
 
@@ -14,15 +15,22 @@ import com.saiyanstrong.presentation.screens.workout.ActiveWorkoutScreen
 fun NavGraph() {
     val navController = rememberNavController()
 
-    NavHost(navController = navController, startDestination = Screen.ActiveWorkout.route) {
+    NavHost(navController = navController, startDestination = Screen.Home.route) {
+        composable(Screen.Home.route) {
+            HomeScreen(
+                onStartWorkout = { navController.navigate(Screen.ActiveWorkout.route) },
+                onViewHistory = { navController.navigate(Screen.History.route) }
+            )
+        }
+
         composable(Screen.ActiveWorkout.route) {
             ActiveWorkoutScreen(
                 onWorkoutFinished = { sessionId ->
-                    navController.navigate(Screen.SessionComplete.createRoute(sessionId))
+                    navController.navigate(Screen.SessionComplete.createRoute(sessionId)) {
+                        popUpTo(Screen.Home.route)
+                    }
                 },
-                onViewHistory = {
-                    navController.navigate(Screen.History.route)
-                }
+                onViewHistory = { navController.navigate(Screen.History.route) }
             )
         }
 
@@ -31,7 +39,11 @@ fun NavGraph() {
             arguments = listOf(navArgument("sessionId") { type = NavType.LongType })
         ) {
             SessionCompleteScreen(
-                onDone = { navController.popBackStack(Screen.ActiveWorkout.route, inclusive = false) }
+                onDone = {
+                    navController.navigate(Screen.Home.route) {
+                        popUpTo(Screen.Home.route) { inclusive = true }
+                    }
+                }
             )
         }
 

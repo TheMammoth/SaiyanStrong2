@@ -16,6 +16,7 @@ private val SaiyanDarkColorScheme = darkColorScheme(
 fun SaiyanTheme(content: @Composable () -> Unit) {
     MaterialTheme(
         colorScheme = SaiyanDarkColorScheme,
+        typography = SaiyanTypography,
         content = content
     )
 }

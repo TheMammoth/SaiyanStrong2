@@ -531,3 +531,18 @@ _(Claude Code appends here after each completed task)_
   arg), History → SessionComplete (tap row), back-stack pops to ActiveWorkout on Done.
   MainActivity now hosts NavGraph() instead of ActiveWorkoutScreen directly. PowerLevelBar
   composable in components/ shows stage label, numeric power, and LinearProgressIndicator.
+- [x] UI visual design — dark industrial theme applied to all screens:
+  Type.kt (SaiyanTypography — FontWeight.Black titles, Monospace bodySmall/label);
+  SaiyanButton.kt (neon green BorderStroke button, WeightKnobButton circular knob,
+  saiyanGlowBorder + scanlineTexture Modifier extensions); SaiyanTheme wired to
+  SaiyanTypography. ActiveWorkoutScreen rewritten: amber "SAIYAN STRONG" header,
+  NeonGreen-bordered ExerciseLogCard, SetInputPanel with WeightKnobButton +10/+25
+  and reps ±, "LOG SET >>>" SaiyanButton, amber-bordered RestTimerRow, telemetry bar
+  in TelemetryGreen on black. SessionCompleteScreen rewritten: StatCard row
+  (VOLUME/POWER/TIME), PowerLevelBar card, ExerciseResultCard with Epley 1RM in kg
+  (WeightFormatter), "DONE >>>" SaiyanButton. HomeScreen + HomeViewModel created:
+  power level via GetEvolutionStageUseCase.execute() → StateFlow, "BEGIN TRAINING"
+  and "SESSION HISTORY" SaiyanButtons, telemetry bar. NavGraph updated: Home is now
+  startDestination; ActiveWorkout → SessionComplete pops to Home; Done → Home clears
+  back-stack. Anatomy PNG overlay committed (AnatomyOverlayCanvas). Hilt bumped to
+  2.54.1 to resolve Kotlin 2.1.0 metadata incompatibility.
