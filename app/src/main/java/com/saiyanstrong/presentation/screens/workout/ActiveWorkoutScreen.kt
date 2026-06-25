@@ -28,14 +28,20 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.saiyanstrong.domain.model.Exercise
 import com.saiyanstrong.domain.model.ExerciseLog
+import com.saiyanstrong.presentation.screens.visualizer.VisualizerScreen
+import com.saiyanstrong.presentation.screens.visualizer.VisualizerState
+import com.saiyanstrong.presentation.screens.visualizer.VisualizerViewModel
 import com.saiyanstrong.presentation.theme.SaiyanTheme
+import com.saiyanstrong.util.WeightFormatter
 
 @Composable
 fun ActiveWorkoutScreen(
     onWorkoutFinished: (Long) -> Unit,
-    viewModel: ActiveWorkoutViewModel = hiltViewModel()
+    workoutViewModel: ActiveWorkoutViewModel = hiltViewModel(),
+    visualizerViewModel: VisualizerViewModel = hiltViewModel()
 ) {
-    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val uiState by workoutViewModel.uiState.collectAsStateWithLifecycle()
+    val visualizerState by visualizerViewModel.state.collectAsStateWithLifecycle()
 
     LaunchedEffect(uiState.completedSessionId) {
         uiState.completedSessionId?.let(onWorkoutFinished)
@@ -43,22 +49,34 @@ fun ActiveWorkoutScreen(
 
     ActiveWorkoutContent(
         uiState = uiState,
-        onAddExerciseClicked = viewModel::onAddExerciseClicked,
-        onExerciseSelected = viewModel::onExerciseSelected,
-        onExercisePickerDismissed = viewModel::onExercisePickerDismissed,
-        onLogSet = viewModel::onLogSet,
-        onSkipRest = viewModel::onSkipRest,
-        onFinishWorkout = viewModel::onFinishWorkout
+        visualizerState = visualizerState,
+        onAddExerciseClicked = workoutViewModel::onAddExerciseClicked,
+        onExerciseSelected = { exercise ->
+            workoutViewModel.onExerciseSelected(exercise)
+            visualizerViewModel.onExerciseSelected(exercise)
+        },
+        onExercisePickerDismissed = workoutViewModel::onExercisePickerDismissed,
+        onBeginSet = visualizerViewModel::onBeginSet,
+        onLogSet = { weightKg, reps, rpe ->
+            workoutViewModel.onLogSet(weightKg, reps, rpe)
+            visualizerViewModel.onSetLogged(weightKg, reps)
+        },
+        onNextSet = visualizerViewModel::onNextSet,
+        onSkipRest = workoutViewModel::onSkipRest,
+        onFinishWorkout = workoutViewModel::onFinishWorkout
     )
 }
 
 @Composable
 private fun ActiveWorkoutContent(
     uiState: ActiveWorkoutUiState,
+    visualizerState: VisualizerState,
     onAddExerciseClicked: () -> Unit,
     onExerciseSelected: (Exercise) -> Unit,
     onExercisePickerDismissed: () -> Unit,
+    onBeginSet: () -> Unit,
     onLogSet: (Double, Int, Float?) -> Unit,
+    onNextSet: () -> Unit,
     onSkipRest: () -> Unit,
     onFinishWorkout: () -> Unit
 ) {
@@ -69,13 +87,25 @@ private fun ActiveWorkoutContent(
                 .padding(padding)
                 .padding(16.dp)
         ) {
-            LazyColumn(modifier = Modifier.fillMaxWidth()) {
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f, fill = false)
+            ) {
                 items(uiState.exerciseLogs, key = { it.exercise.id }) { exerciseLog ->
-                    ExerciseLogRow(
-                        exerciseLog = exerciseLog,
-                        isActive = exerciseLog.exercise.id == uiState.activeExerciseId,
-                        onLogSet = onLogSet
-                    )
+                    ExerciseLogSummaryRow(exerciseLog)
+                }
+            }
+
+            if (uiState.activeExerciseId != null) {
+                VisualizerScreen(
+                    state = visualizerState,
+                    onBeginSet = onBeginSet,
+                    onNextSet = onNextSet
+                )
+
+                if (visualizerState is VisualizerState.DynamicTransition) {
+                    SetEntryForm(onLogSet = onLogSet)
                 }
             }
 
@@ -113,15 +143,7 @@ private fun ActiveWorkoutContent(
 }
 
 @Composable
-private fun ExerciseLogRow(
-    exerciseLog: ExerciseLog,
-    isActive: Boolean,
-    onLogSet: (Double, Int, Float?) -> Unit
-) {
-    var weightText by remember { mutableStateOf("") }
-    var repsText by remember { mutableStateOf("") }
-    var rpeText by remember { mutableStateOf("") }
-
+private fun ExerciseLogSummaryRow(exerciseLog: ExerciseLog) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -129,46 +151,58 @@ private fun ExerciseLogRow(
     ) {
         Text(exerciseLog.exercise.name, style = MaterialTheme.typography.titleMedium)
         exerciseLog.sets.forEach { set ->
-            Text("Set ${set.setNumber}: ${set.weightKg} kg x ${set.reps}")
+            Text("Set ${set.setNumber}: ${WeightFormatter.format(set.weightKg)} x ${set.reps}")
         }
-        if (isActive) {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(
-                    value = weightText,
-                    onValueChange = { weightText = it },
-                    label = { Text("kg") },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    modifier = Modifier.weight(1f)
-                )
-                OutlinedTextField(
-                    value = repsText,
-                    onValueChange = { repsText = it },
-                    label = { Text("reps") },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    modifier = Modifier.weight(1f)
-                )
-                OutlinedTextField(
-                    value = rpeText,
-                    onValueChange = { rpeText = it },
-                    label = { Text("RPE") },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    modifier = Modifier.weight(1f)
-                )
-            }
-            val weightKg = weightText.toDoubleOrNull()
-            val reps = repsText.toIntOrNull()
-            Button(
-                onClick = {
-                    onLogSet(weightKg!!, reps!!, rpeText.toFloatOrNull())
-                    weightText = ""
-                    repsText = ""
-                    rpeText = ""
-                },
-                enabled = weightKg != null && reps != null
-            ) {
-                Text("Log Set")
-            }
-        }
+    }
+}
+
+@Composable
+private fun SetEntryForm(onLogSet: (Double, Int, Float?) -> Unit) {
+    var weightText by remember { mutableStateOf("") }
+    var repsText by remember { mutableStateOf("") }
+    var rpeText by remember { mutableStateOf("") }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        OutlinedTextField(
+            value = weightText,
+            onValueChange = { weightText = it },
+            label = { Text("kg") },
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+            modifier = Modifier.weight(1f)
+        )
+        OutlinedTextField(
+            value = repsText,
+            onValueChange = { repsText = it },
+            label = { Text("reps") },
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            modifier = Modifier.weight(1f)
+        )
+        OutlinedTextField(
+            value = rpeText,
+            onValueChange = { rpeText = it },
+            label = { Text("RPE") },
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+            modifier = Modifier.weight(1f)
+        )
+    }
+
+    val weightKg = weightText.toDoubleOrNull()
+    val reps = repsText.toIntOrNull()
+    Button(
+        onClick = {
+            onLogSet(weightKg!!, reps!!, rpeText.toFloatOrNull())
+            weightText = ""
+            repsText = ""
+            rpeText = ""
+        },
+        enabled = weightKg != null && reps != null
+    ) {
+        Text("Log Set")
     }
 }
 
@@ -178,10 +212,13 @@ private fun ActiveWorkoutContentPreview() {
     SaiyanTheme {
         ActiveWorkoutContent(
             uiState = ActiveWorkoutUiState(),
+            visualizerState = VisualizerState.Idle,
             onAddExerciseClicked = {},
             onExerciseSelected = {},
             onExercisePickerDismissed = {},
+            onBeginSet = {},
             onLogSet = { _, _, _ -> },
+            onNextSet = {},
             onSkipRest = {},
             onFinishWorkout = {}
         )

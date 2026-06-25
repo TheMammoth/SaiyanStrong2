@@ -505,5 +505,22 @@ _(Claude Code appends here after each completed task)_
   now hosts ActiveWorkoutScreen directly as a temporary measure — Screen.kt,
   NavGraph.kt, and HomeScreen don't exist yet (no phase explicitly owns them), so
   there's nowhere to navigate on workout-finished; onWorkoutFinished is a no-op.
-- [ ] Phase 4 — visualizer
+- [x] Phase 4 — visualizer: VisualizerState.kt verbatim from spec; VisualizerViewModel
+  is its own @HiltViewModel (not bound to a nav route — there isn't one for it in
+  Screen.kt — instead it's hoisted in ActiveWorkoutScreen alongside ActiveWorkoutViewModel
+  and shares its lifetime). All 4 transitions wired: exercise-select → Static,
+  Begin Set → DynamicTransition (drives poseIndex 0..2 on a 600ms coroutine tick,
+  cosmetic only — the FullActivation transition is gated on the user actually
+  logging the set, not on the pose animation finishing), log set → FullActivation
+  (power/1RM computed by reusing CalculatePowerLevelUseCase.sessionPowerGained on a
+  1-set list + EstimateOneRepMaxUseCase), Next Set → back to Static. Added
+  TelemetryLog (typewriter component) and ParticleTendrilCanvas (Canvas API,
+  rendered only in FullActivation). Reworked ActiveWorkoutScreen: the per-exercise
+  set-entry form only shows during DynamicTransition now; the old inline
+  `"${weightKg} kg"` string in the summary rows is gone too — that was a rule-2
+  violation from Phase 3, now goes through WeightFormatter.
+  KNOWN GAP: VisualizerState.Static/DynamicTransition show plain text, not the real
+  anatomy SVG / Lottie pose sequence — no lottie/svg asset files exist in
+  res/assets yet (lottie-compose dep has been in the catalog since Phase 1 but is
+  still unused). Wire real rendering once those assets land.
 - [ ] Phase 5 — session complete + history
