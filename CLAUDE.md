@@ -482,7 +482,14 @@ _(Claude Code appends here after each completed task)_
   in app/src. NOT YET VERIFIED: `./gradlew assembleDebug` — no Gradle/Android SDK on
   this machine, and no gradlew wrapper jar generated (open in Android Studio once to
   auto-create it, or run `gradle wrapper` if a system Gradle is available).
-- [ ] Phase 2 — domain layer
+- [x] Phase 2 — domain layer: 6 models (MuscleGroup, Exercise+ExerciseCategory, SetLog,
+  ExerciseLog, WorkoutSession, PowerLevel+SaiyanStage) verbatim from spec; 3 repository
+  interfaces (Exercise/Session/User — no impls yet, that's pending repo-impl work,
+  not listed as its own phase); 5 use cases (EstimateOneRepMax, CalculatePowerLevel,
+  GetEvolutionStage, LogSet, CompleteSession), all `@Inject constructor` for Hilt.
+  RepositoryModule is still the Phase 1 empty stub — ViewModels in Phase 3 will need
+  ExerciseRepositoryImpl/SessionRepositoryImpl/UserRepositoryImpl + @Binds before the
+  Hilt graph that uses them resolves.
 - [ ] Phase 3 — active workout screen
 - [ ] Phase 4 — visualizer
 - [ ] Phase 5 — session complete + history
