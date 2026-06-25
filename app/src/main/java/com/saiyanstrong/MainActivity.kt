@@ -3,7 +3,7 @@ package com.saiyanstrong
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import com.saiyanstrong.presentation.screens.workout.ActiveWorkoutScreen
+import com.saiyanstrong.presentation.navigation.NavGraph
 import com.saiyanstrong.presentation.theme.SaiyanTheme
 import dagger.hilt.android.AndroidEntryPoint
 
@@ -13,7 +13,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         setContent {
             SaiyanTheme {
-                ActiveWorkoutScreen(onWorkoutFinished = {})
+                NavGraph()
             }
         }
     }

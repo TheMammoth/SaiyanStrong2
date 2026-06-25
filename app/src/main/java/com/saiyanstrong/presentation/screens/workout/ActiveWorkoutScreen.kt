@@ -37,6 +37,7 @@ import com.saiyanstrong.util.WeightFormatter
 @Composable
 fun ActiveWorkoutScreen(
     onWorkoutFinished: (Long) -> Unit,
+    onViewHistory: () -> Unit,
     workoutViewModel: ActiveWorkoutViewModel = hiltViewModel(),
     visualizerViewModel: VisualizerViewModel = hiltViewModel()
 ) {
@@ -50,6 +51,7 @@ fun ActiveWorkoutScreen(
     ActiveWorkoutContent(
         uiState = uiState,
         visualizerState = visualizerState,
+        onViewHistory = onViewHistory,
         onAddExerciseClicked = workoutViewModel::onAddExerciseClicked,
         onExerciseSelected = { exercise ->
             workoutViewModel.onExerciseSelected(exercise)
@@ -71,6 +73,7 @@ fun ActiveWorkoutScreen(
 private fun ActiveWorkoutContent(
     uiState: ActiveWorkoutUiState,
     visualizerState: VisualizerState,
+    onViewHistory: () -> Unit,
     onAddExerciseClicked: () -> Unit,
     onExerciseSelected: (Exercise) -> Unit,
     onExercisePickerDismissed: () -> Unit,
@@ -87,6 +90,16 @@ private fun ActiveWorkoutContent(
                 .padding(padding)
                 .padding(16.dp)
         ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text("Active Workout", style = MaterialTheme.typography.headlineSmall)
+                Button(onClick = onViewHistory) { Text("History") }
+            }
+
             LazyColumn(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -213,6 +226,7 @@ private fun ActiveWorkoutContentPreview() {
         ActiveWorkoutContent(
             uiState = ActiveWorkoutUiState(),
             visualizerState = VisualizerState.Idle,
+            onViewHistory = {},
             onAddExerciseClicked = {},
             onExerciseSelected = {},
             onExercisePickerDismissed = {},

@@ -523,4 +523,11 @@ _(Claude Code appends here after each completed task)_
   anatomy SVG / Lottie pose sequence — no lottie/svg asset files exist in
   res/assets yet (lottie-compose dep has been in the catalog since Phase 1 but is
   still unused). Wire real rendering once those assets land.
-- [ ] Phase 5 — session complete + history
+- [x] Phase 5 — session complete + history: SessionCompleteScreen (workout summary,
+  power earned, PowerLevelBar), SessionCompleteViewModel (combines SessionRepository
+  + GetEvolutionStageUseCase flows via `combine`), HistoryScreen (lazy list of past
+  sessions, date + volume + power per row), HistoryViewModel (streams getAllSessions).
+  Screen.kt + NavGraph.kt wire all routes: ActiveWorkout → SessionComplete (sessionId
+  arg), History → SessionComplete (tap row), back-stack pops to ActiveWorkout on Done.
+  MainActivity now hosts NavGraph() instead of ActiveWorkoutScreen directly. PowerLevelBar
+  composable in components/ shows stage label, numeric power, and LinearProgressIndicator.
