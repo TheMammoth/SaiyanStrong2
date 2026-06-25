@@ -490,6 +490,20 @@ _(Claude Code appends here after each completed task)_
   RepositoryModule is still the Phase 1 empty stub — ViewModels in Phase 3 will need
   ExerciseRepositoryImpl/SessionRepositoryImpl/UserRepositoryImpl + @Binds before the
   Hilt graph that uses them resolves.
-- [ ] Phase 3 — active workout screen
+- [x] Repository implementations: ExerciseRepositoryImpl, SessionRepositoryImpl
+  (transactional save via `AppDatabase.withTransaction`, manual entity↔domain joins
+  across session/exercise_log/set_log since there's no Room @Relation yet),
+  UserRepositoryImpl backed by new UserPreferencesDataStore (DataStore Preferences,
+  lifetime power earned). Added ExerciseMapper/SessionMapper/SetLogMapper. RepositoryModule
+  now binds all three via @Binds (changed from object to abstract class). Added
+  lifecycle-runtime-compose dep (needed for collectAsStateWithLifecycle, was missing
+  from Phase 1 catalog).
+- [x] Phase 3 — active workout screen: ActiveWorkoutViewModel (set logging against
+  LogSetUseCase, 90s rest timer via coroutine countdown, finish-workout calls
+  CompleteSessionUseCase), ActiveWorkoutScreen + stateless ActiveWorkoutContent
+  (previewable without Hilt) + ExercisePickerSheet (ModalBottomSheet). MainActivity
+  now hosts ActiveWorkoutScreen directly as a temporary measure — Screen.kt,
+  NavGraph.kt, and HomeScreen don't exist yet (no phase explicitly owns them), so
+  there's nowhere to navigate on workout-finished; onWorkoutFinished is a no-op.
 - [ ] Phase 4 — visualizer
 - [ ] Phase 5 — session complete + history
