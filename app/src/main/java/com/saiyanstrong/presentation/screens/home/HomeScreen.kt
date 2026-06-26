@@ -62,6 +62,7 @@ import com.saiyanstrong.BuildConfig
 fun HomeScreen(
     onStartWorkout: () -> Unit,
     onViewHistory: () -> Unit,
+    onSettings: () -> Unit = {},
     viewModel: HomeViewModel = hiltViewModel()
 ) {
     val powerLevel by viewModel.powerLevel.collectAsStateWithLifecycle()
@@ -105,7 +106,8 @@ fun HomeScreen(
         },
         onDismissUpdate = viewModel::onDismissUpdate,
         updateStatus = updateStatus,
-        onRetryUpdateCheck = viewModel::retryUpdateCheck
+        onRetryUpdateCheck = viewModel::retryUpdateCheck,
+        onSettings = onSettings
     )
 }
 
@@ -121,7 +123,8 @@ internal fun HomeContent(
     onDownloadUpdate: () -> Unit,
     onDismissUpdate: () -> Unit,
     updateStatus: String = "",
-    onRetryUpdateCheck: () -> Unit = {}
+    onRetryUpdateCheck: () -> Unit = {},
+    onSettings: () -> Unit = {}
 ) {
     Scaffold { padding ->
         Column(
@@ -130,23 +133,34 @@ internal fun HomeContent(
                 .scanlineTexture()
                 .padding(padding)
         ) {
-            Column(
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .background(SaiyanGray)
-                    .padding(horizontal = 16.dp, vertical = 16.dp)
+                    .padding(horizontal = 16.dp, vertical = 16.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        "SAIYAN STRONG",
+                        color = PowerAmber,
+                        style = MaterialTheme.typography.headlineLarge,
+                        fontWeight = FontWeight.Black,
+                        letterSpacing = 4.sp
+                    )
+                    Text(
+                        powerLevel?.stage?.label?.uppercase() ?: "INITIALIZING...",
+                        color = Color.White,
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                }
                 Text(
-                    "SAIYAN STRONG",
-                    color = PowerAmber,
-                    style = MaterialTheme.typography.headlineLarge,
-                    fontWeight = FontWeight.Black,
-                    letterSpacing = 4.sp
-                )
-                Text(
-                    powerLevel?.stage?.label?.uppercase() ?: "INITIALIZING...",
-                    color = Color.White,
-                    style = MaterialTheme.typography.titleMedium
+                    "⚙",
+                    color = Color.White.copy(alpha = 0.6f),
+                    fontSize = 22.sp,
+                    modifier = Modifier
+                        .clickable { onSettings() }
+                        .padding(8.dp)
                 )
             }
 

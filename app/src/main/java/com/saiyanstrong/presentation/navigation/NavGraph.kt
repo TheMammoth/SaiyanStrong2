@@ -9,6 +9,7 @@ import androidx.navigation.navArgument
 import com.saiyanstrong.presentation.screens.history.HistoryScreen
 import com.saiyanstrong.presentation.screens.home.HomeScreen
 import com.saiyanstrong.presentation.screens.session_complete.SessionCompleteScreen
+import com.saiyanstrong.presentation.screens.settings.SettingsScreen
 import com.saiyanstrong.presentation.screens.workout.ActiveWorkoutScreen
 
 @Composable
@@ -19,7 +20,8 @@ fun NavGraph() {
         composable(Screen.Home.route) {
             HomeScreen(
                 onStartWorkout = { navController.navigate(Screen.ActiveWorkout.route) },
-                onViewHistory = { navController.navigate(Screen.History.route) }
+                onViewHistory = { navController.navigate(Screen.History.route) },
+                onSettings = { navController.navigate(Screen.Settings.route) }
             )
         }
 
@@ -55,6 +57,10 @@ fun NavGraph() {
                 },
                 onBack = { navController.popBackStack() }
             )
+        }
+
+        composable(Screen.Settings.route) {
+            SettingsScreen(onBack = { navController.popBackStack() })
         }
     }
 }
