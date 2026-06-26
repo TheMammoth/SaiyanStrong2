@@ -558,3 +558,33 @@ _(Claude Code appends here after each completed task)_
   SessionRepositoryImpl wraps save in withTransaction (session→exercise_log→set_log);
   SessionDao orders by date_ms DESC; completedSessionId emitted only after suspend
   resolves; 150 exercises seeded (IDs 1–150); ExercisePickerSheet has search + chips.
+- [x] Sprint 4 — workout table UI + history intelligence: ExerciseLogCard rewritten
+  as a compact set-table (SET | PREV | KG | REPS columns); HistoryScreen now groups
+  sessions by month with MonthHeaderRow and SessionCard showing best set per exercise
+  + Epley-based PR count badge; HistoryViewModel computes 8-week bar chart data
+  (HomeViewModel WeekBar); HomeScreen WorkoutsPerWeekChart via Canvas; ExerciseLogDao
+  adds getUsageCounts() + getMostRecentExerciseLogId; GetLastSessionSetsUseCase added;
+  ExercisePickerSheet gains A-Z/RECENT sort chips and usage badge. DB version → 3
+  (migration adds is_failure INTEGER column to set_logs).
+- [x] Sprint 5 — UX overhaul: Visualizer removed from ActiveWorkoutScreen (source
+  files kept). VisualizerViewModel, VisualizerScreen, onBeginSet, onNextSet all
+  removed from the workout flow. ExerciseLogCard gains inline InlineSetInput +
+  `+ ADD SET >>>` button + × delete on set rows. ActiveWorkoutUiState: replaced
+  activeExerciseId with expandedExerciseId + restTimerForExerciseId. SetLog.isFailure
+  and SetLogEntity.is_failure added.
+- [x] Sprint 6 — app icon + Canvas PowerLevelBar + SessionCompleteScreen HUD:
+  App icon committed at all mipmap densities (barbell/POWER:9001 scouter aesthetic)
+  with adaptive foreground PNGs + mipmap-anydpi-v26 XML. PowerLevelBar completely
+  rewritten as native Canvas segmented bar: 10 segments, 2dp gaps, tapers 100%→65%
+  width bottom-to-top, active brush Brush.verticalGradient(DangerRed→PowerAmber),
+  inactive SolidColor(SaiyanGray), litSegments from (progress × 10).roundToInt();
+  all Brushes remembered with density key for performance. Flame placeholder:
+  Icons.Filled.LocalFireDepartment tinted #F5A623, alpha pulsing 0.5f→1.0f via
+  rememberInfiniteTransition (800ms FastOutSlowInEasing RepeatMode.Reverse). Added
+  material-icons-extended to libs.versions.toml + build.gradle.kts.
+  SessionCompleteScreen rebuilt as Dragon Ball HUD: NeonGreen centered header
+  "SESSION COMPLETE!", hero Row with OutlinedCard (SaiyanGray + NeonGreen border)
+  showing total volume in headline monospace + per-exercise best-set table, paired
+  with PowerLevelBar on right; stat chips row (POWER/TIME/EXERCISES); side-by-side
+  EST. 1RM and SETS LOG OutlinedCards; session title input; DONE/DELETE buttons;
+  telemetry bar. Build verified: assembleDebug SUCCESSFUL.

@@ -1,137 +1,132 @@
-# SaiyanStrong — Sprint 5 Spec: UX Overhaul
+# SaiyanStrong — Sprint 6 Spec: Canvas PowerLevelBar + SessionComplete HUD
 
-## Decisions from user review
-
-| Decision | Choice |
-|----------|--------|
-| Add Set entry point | Inside exercise card, Hevy-style `+ ADD SET` button |
-| Visualizer | **Removed** from active workout screen (files stay, not rendered) |
-| Extra fix | Quick-delete a logged set (× button on each set row) |
+## Status: COMPLETE ✓
 
 ---
 
 ## 1. Objective
 
-The active workout screen is hard to use because:
-- After adding an exercise there is no visible "Add Set" action
-- The `Begin Set` button in the Visualizer is not intuitive
-- Users cannot delete a mistakenly-logged set mid-workout
+Two visual upgrades shipped in Sprint 6:
 
-Sprint 5 fixes all three without changing any DB schema, navigation, or Dragon Ball theme.
+1. **PowerLevelBar** — replace the `LinearProgressIndicator` with a native Canvas
+   segmented power meter (Dragon Ball scouter aesthetic) and a pulsing flame icon
+   placeholder (to be swapped for Lottie when the JSON asset lands).
+
+2. **SessionCompleteScreen** — rebuild the post-workout screen as a full HUD layout
+   matching the Dragon Ball session-complete aesthetic, with prominent volume display,
+   per-exercise stats, estimated 1RM table, and the new PowerLevelBar.
 
 ---
 
-## 2. Active Workout Screen — new layout
+## 2. PowerLevelBar — Canvas Segmented Bar
+
+### Layout
 
 ```
-┌─ SAIYAN STRONG ──────────────── AMBER HEADER ─┐
-│  [BARBELL SQUAT — 2 SETS]                      │
+        [🔥 flame icon — pulsing amber]
+┌──────────────────┐  ← top (narrowest, 65% width)
+│░░░░░░░░░░░░░░░░░░│
+│░░░░░░░░░░░░░░░░░░│
+│▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓│  ← active (DangerRed→PowerAmber gradient)
+│▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓│
+└──────────────────┘  ← bottom (widest, 100% width)
+      SUPER SAIYAN
+      POWER: 14500
+```
+
+### Composable contract
+
+```kotlin
+@Composable
+fun SegmentedBar(progress: Float, modifier: Modifier = Modifier)
+
+@Composable
+fun PowerLevelBar(powerLevel: PowerLevel, modifier: Modifier = Modifier)
+```
+
+- `progress`: 0f..1f; drives `litSegments = (progress × 10).roundToInt()`
+- `SEGMENT_COUNT = 10`, `GAP_DP = 2.dp`, canvas `60.dp × 200.dp`
+- Active brush: `Brush.verticalGradient(DangerRed → PowerAmber)`, key = density
+- Inactive brush: `SolidColor(Color(0xFF1A1A1A))`, remembered once
+- Width taper: `widthFraction = 1f − 0.35f × i / 9f` (i=0 bottom, i=9 top)
+- Flame: `Icons.Filled.LocalFireDepartment`, tint `#F5A623`, alpha 0.5f→1.0f
+  via `rememberInfiniteTransition` (800ms, FastOutSlowInEasing, Reverse)
+
+### Dependency added
+
+```toml
+compose-material-icons-extended = { group = "androidx.compose.material", name = "material-icons-extended" }
+```
+
+```kotlin
+implementation(libs.compose.material.icons.extended)
+```
+
+---
+
+## 3. SessionCompleteScreen — HUD Layout
+
+### Layout
+
+```
+┌─────────────────────────────────────────────────┐
+│  SAIYAN STRONG                    (NeonGreen)   │
+│  SESSION COMPLETE!                               │
 └─────────────────────────────────────────────────┘
 
-┌─ BARBELL SQUAT ─────────────────────────────────┐
-│  SET   PREV           KG     REPS    ×           │
-│   1    95 kg × 5     100      5      ×           │
-│   2    100 kg × 5    100      5      ×           │
-│                                                   │
-│  ⏱ 62s  [-30s] [+30s] [SKIP]                    │
-│                                                   │
-│  [F]   [ + ADD SET >>>                        ]  │
-└───────────────────────────────────────────────────┘
+┌─────────────────────┐  ┌──────────┐
+│ TOTAL VOLUME        │  │  🔥      │
+│  4.25 t             │  │  ████    │
+│                     │  │  ████    │
+│ BARBELL SQUAT       │  │  ████    │
+│   110 kg ×3         │  │  ░░░░    │
+│ DEADLIFT            │  │  ░░░░    │
+│   200 kg ×1         │  │ SSJ1     │
+│                     │  │ 14500    │
+│ SETS      8         │  └──────────┘
+│ DURATION  01:02:00  │
+└─────────────────────┘
 
-┌─ DEADLIFT ──────────────────────────────────────┐
-│  NO SETS LOGGED                                  │
-│  [F]   [ + ADD SET >>>                        ]  │
-└───────────────────────────────────────────────────┘
+[ POWER: +612 ] [ TIME: 01:02:00 ] [ EXERCISES: 2 ]
 
-┌──────────────────────────────────────────────────┐
-│ [+ EXERCISE]  [LOG]  [FINISH]                    │
-│ // SETS: 2  |  VOL: 200 kg //                    │
-└──────────────────────────────────────────────────┘
+┌─────────────────┐  ┌─────────────────┐
+│ EST. 1RM        │  │ SETS LOG        │
+│ SQUAT  142.8 kg │  │ SQUAT   3 sets  │
+│ DEADL  200.0 kg │  │ DEADL   5 sets  │
+│                 │  │ VOLUME  4.25 t  │
+└─────────────────┘  └─────────────────┘
+
+[ Session title (optional) ]
+
+[ DONE >>> ]
+[ DELETE SESSION ]
+// EXERCISES: 2  |  SETS: 8  |  +612 POWER //
 ```
 
-Key points:
-- `+ ADD SET` is **always visible** at the bottom of every exercise card
-- Tapping `+ ADD SET` expands an inline weight/reps input **within that card**
-- Only one card's input is expanded at a time — tapping another collapses the first
-- `[F]` failure toggle lives next to `+ ADD SET` on the same row
-- Rest timer shows inside the card that just logged a set, above `+ ADD SET`
-- Set rows show a small `×` icon; tapping it deletes the set in memory
-- **Visualizer removed** from `ActiveWorkoutScreen`
+### Card styling
+
+- `OutlinedCard` with `CardDefaults.outlinedCardColors(containerColor = SaiyanGray)`
+- Border: `BorderStroke(1.dp, NeonGreen.copy(alpha = 0.5f))` on hero, `0.3f` on data cards
+- All numbers in `FontFamily.Monospace`
+- Labels in `TelemetryGreen`, `labelSmall`, `letterSpacing = 2.sp`
+- Values in `Color.White`, `FontWeight.Bold`
 
 ---
 
-## 3. Inline set input (expanded state)
-
-When `+ ADD SET` is tapped the bottom of the card expands:
-
-```
-┌──────────────────────────────────────────────────┐
-│  [-5]  [ 100 kg ]  [+5]  │  [-]  [5]  [+]       │
-│  [F]   [ LOG SET >>>                           ]  │
-└──────────────────────────────────────────────────┘
-```
-
-- Pre-filled with last logged weight/reps for that exercise (or 60.0 / 5 if none)
-- `LOG SET >>>` calls `onLogSet(exerciseId, weightKg, reps, null, isFailure)`
-- After logging, input collapses and new set row appears; rest timer starts
-
----
-
-## 4. Files to change
+## 4. Files changed
 
 | File | Change |
 |------|--------|
-| `ActiveWorkoutViewModel.kt` | `activeExerciseId` → `expandedExerciseId: Int?`; add `restTimerForExerciseId: Int?`; `onAddSetClicked(exerciseId)` expands that card; `onLogSet` gains `exerciseId: Int`; add `onDeleteSet(exerciseId: Int, setIndex: Int)` |
-| `ActiveWorkoutScreen.kt` | Remove `VisualizerScreen`, `VisualizerViewModel`, all visualizer state; `ExerciseLogCard` gets inline expanded input + `+ ADD SET` + `×` on set rows |
-
-**No DB, navigation, theme, or other-screen changes.**
-
----
-
-## 5. ViewModel contract
-
-```kotlin
-data class ActiveWorkoutUiState(
-    val exerciseLogs: List<ExerciseLog> = emptyList(),
-    val availableExercises: List<Exercise> = emptyList(),
-    val exerciseUsageCounts: Map<Int, Int> = emptyMap(),
-    val previousPerformance: Map<Int, List<SetLog>> = emptyMap(),
-    val expandedExerciseId: Int? = null,
-    val restTimerForExerciseId: Int? = null,
-    val restTimerSecondsRemaining: Int? = null,
-    val isExercisePickerVisible: Boolean = false,
-    val completedSessionId: Long? = null
-)
-
-fun onAddSetClicked(exerciseId: Int)
-fun onLogSet(exerciseId: Int, weightKg: Double, reps: Int, rpe: Float?, isFailure: Boolean)
-fun onDeleteSet(exerciseId: Int, setIndex: Int)
-```
+| `gradle/libs.versions.toml` | Added `compose-material-icons-extended` library |
+| `app/build.gradle.kts` | Added `implementation(libs.compose.material.icons.extended)` |
+| `components/PowerLevelBar.kt` | Full Canvas rewrite of `SegmentedBar`; flame icon placeholder |
+| `screens/session_complete/SessionCompleteScreen.kt` | HUD layout with OutlinedCards |
 
 ---
 
-## 6. Set deletion rules
+## 5. Future work (Sprint 7)
 
-- Delete from in-memory `exerciseLogs` only — no DB write (session not yet saved)
-- Remaining sets renumbered: setNumber = index + 1
-- Card stays even if all sets deleted (user can re-add)
-
----
-
-## 7. Boundaries
-
-**DO:** Keep all color tokens, WeightFormatter, rest timer coroutine, ExercisePickerSheet, Visualizer source files (just stop rendering them).
-
-**DON'T:** Change DB schema, navigation, History/Home screens, or add dependencies.
-
----
-
-## 8. Acceptance criteria
-
-- [ ] Every exercise card shows `+ ADD SET` even with no sets logged
-- [ ] Tapping `+ ADD SET` expands inline weight/reps input in that card only
-- [ ] Only one card's input open at a time
-- [ ] `LOG SET >>>` adds row and starts rest timer inside that card
-- [ ] `×` on a set row removes it and renumbers
-- [ ] Visualizer gone from workout screen, no blank space left
-- [ ] Theme, fonts, colors unchanged
+- [ ] Swap flame `Icon` for real Lottie animation when `flame_loop.json` is ready
+- [ ] `VisualizerScreen` re-integration or permanent removal decision
+- [ ] Strength progress chart (line chart via Canvas on SessionCompleteScreen)
+- [ ] HomeScreen quick-stats cards (best lifts this week)
