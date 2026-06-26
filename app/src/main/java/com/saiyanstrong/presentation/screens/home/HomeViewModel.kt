@@ -72,11 +72,16 @@ class HomeViewModel @Inject constructor(
     private val _downloadState = MutableStateFlow<UpdateDownloadState>(UpdateDownloadState.Idle)
     val downloadState: StateFlow<UpdateDownloadState> = _downloadState.asStateFlow()
 
+    private val _updateStatus = MutableStateFlow("checking…")
+    val updateStatus: StateFlow<String> = _updateStatus.asStateFlow()
+
     init {
         checkForUpdate()
     }
 
     fun canInstallPackages(): Boolean = updateInstaller.canInstallPackages()
+
+    fun retryUpdateCheck() { checkForUpdate() }
 
     fun onDownloadUpdate() {
         val update = _updateAvailable.value ?: return
@@ -94,16 +99,19 @@ class HomeViewModel @Inject constructor(
 
     private fun checkForUpdate() {
         viewModelScope.launch {
-            // Retry up to 3 times with growing delays — covers slow WiFi at boot
+            _updateStatus.value = "checking…"
             val retryDelaysMs = listOf(0L, 5_000L, 15_000L)
-            for (delayMs in retryDelaysMs) {
+            for ((attempt, delayMs) in retryDelaysMs.withIndex()) {
                 if (delayMs > 0L) delay(delayMs)
+                _updateStatus.value = "try ${attempt + 1}/3…"
                 val result = checkForUpdateUseCase.execute(BuildConfig.VERSION_NAME)
                 if (result != null) {
                     _updateAvailable.value = result
-                    break
+                    _updateStatus.value = "update ready: ${result.tagName}"
+                    return@launch
                 }
             }
+            _updateStatus.value = "up to date (v${BuildConfig.VERSION_NAME})"
         }
     }
 

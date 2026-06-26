@@ -8,6 +8,7 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -68,6 +69,7 @@ fun HomeScreen(
     val thisWeekStats by viewModel.thisWeekStats.collectAsStateWithLifecycle()
     val updateAvailable by viewModel.updateAvailable.collectAsStateWithLifecycle()
     val downloadState by viewModel.downloadState.collectAsStateWithLifecycle()
+    val updateStatus by viewModel.updateStatus.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
     LaunchedEffect(downloadState) {
@@ -101,7 +103,9 @@ fun HomeScreen(
                 viewModel.onDownloadUpdate()
             }
         },
-        onDismissUpdate = viewModel::onDismissUpdate
+        onDismissUpdate = viewModel::onDismissUpdate,
+        updateStatus = updateStatus,
+        onRetryUpdateCheck = viewModel::retryUpdateCheck
     )
 }
 
@@ -115,7 +119,9 @@ internal fun HomeContent(
     onStartWorkout: () -> Unit,
     onViewHistory: () -> Unit,
     onDownloadUpdate: () -> Unit,
-    onDismissUpdate: () -> Unit
+    onDismissUpdate: () -> Unit,
+    updateStatus: String = "",
+    onRetryUpdateCheck: () -> Unit = {}
 ) {
     Scaffold { padding ->
         Column(
@@ -220,12 +226,13 @@ internal fun HomeContent(
             }
 
             Text(
-                "// POWER LEVEL: ${powerLevel?.current ?: "---"}  |  v${BuildConfig.VERSION_NAME} //",
+                "// PWR: ${powerLevel?.current ?: "---"}  |  v${BuildConfig.VERSION_NAME}  |  $updateStatus  [tap to retry] //",
                 color = TelemetryGreen,
                 style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier
                     .fillMaxWidth()
                     .background(Color.Black)
+                    .clickable(onClick = onRetryUpdateCheck)
                     .padding(horizontal = 16.dp, vertical = 6.dp)
             )
         }
