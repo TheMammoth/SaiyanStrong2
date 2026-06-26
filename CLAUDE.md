@@ -546,3 +546,15 @@ _(Claude Code appends here after each completed task)_
   startDestination; ActiveWorkout → SessionComplete pops to Home; Done → Home clears
   back-stack. Anatomy PNG overlay committed (AnatomyOverlayCanvas). Hilt bumped to
   2.54.1 to resolve Kotlin 2.1.0 metadata incompatibility.
+- [x] Logic hardening (SPEC.md): two bugs fixed. (1) SetInputPanel:
+  `remember(initialWeightKg)` → `remember` (no key) — prevents weight/reps
+  resetting to initial values mid-composition if a parent recomposition fires
+  while user is adjusting inputs. (2) SessionCompleteViewModel: `isLoading = false`
+  → `isLoading = session == null` — keeps loading state true until Room actually
+  returns the session row, preventing a blank flash on the SessionComplete screen.
+  All other spec items already correct: rest timer cancels on skip/finish and
+  nulls on expiry; DataStore.edit accumulates atomically; Epley uses 30.0 (no
+  integer division); CompleteSessionUseCase computes volume+power before save;
+  SessionRepositoryImpl wraps save in withTransaction (session→exercise_log→set_log);
+  SessionDao orders by date_ms DESC; completedSessionId emitted only after suspend
+  resolves; 150 exercises seeded (IDs 1–150); ExercisePickerSheet has search + chips.

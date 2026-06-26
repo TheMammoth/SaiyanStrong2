@@ -261,8 +261,8 @@ internal fun SetInputPanel(
     onLogSet: (Double, Int, Float?) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var weightKg by remember(initialWeightKg) { mutableStateOf(initialWeightKg) }
-    var reps by remember(initialReps) { mutableIntStateOf(initialReps) }
+    var weightKg by remember { mutableStateOf(initialWeightKg) }
+    var reps by remember { mutableIntStateOf(initialReps) }
 
     Column(
         modifier = modifier

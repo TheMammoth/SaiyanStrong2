@@ -46,7 +46,7 @@ class SessionCompleteViewModel @Inject constructor(
                 current.copy(
                     session = session,
                     powerLevel = powerLevel,
-                    isLoading = false,
+                    isLoading = session == null,
                     titleInput = if (current.isLoading) session?.title ?: "" else current.titleInput
                 )
             }

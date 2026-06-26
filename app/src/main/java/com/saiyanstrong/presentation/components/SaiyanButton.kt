@@ -74,8 +74,8 @@ fun SaiyanButton(
 @Composable
 fun WeightKnobButton(
     label: String,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
 ) {
     Box(
         contentAlignment = Alignment.Center,

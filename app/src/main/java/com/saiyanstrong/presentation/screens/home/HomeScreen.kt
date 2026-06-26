@@ -15,6 +15,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -41,7 +42,7 @@ fun HomeScreen(
 }
 
 @Composable
-private fun HomeContent(
+internal fun HomeContent(
     powerLevel: PowerLevel?,
     onStartWorkout: () -> Unit,
     onViewHistory: () -> Unit
@@ -127,9 +128,10 @@ private fun HomeContent(
     }
 }
 
+@Preview(showBackground = true)
 @PreviewLightDark
 @Composable
-private fun HomeContentPreview() {
+internal fun HomeContentPreview() {
     SaiyanTheme {
         HomeContent(
             powerLevel = PowerLevel(
