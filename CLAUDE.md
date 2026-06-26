@@ -604,3 +604,28 @@ _(Claude Code appends here after each completed task)_
   ISO week. HomeViewModel exposes thisWeekStats: StateFlow<WeekStats>. HomeScreen
   shows ThisWeekRow with three MiniStatChip composables (SESSIONS / VOLUME / TOP LIFT)
   in NeonGreen on SaiyanGray cards, visible only when sessions > 0.
+- [x] Sprint 8 — icon gradient + updater hardening (v0.6.1–v0.6.4):
+  (1) Icon background: replaced @color/ic_launcher_background (#0D0D0D) with
+  @drawable/ic_launcher_background — a 135° linear gradient #FFD600 → #FF8F00 →
+  #E64A19 (SSJ gold → Goku orange). Both adaptive icon XMLs updated. Fallback color
+  updated to #E64A19.
+  (2) Transparent foreground: ic_launcher_foreground PNGs at all densities had solid
+  black background baked in, covering the gradient. BFS flood-fill from corners (threshold
+  < 40 per channel) made background pixels transparent — barbell + POWER:9001 scouter
+  now float on the gradient.
+  (3) Updater retry: checkForUpdate() retries at 0s / 5s / 15s if GitHub API returns
+  null — covers devices where WiFi connects after app launch.
+  (4) User-Agent fix: GitHub API returns 403 for requests without User-Agent header;
+  added 'SaiyanStrong-Android'. This was the root cause of the banner never appearing.
+  (5) Version in UI: BuildConfig.VERSION_NAME shown in HomeScreen telemetry bar so
+  installed version is always visible.
+  (6) versionName kept in sync with release tags from v0.6.1 onward (versionCode 8,
+  versionName 0.6.3 as of v0.6.4 build). Rule: bump both on every release.
+
+## Release rules
+
+- Always build APK locally (`.\gradlew assembleDebug`) and upload with
+  `gh release upload <tag> SaiyanStrong-<tag>-debug.apk --clobber` immediately
+  after `gh release create` — do not wait for CI.
+- Bump `versionCode` (+1) and `versionName` (= release tag without "v") in
+  `app/build.gradle.kts` on every release so the in-app updater compares correctly.

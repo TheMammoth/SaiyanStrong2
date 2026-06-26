@@ -1,132 +1,76 @@
-# SaiyanStrong — Sprint 6 Spec: Canvas PowerLevelBar + SessionComplete HUD
+# SaiyanStrong — Sprint 8 Spec: Icon Polish + Updater Hardening
 
-## Status: COMPLETE ✓
-
----
-
-## 1. Objective
-
-Two visual upgrades shipped in Sprint 6:
-
-1. **PowerLevelBar** — replace the `LinearProgressIndicator` with a native Canvas
-   segmented power meter (Dragon Ball scouter aesthetic) and a pulsing flame icon
-   placeholder (to be swapped for Lottie when the JSON asset lands).
-
-2. **SessionCompleteScreen** — rebuild the post-workout screen as a full HUD layout
-   matching the Dragon Ball session-complete aesthetic, with prominent volume display,
-   per-exercise stats, estimated 1RM table, and the new PowerLevelBar.
+## Status: COMPLETE ✓  (v0.6.1 – v0.6.4)
 
 ---
 
-## 2. PowerLevelBar — Canvas Segmented Bar
+## 1. Icon gradient background
 
-### Layout
+**Problem:** App icon had a solid black (#0D0D0D) background.
 
-```
-        [🔥 flame icon — pulsing amber]
-┌──────────────────┐  ← top (narrowest, 65% width)
-│░░░░░░░░░░░░░░░░░░│
-│░░░░░░░░░░░░░░░░░░│
-│▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓│  ← active (DangerRed→PowerAmber gradient)
-│▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓│
-└──────────────────┘  ← bottom (widest, 100% width)
-      SUPER SAIYAN
-      POWER: 14500
-```
+**Fix:**
+- Created `res/drawable/ic_launcher_background.xml` — 135° linear gradient:
+  `#FFD600` (SSJ gold) → `#FF8F00` (amber) → `#E64A19` (Goku orange)
+- Both `mipmap-anydpi-v26/ic_launcher.xml` and `ic_launcher_round.xml` now
+  reference `@drawable/ic_launcher_background` instead of `@color/...`
+- Fallback `ic_launcher_background` color updated to `#E64A19`
 
-### Composable contract
+**Problem:** Gradient was invisible because `ic_launcher_foreground.png` had
+the black background baked in as pixels, covering the gradient layer.
 
-```kotlin
-@Composable
-fun SegmentedBar(progress: Float, modifier: Modifier = Modifier)
-
-@Composable
-fun PowerLevelBar(powerLevel: PowerLevel, modifier: Modifier = Modifier)
-```
-
-- `progress`: 0f..1f; drives `litSegments = (progress × 10).roundToInt()`
-- `SEGMENT_COUNT = 10`, `GAP_DP = 2.dp`, canvas `60.dp × 200.dp`
-- Active brush: `Brush.verticalGradient(DangerRed → PowerAmber)`, key = density
-- Inactive brush: `SolidColor(Color(0xFF1A1A1A))`, remembered once
-- Width taper: `widthFraction = 1f − 0.35f × i / 9f` (i=0 bottom, i=9 top)
-- Flame: `Icons.Filled.LocalFireDepartment`, tint `#F5A623`, alpha 0.5f→1.0f
-  via `rememberInfiniteTransition` (800ms, FastOutSlowInEasing, Reverse)
-
-### Dependency added
-
-```toml
-compose-material-icons-extended = { group = "androidx.compose.material", name = "material-icons-extended" }
-```
-
-```kotlin
-implementation(libs.compose.material.icons.extended)
-```
+**Fix:** PowerShell BFS flood-fill from all 4 corners (threshold < 40 per
+channel) made background pixels transparent in all 5 density PNGs. The barbell
+and POWER:9001 scouter are preserved and now float on the gradient.
 
 ---
 
-## 3. SessionCompleteScreen — HUD Layout
+## 2. In-app updater hardening
 
-### Layout
+### 2a. Retry on network failure
+`checkForUpdate()` in `HomeViewModel` now retries at 0s / 5s / 15s if the
+GitHub API call returns null. Covers the common case where Android hasn't
+finished connecting to WiFi when the app launches.
 
+### 2b. User-Agent header (root cause fix)
+GitHub's REST API returns **403 Forbidden** for requests missing a `User-Agent`
+header. Our `HttpURLConnection` didn't send one. The `catch (_: Exception)`
+swallowed the resulting error, so the banner never appeared.
+
+**Fix:** Added `setRequestProperty("User-Agent", "SaiyanStrong-Android")` to
+`CheckForUpdateUseCase`.
+
+### 2c. Version visible in UI
+`BuildConfig.VERSION_NAME` appended to HomeScreen telemetry bar:
 ```
-┌─────────────────────────────────────────────────┐
-│  SAIYAN STRONG                    (NeonGreen)   │
-│  SESSION COMPLETE!                               │
-└─────────────────────────────────────────────────┘
-
-┌─────────────────────┐  ┌──────────┐
-│ TOTAL VOLUME        │  │  🔥      │
-│  4.25 t             │  │  ████    │
-│                     │  │  ████    │
-│ BARBELL SQUAT       │  │  ████    │
-│   110 kg ×3         │  │  ░░░░    │
-│ DEADLIFT            │  │  ░░░░    │
-│   200 kg ×1         │  │ SSJ1     │
-│                     │  │ 14500    │
-│ SETS      8         │  └──────────┘
-│ DURATION  01:02:00  │
-└─────────────────────┘
-
-[ POWER: +612 ] [ TIME: 01:02:00 ] [ EXERCISES: 2 ]
-
-┌─────────────────┐  ┌─────────────────┐
-│ EST. 1RM        │  │ SETS LOG        │
-│ SQUAT  142.8 kg │  │ SQUAT   3 sets  │
-│ DEADL  200.0 kg │  │ DEADL   5 sets  │
-│                 │  │ VOLUME  4.25 t  │
-└─────────────────┘  └─────────────────┘
-
-[ Session title (optional) ]
-
-[ DONE >>> ]
-[ DELETE SESSION ]
-// EXERCISES: 2  |  SETS: 8  |  +612 POWER //
+// POWER LEVEL: 14500  |  v0.6.4 //
 ```
+Lets you confirm at a glance which build is running.
 
-### Card styling
-
-- `OutlinedCard` with `CardDefaults.outlinedCardColors(containerColor = SaiyanGray)`
-- Border: `BorderStroke(1.dp, NeonGreen.copy(alpha = 0.5f))` on hero, `0.3f` on data cards
-- All numbers in `FontFamily.Monospace`
-- Labels in `TelemetryGreen`, `labelSmall`, `letterSpacing = 2.sp`
-- Values in `Color.White`, `FontWeight.Bold`
+### 2d. versionName / versionCode discipline
+- `versionName` must equal the release tag (without "v") in every build
+- `versionCode` increments by 1 per release
+- The updater comparison `tagName.removePrefix("v") == VERSION_NAME` only
+  works correctly when these are kept in sync
 
 ---
 
-## 4. Files changed
+## 3. Release process (established rule)
 
-| File | Change |
-|------|--------|
-| `gradle/libs.versions.toml` | Added `compose-material-icons-extended` library |
-| `app/build.gradle.kts` | Added `implementation(libs.compose.material.icons.extended)` |
-| `components/PowerLevelBar.kt` | Full Canvas rewrite of `SegmentedBar`; flame icon placeholder |
-| `screens/session_complete/SessionCompleteScreen.kt` | HUD layout with OutlinedCards |
+1. Make changes, build: `.\gradlew assembleDebug`
+2. Commit + push
+3. `gh release create vX.Y.Z --title "..." --notes "..."`
+4. `cp app/build/outputs/apk/debug/app-debug.apk SaiyanStrong-vX.Y.Z-debug.apk`
+5. `gh release upload vX.Y.Z SaiyanStrong-vX.Y.Z-debug.apk --clobber`
+6. `rm SaiyanStrong-vX.Y.Z-debug.apk`
+
+Do **not** wait for CI — upload immediately from local build.
 
 ---
 
-## 5. Future work (Sprint 7)
+## 4. Sprint 9 backlog
 
-- [ ] Swap flame `Icon` for real Lottie animation when `flame_loop.json` is ready
-- [ ] `VisualizerScreen` re-integration or permanent removal decision
-- [ ] Strength progress chart (line chart via Canvas on SessionCompleteScreen)
-- [ ] HomeScreen quick-stats cards (best lifts this week)
+- [ ] Swap flame `Icon` placeholder for real Lottie animation (when `flame_loop.json` lands)
+- [ ] Strength progress line chart on SessionCompleteScreen (Canvas, historical 1RM trend)
+- [ ] VisualizerScreen permanent removal or re-integration decision
+- [ ] Exercise detail screen (tap exercise name → all-time history for that lift)
+- [ ] Notification for rest timer (so screen can be locked during rest)
