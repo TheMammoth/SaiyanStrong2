@@ -114,6 +114,8 @@ class ActiveWorkoutViewModel @Inject constructor(
     fun onFinishWorkout() {
         val exerciseLogs = _uiState.value.exerciseLogs.filter { it.sets.isNotEmpty() }
         if (exerciseLogs.isEmpty()) return
+        restTimerJob?.cancel()
+        _uiState.update { it.copy(restTimerSecondsRemaining = null) }
         viewModelScope.launch {
             val session = completeSessionUseCase.execute(
                 dateMs = sessionStartMs,

@@ -100,6 +100,7 @@ private fun ActiveWorkoutContent(
     val activeExerciseLog = uiState.exerciseLogs.find { it.exercise.id == uiState.activeExerciseId }
     val nextSetNumber = (activeExerciseLog?.sets?.size ?: 0) + 1
     val lastWeightKg = activeExerciseLog?.sets?.lastOrNull()?.weightKg ?: 60.0
+    val lastReps = activeExerciseLog?.sets?.lastOrNull()?.reps ?: 5
     val totalSets = uiState.exerciseLogs.sumOf { it.sets.size }
     val totalVolumeKg = uiState.exerciseLogs.sumOf { log -> log.sets.sumOf { it.volumeKg } }
 
@@ -155,7 +156,11 @@ private fun ActiveWorkoutContent(
                     }
                     if (visualizerState is VisualizerState.DynamicTransition) {
                         item {
-                            SetInputPanel(initialWeightKg = lastWeightKg, onLogSet = onLogSet)
+                            SetInputPanel(
+                                initialWeightKg = lastWeightKg,
+                                initialReps = lastReps,
+                                onLogSet = onLogSet
+                            )
                         }
                     }
                 }
@@ -240,11 +245,12 @@ private fun ExerciseLogCard(exerciseLog: ExerciseLog) {
 @Composable
 private fun SetInputPanel(
     initialWeightKg: Double,
+    initialReps: Int = 5,
     onLogSet: (Double, Int, Float?) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var weightKg by remember(initialWeightKg) { mutableStateOf(initialWeightKg) }
-    var reps by remember { mutableIntStateOf(5) }
+    var reps by remember(initialReps) { mutableIntStateOf(initialReps) }
 
     Column(
         modifier = modifier
