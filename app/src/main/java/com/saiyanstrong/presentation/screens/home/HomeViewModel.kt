@@ -94,7 +94,16 @@ class HomeViewModel @Inject constructor(
 
     private fun checkForUpdate() {
         viewModelScope.launch {
-            _updateAvailable.value = checkForUpdateUseCase.execute(BuildConfig.VERSION_NAME)
+            // Retry up to 3 times with growing delays — covers slow WiFi at boot
+            val retryDelaysMs = listOf(0L, 5_000L, 15_000L)
+            for (delayMs in retryDelaysMs) {
+                if (delayMs > 0L) delay(delayMs)
+                val result = checkForUpdateUseCase.execute(BuildConfig.VERSION_NAME)
+                if (result != null) {
+                    _updateAvailable.value = result
+                    break
+                }
+            }
         }
     }
 
