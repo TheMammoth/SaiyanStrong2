@@ -28,7 +28,7 @@ data class ActiveWorkoutUiState(
     val availableExercises: List<Exercise> = emptyList(),
     val exerciseUsageCounts: Map<Int, Int> = emptyMap(),
     val previousPerformance: Map<Int, List<SetLog>> = emptyMap(),
-    val expandedExerciseId: Int? = null,
+    val pendingSetCounts: Map<Int, Int> = emptyMap(),  // exerciseId → visible pending row count
     val restTimerForExerciseId: Int? = null,
     val restTimerSecondsRemaining: Int? = null,
     val isExercisePickerVisible: Boolean = false,
@@ -88,10 +88,12 @@ class ActiveWorkoutViewModel @Inject constructor(
                     orderIndex = state.exerciseLogs.size
                 )
             }
+            val pending = state.pendingSetCounts.toMutableMap()
+            if (!alreadyAdded) pending[exercise.id] = 1  // start with one pending row
             state.copy(
                 exerciseLogs = exerciseLogs,
                 isExercisePickerVisible = false,
-                expandedExerciseId = exercise.id
+                pendingSetCounts = pending
             )
         }
         viewModelScope.launch {
@@ -101,7 +103,10 @@ class ActiveWorkoutViewModel @Inject constructor(
     }
 
     fun onAddSetClicked(exerciseId: Int) {
-        _uiState.update { it.copy(expandedExerciseId = exerciseId) }
+        _uiState.update { state ->
+            val count = (state.pendingSetCounts[exerciseId] ?: 0) + 1
+            state.copy(pendingSetCounts = state.pendingSetCounts + (exerciseId to count))
+        }
     }
 
     fun onLogSet(exerciseId: Int, weightKg: Double, reps: Int, rpe: Float?, isFailure: Boolean = false) {
@@ -119,14 +124,32 @@ class ActiveWorkoutViewModel @Inject constructor(
                     log.copy(sets = log.sets + setLog)
                 }
             }
+            val prevCount = state.pendingSetCounts[exerciseId] ?: 1
+            val newCount = (prevCount - 1).coerceAtLeast(0)
             state.copy(
                 exerciseLogs = exerciseLogs,
-                expandedExerciseId = null,
+                pendingSetCounts = state.pendingSetCounts + (exerciseId to newCount),
                 restTimerForExerciseId = exerciseId,
                 restTimerSecondsRemaining = REST_DURATION_SECONDS
             )
         }
         startRestTimer()
+    }
+
+    fun onEditSet(exerciseId: Int, setIndex: Int, weightKg: Double, reps: Int, isFailure: Boolean) {
+        _uiState.update { state ->
+            val exerciseLogs = state.exerciseLogs.map { log ->
+                if (log.exercise.id != exerciseId) log
+                else {
+                    val updated = log.sets.mapIndexed { i, s ->
+                        if (i == setIndex) s.copy(weightKg = weightKg, reps = reps, isFailure = isFailure, volumeKg = weightKg * reps)
+                        else s
+                    }
+                    log.copy(sets = updated)
+                }
+            }
+            state.copy(exerciseLogs = exerciseLogs)
+        }
     }
 
     fun onDeleteSet(exerciseId: Int, setIndex: Int) {

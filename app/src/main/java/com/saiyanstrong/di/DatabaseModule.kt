@@ -2,6 +2,7 @@ package com.saiyanstrong.di
 
 import android.content.Context
 import androidx.room.Room
+import com.saiyanstrong.data.local.MIGRATION_3_4
 import com.saiyanstrong.data.local.AppDatabase
 import com.saiyanstrong.data.local.dao.ExerciseDao
 import com.saiyanstrong.data.local.dao.ExerciseLogDao
@@ -32,7 +33,8 @@ object DatabaseModule {
                     override fun migrate(database: androidx.sqlite.db.SupportSQLiteDatabase) {
                         database.execSQL("ALTER TABLE set_logs ADD COLUMN is_failure INTEGER NOT NULL DEFAULT 0")
                     }
-                }
+                },
+                MIGRATION_3_4
             )
             .build()
 

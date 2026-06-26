@@ -154,14 +154,6 @@ internal fun HomeContent(
                         style = MaterialTheme.typography.titleMedium
                     )
                 }
-                Text(
-                    "⚙",
-                    color = Color.White.copy(alpha = 0.6f),
-                    fontSize = 22.sp,
-                    modifier = Modifier
-                        .clickable { onSettings() }
-                        .padding(8.dp)
-                )
             }
 
             AnimatedVisibility(

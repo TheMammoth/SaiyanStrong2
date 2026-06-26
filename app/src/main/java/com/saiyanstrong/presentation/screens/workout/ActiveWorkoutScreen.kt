@@ -1,8 +1,10 @@
 package com.saiyanstrong.presentation.screens.workout
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -53,10 +55,10 @@ import com.saiyanstrong.presentation.theme.SaiyanTheme
 import com.saiyanstrong.presentation.theme.TelemetryGreen
 import com.saiyanstrong.util.WeightFormatter
 
-private val CompletedSetBg = Color(0xFF0D2B14)   // dark green tint
-private val CompletedCheckBg = Color(0xFF2E7D32)  // filled green for ✓
-private val PendingSetBg = Color(0xFF111111)
-private val RestLabelColor = Color(0xFF4CAF50)    // teal-green
+private val CompletedSetBg  = Color(0xFF0D2B14)
+private val CompletedCheckBg = Color(0xFF2E7D32)
+private val PendingSetBg    = Color(0xFF111111)
+private val RestLabelColor  = Color(0xFF4CAF50)
 
 @Composable
 fun ActiveWorkoutScreen(
@@ -81,6 +83,7 @@ fun ActiveWorkoutScreen(
         onExercisePickerDismissed = workoutViewModel::onExercisePickerDismissed,
         onAddSetClicked = workoutViewModel::onAddSetClicked,
         onLogSet = workoutViewModel::onLogSet,
+        onEditSet = workoutViewModel::onEditSet,
         onDeleteSet = workoutViewModel::onDeleteSet,
         onSkipRest = workoutViewModel::onSkipRest,
         onAdjustRest = workoutViewModel::onAdjustRestTimer,
@@ -99,6 +102,7 @@ internal fun ActiveWorkoutContent(
     onExercisePickerDismissed: () -> Unit,
     onAddSetClicked: (Int) -> Unit,
     onLogSet: (Int, Double, Int, Float?, Boolean) -> Unit,
+    onEditSet: (Int, Int, Double, Int, Boolean) -> Unit = { _, _, _, _, _ -> },
     onDeleteSet: (Int, Int) -> Unit,
     onSkipRest: () -> Unit,
     onAdjustRest: (Int) -> Unit,
@@ -143,12 +147,8 @@ internal fun ActiveWorkoutContent(
                     .background(SaiyanGray)
                     .padding(horizontal = 16.dp, vertical = 10.dp)
             ) {
-                Text(
-                    "TRAINING SESSION",
-                    color = Color.White,
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Black
-                )
+                Text("TRAINING SESSION", color = Color.White,
+                    style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
                 Text(elapsedFormatted, color = Color.White.copy(alpha = 0.55f),
                     fontSize = 13.sp, fontFamily = FontFamily.Monospace)
             }
@@ -163,13 +163,16 @@ internal fun ActiveWorkoutContent(
                     ExerciseLogCard(
                         exerciseLog = exerciseLog,
                         previousSets = uiState.previousPerformance[exerciseLog.exercise.id] ?: emptyList(),
-                        isSetInputExpanded = exerciseLog.exercise.id == uiState.expandedExerciseId,
+                        pendingCount = uiState.pendingSetCounts[exerciseLog.exercise.id] ?: 0,
                         restTimerSecondsRemaining = if (exerciseLog.exercise.id == uiState.restTimerForExerciseId)
                             uiState.restTimerSecondsRemaining else null,
                         restLabel = restLabel,
                         onAddSetClicked = { onAddSetClicked(exerciseLog.exercise.id) },
                         onLogSet = { weightKg, reps, rpe, isFailure ->
                             onLogSet(exerciseLog.exercise.id, weightKg, reps, rpe, isFailure)
+                        },
+                        onEditSet = { setIndex, wKg, r, fail ->
+                            onEditSet(exerciseLog.exercise.id, setIndex, wKg, r, fail)
                         },
                         onDeleteSet = { setIndex -> onDeleteSet(exerciseLog.exercise.id, setIndex) },
                         onSkipRest = onSkipRest,
@@ -219,11 +222,12 @@ internal fun ActiveWorkoutContent(
 internal fun ExerciseLogCard(
     exerciseLog: ExerciseLog,
     previousSets: List<SetLog> = emptyList(),
-    isSetInputExpanded: Boolean = false,
+    pendingCount: Int = 0,
     restTimerSecondsRemaining: Int? = null,
     restLabel: String = "1:30",
     onAddSetClicked: () -> Unit = {},
     onLogSet: (Double, Int, Float?, Boolean) -> Unit = { _, _, _, _ -> },
+    onEditSet: (Int, Double, Int, Boolean) -> Unit = { _, _, _, _ -> },
     onDeleteSet: (Int) -> Unit = {},
     onSkipRest: () -> Unit = {},
     onAdjustRest: (Int) -> Unit = {}
@@ -233,66 +237,52 @@ internal fun ExerciseLogCard(
         if (n.contains("Dumbbell", ignoreCase = true) || n.contains("Kettlebell", ignoreCase = true)) 2.0 else 5.0
     }
     val lastWeight = exerciseLog.sets.lastOrNull()?.weightKg ?: 60.0
-    val lastReps = exerciseLog.sets.lastOrNull()?.reps ?: 5
+    val lastReps   = exerciseLog.sets.lastOrNull()?.reps ?: 5
 
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .background(SaiyanGray, RoundedCornerShape(6.dp))
-            .border(1.dp, NeonGreen.copy(alpha = if (isSetInputExpanded) 0.6f else 0.22f), RoundedCornerShape(6.dp))
+            .border(1.dp, NeonGreen.copy(alpha = if (pendingCount > 0) 0.6f else 0.22f), RoundedCornerShape(6.dp))
     ) {
-        // ── Exercise header ─────────────────────────────────
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                exerciseLog.exercise.name,
-                color = NeonGreen,
-                fontSize = 15.sp,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.weight(1f)
-            )
+        // Exercise name
+        Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically) {
+            Text(exerciseLog.exercise.name, color = NeonGreen, fontSize = 15.sp,
+                fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
         }
 
-        // ── Column headers ──────────────────────────────────
-        if (exerciseLog.sets.isNotEmpty() || isSetInputExpanded) {
-            Row(
-                modifier = Modifier.fillMaxWidth()
-                    .padding(horizontal = 14.dp)
-                    .padding(bottom = 4.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
+        // Column headers
+        if (exerciseLog.sets.isNotEmpty() || pendingCount > 0) {
+            Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp).padding(bottom = 4.dp),
+                verticalAlignment = Alignment.CenterVertically) {
                 Text("SET", color = TelemetryGreen, fontSize = 10.sp, modifier = Modifier.width(32.dp))
                 Text("PREVIOUS", color = TelemetryGreen, fontSize = 10.sp, modifier = Modifier.weight(1.2f))
                 Text("KG", color = TelemetryGreen, fontSize = 10.sp, modifier = Modifier.weight(1f), textAlign = TextAlign.Center)
                 Text("REPS", color = TelemetryGreen, fontSize = 10.sp, modifier = Modifier.weight(0.8f), textAlign = TextAlign.Center)
-                Text("✓", color = TelemetryGreen, fontSize = 10.sp, modifier = Modifier.width(40.dp), textAlign = TextAlign.Center)
+                Text("✓", color = TelemetryGreen, fontSize = 10.sp, modifier = Modifier.width(44.dp), textAlign = TextAlign.Center)
             }
         }
 
-        // ── Completed sets ──────────────────────────────────
+        // Completed sets — tap to edit, long-press to delete
         exerciseLog.sets.forEachIndexed { index, set ->
             CompletedSetRow(
                 set = set,
+                setIndex = index,
                 previousSet = previousSets.getOrNull(index),
-                onDelete = { onDeleteSet(index)},
+                onEdit = { wKg, r, fail -> onEditSet(index, wKg, r, fail) },
+                onDelete = { onDeleteSet(index) },
                 modifier = Modifier.padding(horizontal = 10.dp, vertical = 2.dp)
             )
-            val showRestLabel = index < exerciseLog.sets.size - 1 || restTimerSecondsRemaining != null || isSetInputExpanded
+            val showRestLabel = index < exerciseLog.sets.size - 1 || restTimerSecondsRemaining != null || pendingCount > 0
             if (showRestLabel) {
-                Text(
-                    restLabel,
-                    color = RestLabelColor,
-                    fontSize = 11.sp,
-                    fontFamily = FontFamily.Monospace,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
-                )
+                Text(restLabel, color = RestLabelColor, fontSize = 11.sp,
+                    fontFamily = FontFamily.Monospace, textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp))
             }
         }
 
-        // ── Active rest timer bar ───────────────────────────
+        // Active rest timer bar (stays visible while pending sets are shown)
         if (restTimerSecondsRemaining != null) {
             RestTimerBar(
                 secondsRemaining = restTimerSecondsRemaining,
@@ -302,11 +292,16 @@ internal fun ExerciseLogCard(
             )
         }
 
-        // ── Pending set row ─────────────────────────────────
-        if (isSetInputExpanded) {
+        // Pending set rows — all N rows visible simultaneously
+        repeat(pendingCount) { pendingIdx ->
+            if (pendingIdx > 0) {
+                Text(restLabel, color = RestLabelColor, fontSize = 11.sp,
+                    fontFamily = FontFamily.Monospace, textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp))
+            }
             PendingSetRow(
-                setNumber = exerciseLog.sets.size + 1,
-                previousSet = previousSets.getOrNull(exerciseLog.sets.size),
+                setNumber = exerciseLog.sets.size + pendingIdx + 1,
+                previousSet = previousSets.getOrNull(exerciseLog.sets.size + pendingIdx),
                 initialWeightKg = lastWeight,
                 initialReps = lastReps,
                 weightStepKg = stepKg,
@@ -315,63 +310,115 @@ internal fun ExerciseLogCard(
             )
         }
 
-        // ── ADD SET ─────────────────────────────────────────
-        if (restTimerSecondsRemaining == null) {
-            Column(
-                modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                TextButton(onClick = onAddSetClicked) {
-                    Text("ADD SET ($restLabel)", color = NeonGreen,
-                        fontWeight = FontWeight.Bold, fontSize = 13.sp, letterSpacing = 0.5.sp)
-                }
+        // ADD SET button — always visible
+        Column(modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
+            horizontalAlignment = Alignment.CenterHorizontally) {
+            TextButton(onClick = onAddSetClicked) {
+                Text("ADD SET ($restLabel)", color = NeonGreen,
+                    fontWeight = FontWeight.Bold, fontSize = 13.sp, letterSpacing = 0.5.sp)
             }
         }
     }
 }
 
-// ── Completed set row ────────────────────────────────────────────────────────
+// ── Completed set row ─────────────────────────────────────────────────────────
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun CompletedSetRow(set: SetLog, previousSet: SetLog?, onDelete: () -> Unit, modifier: Modifier = Modifier) {
-    val prevText = previousSet?.let {
-        "${WeightFormatter.format(it.weightKg)} × ${it.reps}${if (it.isFailure) " [F]" else ""}"
-    } ?: "—"
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .background(CompletedSetBg, RoundedCornerShape(4.dp))
-            .padding(vertical = 6.dp, horizontal = 4.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(
-            if (set.isFailure) "F" else "${set.setNumber}",
-            color = if (set.isFailure) DangerRed else Color.White,
-            fontSize = 13.sp, fontWeight = FontWeight.Bold,
-            modifier = Modifier.width(32.dp)
-        )
-        Text(prevText, color = Color.White.copy(alpha = 0.5f), fontSize = 12.sp, modifier = Modifier.weight(1.2f))
-        Text(
-            WeightFormatter.format(set.weightKg).replace(" kg", ""),
-            color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold,
-            modifier = Modifier.weight(1f), textAlign = TextAlign.Center
-        )
-        Text(
-            "${set.reps}",
-            color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold,
-            modifier = Modifier.weight(0.8f), textAlign = TextAlign.Center
-        )
+private fun CompletedSetRow(
+    set: SetLog,
+    setIndex: Int,
+    previousSet: SetLog?,
+    onEdit: (Double, Int, Boolean) -> Unit,
+    onDelete: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var isEditing by remember(set.id, setIndex) { mutableStateOf(false) }
+    var editWeight by remember(set.id, setIndex) { mutableStateOf(set.weightKg) }
+    var editReps   by remember(set.id, setIndex) { mutableIntStateOf(set.reps) }
+    var editFail   by remember(set.id, setIndex) { mutableStateOf(set.isFailure) }
+
+    val prevText = previousSet?.let { "${WeightFormatter.format(it.weightKg)} × ${it.reps}" } ?: "—"
+
+    if (isEditing) {
         Column(
-            modifier = Modifier
-                .width(36.dp)
-                .height(32.dp)
-                .clip(RoundedCornerShape(4.dp))
-                .background(CompletedCheckBg)
-                .clickable { onDelete() },
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
+            modifier = modifier.fillMaxWidth()
+                .background(Color(0xFF1A3A2A), RoundedCornerShape(4.dp))
+                .border(1.dp, NeonGreen, RoundedCornerShape(4.dp))
+                .padding(vertical = 4.dp, horizontal = 4.dp)
         ) {
-            Text("✓", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Black)
+            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(if (editFail) "F" else "${set.setNumber}",
+                    color = if (editFail) DangerRed else NeonGreen,
+                    fontSize = 13.sp, fontWeight = FontWeight.Bold, modifier = Modifier.width(32.dp))
+                Text(prevText, color = Color.White.copy(alpha = 0.4f), fontSize = 11.sp, modifier = Modifier.weight(1.2f))
+                // KG stepper
+                Row(Modifier.weight(1f), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+                    Text("−", color = NeonGreen, fontSize = 16.sp, fontWeight = FontWeight.Black,
+                        modifier = Modifier.clickable { editWeight = (editWeight - 2.5).coerceAtLeast(0.0) }.padding(horizontal = 4.dp))
+                    Text(editWeight.let { if (it == it.toLong().toDouble()) "${it.toLong()}" else "%.1f".format(it) },
+                        color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.Center, modifier = Modifier.width(36.dp))
+                    Text("+", color = NeonGreen, fontSize = 16.sp, fontWeight = FontWeight.Black,
+                        modifier = Modifier.clickable { editWeight += 2.5 }.padding(horizontal = 4.dp))
+                }
+                // REPS stepper
+                Row(Modifier.weight(0.8f), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+                    Text("−", color = NeonGreen, fontSize = 16.sp, fontWeight = FontWeight.Black,
+                        modifier = Modifier.clickable { if (editReps > 1) editReps-- }.padding(horizontal = 3.dp))
+                    Text("$editReps", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.Center, modifier = Modifier.width(24.dp))
+                    Text("+", color = NeonGreen, fontSize = 16.sp, fontWeight = FontWeight.Black,
+                        modifier = Modifier.clickable { editReps++ }.padding(horizontal = 3.dp))
+                }
+                // Save ✓
+                Column(
+                    modifier = Modifier.width(44.dp).height(36.dp)
+                        .clip(RoundedCornerShape(4.dp)).background(CompletedCheckBg)
+                        .clickable { onEdit(editWeight, editReps, editFail); isEditing = false },
+                    horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center
+                ) { Text("✓", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Black) }
+            }
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                TextButton(onClick = { isEditing = false }) {
+                    Text("CANCEL", color = Color.White.copy(alpha = 0.4f), fontSize = 10.sp)
+                }
+                TextButton(onClick = { editFail = !editFail }) {
+                    Text("[F] FAILURE", color = if (editFail) DangerRed else Color.White.copy(alpha = 0.3f), fontSize = 10.sp)
+                }
+            }
+        }
+    } else {
+        Row(
+            modifier = modifier.fillMaxWidth()
+                .background(CompletedSetBg, RoundedCornerShape(4.dp))
+                .combinedClickable(
+                    onClick = {
+                        isEditing = true
+                        editWeight = set.weightKg
+                        editReps = set.reps
+                        editFail = set.isFailure
+                    },
+                    onLongClick = onDelete
+                )
+                .padding(vertical = 6.dp, horizontal = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(if (set.isFailure) "F" else "${set.setNumber}",
+                color = if (set.isFailure) DangerRed else Color.White,
+                fontSize = 13.sp, fontWeight = FontWeight.Bold, modifier = Modifier.width(32.dp))
+            Text(prevText, color = Color.White.copy(alpha = 0.5f), fontSize = 12.sp, modifier = Modifier.weight(1.2f))
+            Text(WeightFormatter.format(set.weightKg).replace(" kg", ""),
+                color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold,
+                modifier = Modifier.weight(1f), textAlign = TextAlign.Center)
+            Text("${set.reps}", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold,
+                modifier = Modifier.weight(0.8f), textAlign = TextAlign.Center)
+            // ✓ is visual only — tap the row to edit, long-press to delete
+            Column(
+                modifier = Modifier.width(44.dp).height(32.dp)
+                    .clip(RoundedCornerShape(4.dp)).background(CompletedCheckBg),
+                horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center
+            ) { Text("✓", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Black) }
         }
     }
 }
@@ -389,69 +436,56 @@ private fun PendingSetRow(
     modifier: Modifier = Modifier
 ) {
     var weightKg by remember { mutableStateOf(initialWeightKg) }
-    var reps by remember { mutableIntStateOf(initialReps) }
+    var reps     by remember { mutableIntStateOf(initialReps) }
     var isFailure by remember { mutableStateOf(false) }
     val prevText = previousSet?.let { "${WeightFormatter.format(it.weightKg)} × ${it.reps}" } ?: "—"
 
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .background(PendingSetBg, RoundedCornerShape(4.dp))
-            .border(1.dp, NeonGreen.copy(alpha = 0.35f), RoundedCornerShape(4.dp))
-            .padding(vertical = 4.dp, horizontal = 4.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(
-            if (isFailure) "F" else "$setNumber",
-            color = if (isFailure) DangerRed else Color.White.copy(alpha = 0.6f),
-            fontSize = 13.sp, fontWeight = FontWeight.Bold,
-            modifier = Modifier.width(32.dp)
-        )
-        Text(prevText, color = Color.White.copy(alpha = 0.4f), fontSize = 11.sp, modifier = Modifier.weight(1.2f))
-
-        // KG stepper
-        Row(modifier = Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
-            Text("−", color = NeonGreen, fontSize = 16.sp, fontWeight = FontWeight.Black,
-                modifier = Modifier.clickable { weightKg = (weightKg - weightStepKg).coerceAtLeast(0.0) }.padding(horizontal = 4.dp))
-            Text(
-                weightKg.let { if (it == it.toLong().toDouble()) "${it.toLong()}" else "%.1f".format(it) },
-                color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold,
-                textAlign = TextAlign.Center, modifier = Modifier.width(36.dp)
-            )
-            Text("+", color = NeonGreen, fontSize = 16.sp, fontWeight = FontWeight.Black,
-                modifier = Modifier.clickable { weightKg += weightStepKg }.padding(horizontal = 4.dp))
-        }
-
-        // REPS stepper
-        Row(modifier = Modifier.weight(0.8f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
-            Text("−", color = NeonGreen, fontSize = 16.sp, fontWeight = FontWeight.Black,
-                modifier = Modifier.clickable { if (reps > 1) reps-- }.padding(horizontal = 3.dp))
-            Text("$reps", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold,
-                textAlign = TextAlign.Center, modifier = Modifier.width(24.dp))
-            Text("+", color = NeonGreen, fontSize = 16.sp, fontWeight = FontWeight.Black,
-                modifier = Modifier.clickable { reps++ }.padding(horizontal = 3.dp))
-        }
-
-        // LOG ✓ button
-        Column(
-            modifier = Modifier
-                .width(40.dp)
-                .height(36.dp)
-                .clip(RoundedCornerShape(4.dp))
-                .background(NeonGreen.copy(alpha = 0.25f))
-                .border(1.dp, NeonGreen.copy(alpha = 0.6f), RoundedCornerShape(4.dp))
-                .clickable { onLogSet(weightKg, reps, null, isFailure) },
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
+    Column {
+        Row(
+            modifier = modifier.fillMaxWidth()
+                .background(PendingSetBg, RoundedCornerShape(4.dp))
+                .border(1.dp, NeonGreen.copy(alpha = 0.35f), RoundedCornerShape(4.dp))
+                .padding(vertical = 4.dp, horizontal = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("✓", color = NeonGreen, fontSize = 16.sp, fontWeight = FontWeight.Black)
+            Text(if (isFailure) "F" else "$setNumber",
+                color = if (isFailure) DangerRed else Color.White.copy(alpha = 0.6f),
+                fontSize = 13.sp, fontWeight = FontWeight.Bold, modifier = Modifier.width(32.dp))
+            Text(prevText, color = Color.White.copy(alpha = 0.4f), fontSize = 11.sp, modifier = Modifier.weight(1.2f))
+            // KG stepper
+            Row(modifier = Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
+                Text("−", color = NeonGreen, fontSize = 16.sp, fontWeight = FontWeight.Black,
+                    modifier = Modifier.clickable { weightKg = (weightKg - weightStepKg).coerceAtLeast(0.0) }.padding(horizontal = 4.dp))
+                Text(weightKg.let { if (it == it.toLong().toDouble()) "${it.toLong()}" else "%.1f".format(it) },
+                    color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center, modifier = Modifier.width(36.dp))
+                Text("+", color = NeonGreen, fontSize = 16.sp, fontWeight = FontWeight.Black,
+                    modifier = Modifier.clickable { weightKg += weightStepKg }.padding(horizontal = 4.dp))
+            }
+            // REPS stepper
+            Row(modifier = Modifier.weight(0.8f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
+                Text("−", color = NeonGreen, fontSize = 16.sp, fontWeight = FontWeight.Black,
+                    modifier = Modifier.clickable { if (reps > 1) reps-- }.padding(horizontal = 3.dp))
+                Text("$reps", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center, modifier = Modifier.width(24.dp))
+                Text("+", color = NeonGreen, fontSize = 16.sp, fontWeight = FontWeight.Black,
+                    modifier = Modifier.clickable { reps++ }.padding(horizontal = 3.dp))
+            }
+            // LOG ✓ button
+            Column(
+                modifier = Modifier.width(44.dp).height(36.dp)
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(NeonGreen.copy(alpha = 0.25f))
+                    .border(1.dp, NeonGreen.copy(alpha = 0.6f), RoundedCornerShape(4.dp))
+                    .clickable { onLogSet(weightKg, reps, null, isFailure) },
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) { Text("✓", color = NeonGreen, fontSize = 16.sp, fontWeight = FontWeight.Black) }
         }
-    }
-
-    // Failure toggle below
-    TextButton(onClick = { isFailure = !isFailure }, modifier = Modifier.fillMaxWidth()) {
-        Text("[F] FAILURE SET", color = if (isFailure) DangerRed else Color.White.copy(alpha = 0.3f),
-            fontSize = 10.sp, fontWeight = FontWeight.Bold)
+        TextButton(onClick = { isFailure = !isFailure }, modifier = Modifier.fillMaxWidth()) {
+            Text("[F] FAILURE SET", color = if (isFailure) DangerRed else Color.White.copy(alpha = 0.3f),
+                fontSize = 10.sp, fontWeight = FontWeight.Bold)
+        }
     }
 }
 
@@ -465,28 +499,16 @@ private fun RestTimerBar(
     modifier: Modifier = Modifier
 ) {
     Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(6.dp))
-            .background(PowerAmber)
+        modifier = modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp)).background(PowerAmber)
     ) {
-        Text(
-            formatElapsed(secondsRemaining),
-            color = Color.Black,
-            fontSize = 26.sp,
-            fontWeight = FontWeight.Black,
-            fontFamily = FontFamily.Monospace,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
-        )
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
-            horizontalArrangement = Arrangement.Center,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
+        Text(formatElapsed(secondsRemaining), color = Color.Black, fontSize = 26.sp,
+            fontWeight = FontWeight.Black, fontFamily = FontFamily.Monospace,
+            textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp))
+        Row(modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
+            horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
             TextButton(onClick = { onAdjust(-30) }) { Text("-30s", color = Color.Black, fontWeight = FontWeight.Bold) }
-            TextButton(onClick = { onAdjust(30) }) { Text("+30s", color = Color.Black, fontWeight = FontWeight.Bold) }
-            TextButton(onClick = onSkip) { Text("SKIP", color = Color.Black, fontWeight = FontWeight.Black, fontSize = 13.sp) }
+            TextButton(onClick = { onAdjust(30) })  { Text("+30s", color = Color.Black, fontWeight = FontWeight.Bold) }
+            TextButton(onClick = onSkip)             { Text("SKIP", color = Color.Black, fontWeight = FontWeight.Black, fontSize = 13.sp) }
         }
     }
 }
@@ -494,16 +516,12 @@ private fun RestTimerBar(
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 private fun formatElapsed(totalSeconds: Int): String {
-    val h = totalSeconds / 3600
-    val m = (totalSeconds % 3600) / 60
-    val s = totalSeconds % 60
-    return if (h > 0) "%d:%02d:%02d".format(h, m, s)
-    else "%d:%02d".format(m, s)
+    val h = totalSeconds / 3600; val m = (totalSeconds % 3600) / 60; val s = totalSeconds % 60
+    return if (h > 0) "%d:%02d:%02d".format(h, m, s) else "%d:%02d".format(m, s)
 }
 
 private fun formatRestLabel(seconds: Int): String {
-    val m = seconds / 60
-    val s = seconds % 60
+    val m = seconds / 60; val s = seconds % 60
     return if (s == 0) "$m:00" else "%d:%02d".format(m, s)
 }
 
@@ -549,7 +567,7 @@ internal fun ActiveWorkoutWithSetsPreview() {
                 )),
                 restTimerForExerciseId = 1,
                 restTimerSecondsRemaining = 238,
-                expandedExerciseId = 1
+                pendingSetCounts = mapOf(1 to 2)
             ),
             elapsedSeconds = 610,
             onViewHistory = {}, onAddExerciseClicked = {}, onExerciseSelected = {},

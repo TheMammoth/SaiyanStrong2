@@ -5,10 +5,10 @@ import com.saiyanstrong.data.local.entity.ExerciseEntity
 object ExerciseSeeder {
     val DATA = listOf(
         // ── Big 4 ──────────────────────────────────────────────────────────────
-        ExerciseEntity(1, "Barbell Squat", "SQUAT", "QUADRICEPS,GLUTEUS_MAXIMUS,ERECTOR_SPINAE", "HAMSTRINGS,CALVES,RECTUS_ABDOMINIS", "squat_transition.json", "muscle_squat"),
-        ExerciseEntity(2, "Deadlift", "HINGE", "ERECTOR_SPINAE,GLUTEUS_MAXIMUS,HAMSTRINGS", "TRAPEZIUS,LATISSIMUS_DORSI,QUADRICEPS", "deadlift_transition.json", "muscle_deadlift"),
-        ExerciseEntity(3, "Bench Press", "PUSH", "PECTORALIS_MAJOR,DELTOIDS,TRICEPS", "BICEPS,RECTUS_ABDOMINIS", "bench_transition.json", "muscle_bench"),
-        ExerciseEntity(4, "Overhead Press", "PUSH", "DELTOIDS,TRICEPS", "TRAPEZIUS,ERECTOR_SPINAE,RECTUS_ABDOMINIS", "ohp_transition.json", "muscle_ohp"),
+        ExerciseEntity(1, "Squat (Barbell)", "SQUAT", "QUADRICEPS,GLUTEUS_MAXIMUS,ERECTOR_SPINAE", "HAMSTRINGS,CALVES,RECTUS_ABDOMINIS", "squat_transition.json", "muscle_squat"),
+        ExerciseEntity(2, "Deadlift (Barbell)", "HINGE", "ERECTOR_SPINAE,GLUTEUS_MAXIMUS,HAMSTRINGS", "TRAPEZIUS,LATISSIMUS_DORSI,QUADRICEPS", "deadlift_transition.json", "muscle_deadlift"),
+        ExerciseEntity(3, "Bench Press (Barbell)", "PUSH", "PECTORALIS_MAJOR,DELTOIDS,TRICEPS", "BICEPS,RECTUS_ABDOMINIS", "bench_transition.json", "muscle_bench"),
+        ExerciseEntity(4, "Overhead Press (Barbell)", "PUSH", "DELTOIDS,TRICEPS", "TRAPEZIUS,ERECTOR_SPINAE,RECTUS_ABDOMINIS", "ohp_transition.json", "muscle_ohp"),
 
         // ── Squat / Legs ───────────────────────────────────────────────────────
         ExerciseEntity(5, "Front Squat", "SQUAT", "QUADRICEPS,GLUTEUS_MAXIMUS,ERECTOR_SPINAE", "HAMSTRINGS,CALVES,RECTUS_ABDOMINIS", "squat_transition.json", "muscle_squat"),
@@ -33,8 +33,8 @@ object ExerciseSeeder {
         ExerciseEntity(24, "Sissy Squat", "SQUAT", "QUADRICEPS", "CALVES,RECTUS_ABDOMINIS", "squat_transition.json", "muscle_squat"),
 
         // ── Hinge / Posterior Chain ────────────────────────────────────────────
-        ExerciseEntity(25, "Romanian Deadlift", "HINGE", "HAMSTRINGS,GLUTEUS_MAXIMUS", "ERECTOR_SPINAE,CALVES", "deadlift_transition.json", "muscle_deadlift"),
-        ExerciseEntity(26, "Sumo Deadlift", "HINGE", "ERECTOR_SPINAE,GLUTEUS_MAXIMUS,HAMSTRINGS", "TRAPEZIUS,QUADRICEPS", "deadlift_transition.json", "muscle_deadlift"),
+        ExerciseEntity(25, "Romanian Deadlift (Barbell)", "HINGE", "HAMSTRINGS,GLUTEUS_MAXIMUS", "ERECTOR_SPINAE,CALVES", "deadlift_transition.json", "muscle_deadlift"),
+        ExerciseEntity(26, "Sumo Deadlift (Barbell)", "HINGE", "ERECTOR_SPINAE,GLUTEUS_MAXIMUS,HAMSTRINGS", "TRAPEZIUS,QUADRICEPS", "deadlift_transition.json", "muscle_deadlift"),
         ExerciseEntity(27, "Trap Bar Deadlift", "HINGE", "ERECTOR_SPINAE,GLUTEUS_MAXIMUS,HAMSTRINGS", "TRAPEZIUS,QUADRICEPS", "deadlift_transition.json", "muscle_deadlift"),
         ExerciseEntity(28, "Stiff-Leg Deadlift", "HINGE", "HAMSTRINGS,GLUTEUS_MAXIMUS", "ERECTOR_SPINAE,CALVES", "deadlift_transition.json", "muscle_deadlift"),
         ExerciseEntity(29, "Good Morning", "HINGE", "HAMSTRINGS,ERECTOR_SPINAE", "GLUTEUS_MAXIMUS", "deadlift_transition.json", "muscle_deadlift"),
@@ -52,10 +52,10 @@ object ExerciseSeeder {
         ExerciseEntity(41, "Barbell Hip Thrust", "HINGE", "GLUTEUS_MAXIMUS,HAMSTRINGS", "ERECTOR_SPINAE,QUADRICEPS", "deadlift_transition.json", "muscle_deadlift"),
 
         // ── Push / Chest ───────────────────────────────────────────────────────
-        ExerciseEntity(42, "Incline Bench Press", "PUSH", "PECTORALIS_MAJOR,DELTOIDS,TRICEPS", "BICEPS,RECTUS_ABDOMINIS", "bench_transition.json", "muscle_bench"),
-        ExerciseEntity(43, "Decline Bench Press", "PUSH", "PECTORALIS_MAJOR,TRICEPS", "DELTOIDS,RECTUS_ABDOMINIS", "bench_transition.json", "muscle_bench"),
-        ExerciseEntity(44, "Dumbbell Bench Press", "PUSH", "PECTORALIS_MAJOR,DELTOIDS,TRICEPS", "BICEPS,RECTUS_ABDOMINIS", "bench_transition.json", "muscle_bench"),
-        ExerciseEntity(45, "Incline Dumbbell Press", "PUSH", "PECTORALIS_MAJOR,DELTOIDS,TRICEPS", "BICEPS", "bench_transition.json", "muscle_bench"),
+        ExerciseEntity(42, "Incline Bench Press (Barbell)", "PUSH", "PECTORALIS_MAJOR,DELTOIDS,TRICEPS", "BICEPS,RECTUS_ABDOMINIS", "bench_transition.json", "muscle_bench"),
+        ExerciseEntity(43, "Decline Bench Press (Barbell)", "PUSH", "PECTORALIS_MAJOR,TRICEPS", "DELTOIDS,RECTUS_ABDOMINIS", "bench_transition.json", "muscle_bench"),
+        ExerciseEntity(44, "Bench Press (Dumbbell)", "PUSH", "PECTORALIS_MAJOR,DELTOIDS,TRICEPS", "BICEPS,RECTUS_ABDOMINIS", "bench_transition.json", "muscle_bench"),
+        ExerciseEntity(45, "Incline Bench Press (Dumbbell)", "PUSH", "PECTORALIS_MAJOR,DELTOIDS,TRICEPS", "BICEPS", "bench_transition.json", "muscle_bench"),
         ExerciseEntity(46, "Cable Chest Fly", "PUSH", "PECTORALIS_MAJOR", "DELTOIDS,BICEPS", "bench_transition.json", "muscle_bench"),
         ExerciseEntity(47, "Dumbbell Fly", "PUSH", "PECTORALIS_MAJOR", "DELTOIDS,BICEPS", "bench_transition.json", "muscle_bench"),
         ExerciseEntity(48, "Pec Deck", "PUSH", "PECTORALIS_MAJOR", "DELTOIDS,BICEPS", "bench_transition.json", "muscle_bench"),
@@ -68,16 +68,16 @@ object ExerciseSeeder {
         ExerciseEntity(55, "Incline Cable Fly", "PUSH", "PECTORALIS_MAJOR", "DELTOIDS,BICEPS", "bench_transition.json", "muscle_bench"),
 
         // ── Push / Shoulders & Triceps ─────────────────────────────────────────
-        ExerciseEntity(56, "Dumbbell Shoulder Press", "PUSH", "DELTOIDS,TRICEPS", "TRAPEZIUS,ERECTOR_SPINAE", "ohp_transition.json", "muscle_ohp"),
+        ExerciseEntity(56, "Overhead Press (Dumbbell)", "PUSH", "DELTOIDS,TRICEPS", "TRAPEZIUS,ERECTOR_SPINAE", "ohp_transition.json", "muscle_ohp"),
         ExerciseEntity(57, "Arnold Press", "PUSH", "DELTOIDS,TRICEPS", "TRAPEZIUS,PECTORALIS_MAJOR", "ohp_transition.json", "muscle_ohp"),
         ExerciseEntity(58, "Push Press", "PUSH", "DELTOIDS,TRICEPS", "TRAPEZIUS,ERECTOR_SPINAE,QUADRICEPS", "ohp_transition.json", "muscle_ohp"),
-        ExerciseEntity(59, "Lateral Raise", "PUSH", "DELTOIDS", "TRAPEZIUS", "ohp_transition.json", "muscle_ohp"),
-        ExerciseEntity(60, "Front Raise", "PUSH", "DELTOIDS", "PECTORALIS_MAJOR", "ohp_transition.json", "muscle_ohp"),
+        ExerciseEntity(59, "Lateral Raise (Dumbbell)", "PUSH", "DELTOIDS", "TRAPEZIUS", "ohp_transition.json", "muscle_ohp"),
+        ExerciseEntity(60, "Front Raise (Dumbbell)", "PUSH", "DELTOIDS", "PECTORALIS_MAJOR", "ohp_transition.json", "muscle_ohp"),
         ExerciseEntity(61, "Cable Lateral Raise", "PUSH", "DELTOIDS", "TRAPEZIUS", "ohp_transition.json", "muscle_ohp"),
         ExerciseEntity(62, "Face Pull", "PUSH", "DELTOIDS,TRAPEZIUS", "BICEPS", "ohp_transition.json", "muscle_ohp"),
         ExerciseEntity(63, "Upright Row", "PUSH", "DELTOIDS,TRAPEZIUS", "BICEPS", "ohp_transition.json", "muscle_ohp"),
         ExerciseEntity(64, "Tricep Pushdown", "PUSH", "TRICEPS", "DELTOIDS", "ohp_transition.json", "muscle_ohp"),
-        ExerciseEntity(65, "Skull Crusher", "PUSH", "TRICEPS", "DELTOIDS", "bench_transition.json", "muscle_bench"),
+        ExerciseEntity(65, "Skull Crusher (Barbell)", "PUSH", "TRICEPS", "DELTOIDS", "bench_transition.json", "muscle_bench"),
         ExerciseEntity(66, "Overhead Tricep Extension", "PUSH", "TRICEPS", "DELTOIDS", "ohp_transition.json", "muscle_ohp"),
         ExerciseEntity(67, "Tricep Kickback", "PUSH", "TRICEPS", "DELTOIDS", "ohp_transition.json", "muscle_ohp"),
         ExerciseEntity(68, "Dips (Triceps)", "PUSH", "TRICEPS,DELTOIDS", "PECTORALIS_MAJOR", "bench_transition.json", "muscle_bench"),
@@ -91,10 +91,10 @@ object ExerciseSeeder {
         ExerciseEntity(74, "Lat Pulldown Wide", "PULL", "LATISSIMUS_DORSI", "BICEPS,TRAPEZIUS", "deadlift_transition.json", "muscle_deadlift"),
         ExerciseEntity(75, "Lat Pulldown Close", "PULL", "LATISSIMUS_DORSI,BICEPS", "TRAPEZIUS", "deadlift_transition.json", "muscle_deadlift"),
         ExerciseEntity(76, "Seated Cable Row", "PULL", "LATISSIMUS_DORSI,TRAPEZIUS", "BICEPS,ERECTOR_SPINAE", "deadlift_transition.json", "muscle_deadlift"),
-        ExerciseEntity(77, "Dumbbell Row", "PULL", "LATISSIMUS_DORSI,TRAPEZIUS", "BICEPS,ERECTOR_SPINAE", "deadlift_transition.json", "muscle_deadlift"),
-        ExerciseEntity(78, "Pendlay Row", "PULL", "LATISSIMUS_DORSI,TRAPEZIUS", "BICEPS,ERECTOR_SPINAE", "deadlift_transition.json", "muscle_deadlift"),
+        ExerciseEntity(77, "Bent Over Row (Dumbbell)", "PULL", "LATISSIMUS_DORSI,TRAPEZIUS", "BICEPS,ERECTOR_SPINAE", "deadlift_transition.json", "muscle_deadlift"),
+        ExerciseEntity(78, "Pendlay Row (Barbell)", "PULL", "LATISSIMUS_DORSI,TRAPEZIUS", "BICEPS,ERECTOR_SPINAE", "deadlift_transition.json", "muscle_deadlift"),
         ExerciseEntity(79, "T-Bar Row", "PULL", "LATISSIMUS_DORSI,TRAPEZIUS", "BICEPS,ERECTOR_SPINAE", "deadlift_transition.json", "muscle_deadlift"),
-        ExerciseEntity(80, "Single-Arm Dumbbell Row", "PULL", "LATISSIMUS_DORSI,TRAPEZIUS", "BICEPS,ERECTOR_SPINAE", "deadlift_transition.json", "muscle_deadlift"),
+        ExerciseEntity(80, "One Arm Row (Dumbbell)", "PULL", "LATISSIMUS_DORSI,TRAPEZIUS", "BICEPS,ERECTOR_SPINAE", "deadlift_transition.json", "muscle_deadlift"),
         ExerciseEntity(81, "Machine Row", "PULL", "LATISSIMUS_DORSI,TRAPEZIUS", "BICEPS", "deadlift_transition.json", "muscle_deadlift"),
         ExerciseEntity(82, "Chest-Supported Row", "PULL", "LATISSIMUS_DORSI,TRAPEZIUS", "BICEPS", "deadlift_transition.json", "muscle_deadlift"),
         ExerciseEntity(83, "Straight-Arm Pulldown", "PULL", "LATISSIMUS_DORSI", "TRICEPS,DELTOIDS", "deadlift_transition.json", "muscle_deadlift"),
@@ -102,8 +102,8 @@ object ExerciseSeeder {
         ExerciseEntity(85, "Incline Dumbbell Row", "PULL", "LATISSIMUS_DORSI,TRAPEZIUS", "BICEPS", "deadlift_transition.json", "muscle_deadlift"),
 
         // ── Pull / Biceps ──────────────────────────────────────────────────────
-        ExerciseEntity(86, "Barbell Curl", "PULL", "BICEPS", "DELTOIDS,TRAPEZIUS", "deadlift_transition.json", "muscle_deadlift"),
-        ExerciseEntity(87, "Dumbbell Curl", "PULL", "BICEPS", "DELTOIDS", "deadlift_transition.json", "muscle_deadlift"),
+        ExerciseEntity(86, "Curl (Barbell)", "PULL", "BICEPS", "DELTOIDS,TRAPEZIUS", "deadlift_transition.json", "muscle_deadlift"),
+        ExerciseEntity(87, "Curl (Dumbbell)", "PULL", "BICEPS", "DELTOIDS", "deadlift_transition.json", "muscle_deadlift"),
         ExerciseEntity(88, "Hammer Curl", "PULL", "BICEPS", "DELTOIDS", "deadlift_transition.json", "muscle_deadlift"),
         ExerciseEntity(89, "Preacher Curl", "PULL", "BICEPS", "DELTOIDS", "deadlift_transition.json", "muscle_deadlift"),
         ExerciseEntity(90, "Incline Dumbbell Curl", "PULL", "BICEPS", "DELTOIDS", "deadlift_transition.json", "muscle_deadlift"),

@@ -2,6 +2,8 @@ package com.saiyanstrong.data.local
 
 import androidx.room.Database
 import androidx.room.RoomDatabase
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import com.saiyanstrong.data.local.dao.ExerciseDao
 import com.saiyanstrong.data.local.dao.ExerciseLogDao
 import com.saiyanstrong.data.local.dao.SessionDao
@@ -11,6 +13,13 @@ import com.saiyanstrong.data.local.entity.ExerciseLogEntity
 import com.saiyanstrong.data.local.entity.SessionEntity
 import com.saiyanstrong.data.local.entity.SetLogEntity
 
+val MIGRATION_3_4 = object : Migration(3, 4) {
+    override fun migrate(database: SupportSQLiteDatabase) {
+        // Clear exercises so ExerciseSeeder re-inserts updated names on next app launch
+        database.execSQL("DELETE FROM exercises")
+    }
+}
+
 @Database(
     entities = [
         ExerciseEntity::class,
@@ -18,7 +27,7 @@ import com.saiyanstrong.data.local.entity.SetLogEntity
         ExerciseLogEntity::class,
         SetLogEntity::class
     ],
-    version = 3,
+    version = 4,
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {

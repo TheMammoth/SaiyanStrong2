@@ -1,142 +1,115 @@
-# SaiyanStrong — Sprint 10 Spec: ActiveWorkoutScreen layout rebuild
+# SaiyanStrong — Sprint 11 Spec
 
-## Reference: provided screenshot
-
-## Status: COMPLETE — v0.8.0
+## Status: IN PROGRESS
 
 ---
 
-## Differences between reference and current UI
+## Sprint 11 scope (3 reference screenshots)
 
-| Area | Reference | Current (before this sprint) |
-|------|-----------|------------------------------|
-| Top bar | ← icon · timer · FINISH right | No top bar |
-| Header | Workout name bold + elapsed | "SAIYAN STRONG" static |
-| Exercise name | Accent color, 16sp | Uppercase white/green, smaller |
-| Columns | SET / PREVIOUS / KG / REPS / ✓ | SET / PREV / KG / REPS / × |
-| Completed rows | **Solid green bg**, filled ✓ button | Faint tint, × delete |
-| Rest label between sets | "4:00" teal text between each row | Nothing |
-| Active timer | **Full-width solid colored bar** | Small amber bordered row with buttons |
-| Pending set | Inline table row with input boxes | Collapsed panel, hidden |
-| Add set button | `ADD SET (1:30)` text button | `+ ADD SET >>>` SaiyanButton |
-| Add exercise | Bottom text button | Row button with LOG/FINISH |
+### 1. Exercise equipment variants
+Reference pic 1 shows exercises named as "Bench Press (Barbell)", "Bench Press (Dumbbell)",
+"Overhead Press (Barbell)", "Overhead Press (Dumbbell)" as separate entries.
 
----
+**Changes:**
+- Rename key exercises in ExerciseSeeder to follow `"Name (Equipment)"` convention
+- Bump DB version 3 → 4 with migration that clears exercises table (re-seeded on next launch)
+- Equipment suffixes: (Barbell), (Dumbbell), (Cable), (Machine), (Smith Machine), (Kettlebell)
+- Bodyweight exercises keep no suffix: "Pull-Up", "Push-Up", "Dips"
 
-## Layout spec
-
-```
-Column {
-    // TOP BAR
-    Row(SaiyanGray bg) {
-        Text("←", white)
-        Spacer(weight=1)
-        Text(elapsed "M:SS", white)
-        Spacer(weight=1)
-        TextButton("FINISH", NeonGreen)
-    }
-
-    // WORKOUT TITLE
-    Column(padding=16) {
-        Text("TRAINING SESSION", white, bold, 20sp)
-        Text(elapsed, white alpha 0.6, 13sp)
-    }
-
-    // EXERCISE CARDS
-    LazyColumn(weight=1f) {
-        items(exerciseLogs) { log ->
-            ExerciseLogCard(log, ...)
-        }
-        item { TextButton("ADD EXERCISE", NeonGreen) }
-    }
-
-    // TELEMETRY
-    Text("// SETS: N | VOL: X //", TelemetryGreen, black bg)
-}
-```
+Key renames:
+| ID | Before | After |
+|----|--------|-------|
+| 1 | Barbell Squat | Squat (Barbell) |
+| 2 | Deadlift | Deadlift (Barbell) |
+| 3 | Bench Press | Bench Press (Barbell) |
+| 4 | Overhead Press | Overhead Press (Barbell) |
+| 44 | Dumbbell Bench Press | Bench Press (Dumbbell) |
+| 45 | Incline Dumbbell Press | Incline Bench Press (Dumbbell) |
+| 42 | Incline Bench Press | Incline Bench Press (Barbell) |
+| 56 | Dumbbell Shoulder Press | Overhead Press (Dumbbell) |
+| 77 | Dumbbell Row | Bent Over Row (Dumbbell) |
+| 78 | Pendlay Row | Pendlay Row (Barbell) |
+| 80 | Single-Arm Dumbbell Row | One Arm Row (Dumbbell) |
+| 86 | Barbell Curl | Curl (Barbell) |
+| 87 | Dumbbell Curl | Curl (Dumbbell) |
+| 59 | Lateral Raise | Lateral Raise (Dumbbell) |
+| 60 | Front Raise | Front Raise (Dumbbell) |
+| 25 | Romanian Deadlift | Romanian Deadlift (Barbell) |
+| 65 | Skull Crusher | Skull Crusher (Barbell) |
 
 ---
 
-## ExerciseLogCard layout spec
+### 2. Bottom 5-tab navigation
+Reference shows persistent bottom bar: Profile | History | Workout | Exercises | Measure
 
-```
-Column(SaiyanGray bg, NeonGreen border) {
-    Row {
-        Text(exerciseName, NeonGreen, 16sp, bold)
-        Spacer
-    }
+**Our tabs:** Home | History | Workout | Exercises | Settings
 
-    // Headers
-    Row { "SET" | "PREVIOUS" | "KG" | "REPS" | "✓" }  ← TelemetryGreen
-
-    forEach(completedSets, index) {
-        CompletedSetRow(set, previousSet)   ← NeonGreen bg alpha 0.18f
-        if (not last OR rest timer running OR pending open) {
-            RestLabel("1:30")  ← TelemetryGreen, 10sp, centered
-        }
-    }
-
-    // Active rest timer (if running)
-    if (restSecondsRemaining != null) {
-        RestTimerBar(seconds)  ← full-width, PowerAmber solid bg
-    }
-
-    // Pending set row (if expanded)
-    if (isExpanded) {
-        PendingSetRow(...)
-    }
-
-    // ADD SET
-    TextButton("ADD SET (1:30)", NeonGreen, centered)
-}
-```
+- `NavigationBar` in `NavGraph` top-level `Scaffold.bottomBar`
+- Tabs hidden on `ActiveWorkout` and `SessionComplete` routes
+- Workout tab → navigate to `Screen.ActiveWorkout`
+- Exercises tab → `ExerciseBrowserScreen` (new screen)
+- Settings tab → `Screen.Settings` (already exists)
+- History tab → `Screen.History`
+- Home tab → `Screen.Home`
 
 ---
 
-## Component details
-
-### CompletedSetRow
-- Background: `NeonGreen.copy(alpha = 0.15f)`, RoundedCornerShape(3.dp)
-- ✓ button: `Color(0xFF2E7D32)` green filled, white "✓" text → tapping = delete
-
-### RestLabel
-- Text `"1:30"`, color = `TelemetryGreen`, 10sp, centered, full width
-
-### RestTimerBar
-- Full-width `Row`, background = `PowerAmber`, padding vertical 10dp
-- Centered large `Text(M:SS)`, white, 22sp, bold
-- Small row below: `-30s` · `+30s` · `SKIP` TextButtons in white
-
-### PendingSetRow
-- Background: dark (`Color(0xFF111111)`)
-- SET column: next set number
-- PREVIOUS: previousSet?.let { "Xkg × N" } ?: "—"
-- KG: `[-] [value] [+]` inline (weightStepKg steps)
-- REPS: `[-] [value] [+]` inline
-- ✓: NeonGreen filled square → logs the set
-
-### AddExerciseButton
-- Centered `TextButton`, text "ADD EXERCISE", NeonGreen, 15sp bold
+### 3. ExerciseBrowserScreen (Exercises tab)
+Standalone screen version of the exercise picker:
+- Same search + filter chips as ExercisePickerSheet
+- No dialog / overlay — it's a proper nav destination
+- Tap on exercise = no-op for now (detail screen is future sprint)
+- `ExerciseBrowserViewModel` injects `ExerciseRepository`
 
 ---
 
-## ViewModel addition
-```kotlin
-private val _elapsedSeconds = MutableStateFlow(0)
-val elapsedSeconds: StateFlow<Int> = _elapsedSeconds.asStateFlow()
-// ticks every second in init coroutine
-```
+### 4. ActiveWorkoutScreen: pre-added pending sets
+Reference pic 3 shows sets 4, 5, F all pre-visible with input boxes simultaneously.
+
+**Model change:**
+- Remove `expandedExerciseId: Int?` from UiState
+- Add `pendingSetCounts: Map<Int, Int>` (exerciseId → number of pending rows visible)
+- Exercise selected → starts with 1 pending row (`pendingSetCounts[id] = 1`)
+- ADD SET → increments count
+- Log pending set ✓ → decrements count (and calls `onLogSet`)
+- All pending rows shown simultaneously AFTER the rest timer bar (if active)
 
 ---
 
-## Files changed
-1. `ActiveWorkoutViewModel.kt` — add elapsedSeconds StateFlow
-2. `ActiveWorkoutScreen.kt` — full rewrite
+### 5. Completed set ✓ button fix
+- ✓ is a **visual indicator only** on completed rows — NOT a delete button
+- Row is **tappable** → enters inline edit mode (steppers for KG and REPS appear)
+- In edit mode: confirm ✓ saves via `onEditSet`, cancel X exits
+- Long-press → delete (via `Modifier.combinedClickable`)
+- Add `onEditSet(exerciseId, setIndex, weightKg, reps, isFailure)` to ViewModel
 
 ---
 
-## Sprint 11 backlog
-- [ ] Lottie flame (SessionComplete)
-- [ ] Exercise detail screen
-- [ ] Rest timer notification
-- [ ] Pre-planned pending sets (add multiple sets upfront)
+### 6. Rest timer adjustment (verify + fix)
+- The `-30s / +30s / SKIP` buttons in RestTimerBar call `onAdjustRest` correctly
+- Ensure timer bar is visible even while pending set rows are shown
+- The pending rows appear BELOW the timer bar (not above)
+
+---
+
+## Files changed / created
+
+| File | Action |
+|------|--------|
+| `ExerciseSeeder.kt` | Rename exercises to (Equipment) convention |
+| `AppDatabase.kt` | Version 3→4, MIGRATION_3_4 |
+| `Screen.kt` | Add `Exercises` route |
+| `NavGraph.kt` | Bottom nav bar, 5 tabs |
+| `ExerciseBrowserViewModel.kt` | New |
+| `ExerciseBrowserScreen.kt` | New |
+| `ActiveWorkoutViewModel.kt` | pendingSetCounts, onEditSet |
+| `ActiveWorkoutScreen.kt` | Multiple pending rows, edit mode, fix ✓ |
+| `HomeScreen.kt` | Remove ⚙ header gear (Settings is a tab) |
+
+---
+
+## Sprint 12 backlog
+- [ ] Exercise detail screen (tap exercise in browser → detail)
+- [ ] Workout naming before session (or name on complete)
+- [ ] Lottie flame animation
+- [ ] Pre-planned pending sets: persist across rest timer

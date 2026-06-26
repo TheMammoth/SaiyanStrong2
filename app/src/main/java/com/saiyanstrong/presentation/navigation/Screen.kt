@@ -10,5 +10,6 @@ sealed class Screen(val route: String) {
     data object ExerciseDetail : Screen("exercise/{exerciseId}") {
         fun createRoute(exerciseId: Int) = "exercise/$exerciseId"
     }
-    data object Settings : Screen("settings")
+    data object Exercises : Screen("exercises")
+    data object Settings  : Screen("settings")
 }
