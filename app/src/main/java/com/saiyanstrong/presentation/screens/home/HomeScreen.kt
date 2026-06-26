@@ -1,5 +1,11 @@
 package com.saiyanstrong.presentation.screens.home
 
+import android.content.Intent
+import android.net.Uri
+import android.provider.Settings
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -10,16 +16,24 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.SystemUpdate
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
@@ -28,11 +42,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.saiyanstrong.domain.model.AppUpdate
 import com.saiyanstrong.domain.model.PowerLevel
 import com.saiyanstrong.domain.model.SaiyanStage
 import com.saiyanstrong.presentation.components.PowerLevelBar
 import com.saiyanstrong.presentation.components.SaiyanButton
 import com.saiyanstrong.presentation.components.scanlineTexture
+import com.saiyanstrong.presentation.theme.DangerRed
 import com.saiyanstrong.presentation.theme.NeonGreen
 import com.saiyanstrong.presentation.theme.PowerAmber
 import com.saiyanstrong.presentation.theme.SaiyanGray
@@ -47,11 +63,41 @@ fun HomeScreen(
 ) {
     val powerLevel by viewModel.powerLevel.collectAsStateWithLifecycle()
     val weeklyBars by viewModel.weeklyBars.collectAsStateWithLifecycle()
+    val updateAvailable by viewModel.updateAvailable.collectAsStateWithLifecycle()
+    val downloadState by viewModel.downloadState.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+
+    LaunchedEffect(downloadState) {
+        if (downloadState is UpdateDownloadState.Ready) {
+            val uri = (downloadState as UpdateDownloadState.Ready).uri
+            val intent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, "application/vnd.android.package-archive")
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION
+            }
+            context.startActivity(intent)
+            viewModel.onInstallConsumed()
+        }
+    }
+
     HomeContent(
         powerLevel = powerLevel,
         weeklyBars = weeklyBars,
+        updateAvailable = updateAvailable,
+        downloadState = downloadState,
         onStartWorkout = onStartWorkout,
-        onViewHistory = onViewHistory
+        onViewHistory = onViewHistory,
+        onDownloadUpdate = {
+            if (!viewModel.canInstallPackages()) {
+                val intent = Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES).apply {
+                    data = Uri.parse("package:${context.packageName}")
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                }
+                context.startActivity(intent)
+            } else {
+                viewModel.onDownloadUpdate()
+            }
+        },
+        onDismissUpdate = viewModel::onDismissUpdate
     )
 }
 
@@ -59,8 +105,12 @@ fun HomeScreen(
 internal fun HomeContent(
     powerLevel: PowerLevel?,
     weeklyBars: List<WeekBar>,
+    updateAvailable: AppUpdate?,
+    downloadState: UpdateDownloadState,
     onStartWorkout: () -> Unit,
-    onViewHistory: () -> Unit
+    onViewHistory: () -> Unit,
+    onDownloadUpdate: () -> Unit,
+    onDismissUpdate: () -> Unit
 ) {
     Scaffold { padding ->
         Column(
@@ -86,6 +136,19 @@ internal fun HomeContent(
                     powerLevel?.stage?.label?.uppercase() ?: "INITIALIZING...",
                     color = Color.White,
                     style = MaterialTheme.typography.titleMedium
+                )
+            }
+
+            AnimatedVisibility(
+                visible = updateAvailable != null,
+                enter = slideInVertically { -it },
+                exit = slideOutVertically { -it }
+            ) {
+                UpdateBanner(
+                    tagName = updateAvailable?.tagName ?: "",
+                    downloadState = downloadState,
+                    onDownload = onDownloadUpdate,
+                    onDismiss = onDismissUpdate
                 )
             }
 
@@ -156,6 +219,57 @@ internal fun HomeContent(
 }
 
 @Composable
+private fun UpdateBanner(
+    tagName: String,
+    downloadState: UpdateDownloadState,
+    onDownload: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(PowerAmber.copy(alpha = 0.15f))
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Icon(
+            Icons.Filled.SystemUpdate,
+            contentDescription = null,
+            tint = PowerAmber,
+            modifier = Modifier.size(20.dp)
+        )
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                "UPDATE AVAILABLE",
+                color = PowerAmber,
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Black,
+                letterSpacing = 2.sp
+            )
+            Text(tagName, color = Color.White, style = MaterialTheme.typography.bodySmall)
+        }
+        when (downloadState) {
+            is UpdateDownloadState.Downloading -> {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(20.dp),
+                    color = PowerAmber,
+                    strokeWidth = 2.dp
+                )
+            }
+            else -> {
+                TextButton(onClick = onDownload) {
+                    Text("UPDATE", color = PowerAmber, fontWeight = FontWeight.Black, fontSize = 12.sp)
+                }
+                TextButton(onClick = onDismiss) {
+                    Text("✕", color = DangerRed, fontSize = 12.sp)
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun WorkoutsPerWeekChart(weekBars: List<WeekBar>, modifier: Modifier = Modifier) {
     val maxCount = weekBars.maxOfOrNull { it.count }?.coerceAtLeast(1) ?: 1
 
@@ -178,7 +292,6 @@ private fun WorkoutsPerWeekChart(weekBars: List<WeekBar>, modifier: Modifier = M
                         size = Size(barWidth, barHeight)
                     )
                 } else {
-                    // Zero-height bar: draw a 2px floor line
                     drawRect(
                         color = NeonGreen.copy(alpha = 0.2f),
                         topLeft = Offset(i * slotWidth + barMargin, size.height - 2f),
@@ -221,8 +334,12 @@ internal fun HomeContentPreview() {
                 WeekBar("6/23", 4), WeekBar("6/30", 1), WeekBar("7/7", 3),
                 WeekBar("7/14", 0), WeekBar("7/21", 2)
             ),
+            updateAvailable = AppUpdate("v0.5.0", ""),
+            downloadState = UpdateDownloadState.Idle,
             onStartWorkout = {},
-            onViewHistory = {}
+            onViewHistory = {},
+            onDownloadUpdate = {},
+            onDismissUpdate = {}
         )
     }
 }
