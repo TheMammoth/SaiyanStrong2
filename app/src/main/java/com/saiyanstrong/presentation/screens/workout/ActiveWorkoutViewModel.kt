@@ -4,8 +4,10 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.saiyanstrong.domain.model.Exercise
 import com.saiyanstrong.domain.model.ExerciseLog
+import com.saiyanstrong.domain.model.SetLog
 import com.saiyanstrong.domain.repository.ExerciseRepository
 import com.saiyanstrong.domain.usecase.CompleteSessionUseCase
+import com.saiyanstrong.domain.usecase.GetLastSessionSetsUseCase
 import com.saiyanstrong.domain.usecase.LogSetUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
@@ -13,8 +15,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.launchIn
-import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -24,9 +26,12 @@ private const val REST_DURATION_SECONDS = 90
 data class ActiveWorkoutUiState(
     val exerciseLogs: List<ExerciseLog> = emptyList(),
     val availableExercises: List<Exercise> = emptyList(),
-    val isExercisePickerVisible: Boolean = false,
-    val activeExerciseId: Int? = null,
+    val exerciseUsageCounts: Map<Int, Int> = emptyMap(),
+    val previousPerformance: Map<Int, List<SetLog>> = emptyMap(),
+    val expandedExerciseId: Int? = null,
+    val restTimerForExerciseId: Int? = null,
     val restTimerSecondsRemaining: Int? = null,
+    val isExercisePickerVisible: Boolean = false,
     val completedSessionId: Long? = null
 )
 
@@ -34,7 +39,8 @@ data class ActiveWorkoutUiState(
 class ActiveWorkoutViewModel @Inject constructor(
     private val exerciseRepository: ExerciseRepository,
     private val logSetUseCase: LogSetUseCase,
-    private val completeSessionUseCase: CompleteSessionUseCase
+    private val completeSessionUseCase: CompleteSessionUseCase,
+    private val getLastSessionSetsUseCase: GetLastSessionSetsUseCase
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ActiveWorkoutUiState())
@@ -44,9 +50,12 @@ class ActiveWorkoutViewModel @Inject constructor(
     private var restTimerJob: Job? = null
 
     init {
-        exerciseRepository.getAllExercises()
-            .onEach { exercises -> _uiState.update { it.copy(availableExercises = exercises) } }
-            .launchIn(viewModelScope)
+        combine(
+            exerciseRepository.getAllExercises(),
+            exerciseRepository.getExerciseUsageCounts()
+        ) { exercises, usageCounts ->
+            _uiState.update { it.copy(availableExercises = exercises, exerciseUsageCounts = usageCounts) }
+        }.launchIn(viewModelScope)
     }
 
     fun onAddExerciseClicked() {
@@ -70,13 +79,20 @@ class ActiveWorkoutViewModel @Inject constructor(
             state.copy(
                 exerciseLogs = exerciseLogs,
                 isExercisePickerVisible = false,
-                activeExerciseId = exercise.id
+                expandedExerciseId = exercise.id
             )
+        }
+        viewModelScope.launch {
+            val prevSets = getLastSessionSetsUseCase.execute(exercise.id)
+            _uiState.update { it.copy(previousPerformance = it.previousPerformance + (exercise.id to prevSets)) }
         }
     }
 
-    fun onLogSet(weightKg: Double, reps: Int, rpe: Float?) {
-        val exerciseId = _uiState.value.activeExerciseId ?: return
+    fun onAddSetClicked(exerciseId: Int) {
+        _uiState.update { it.copy(expandedExerciseId = exerciseId) }
+    }
+
+    fun onLogSet(exerciseId: Int, weightKg: Double, reps: Int, rpe: Float?, isFailure: Boolean = false) {
         _uiState.update { state ->
             val exerciseLogs = state.exerciseLogs.map { log ->
                 if (log.exercise.id != exerciseId) log
@@ -85,25 +101,45 @@ class ActiveWorkoutViewModel @Inject constructor(
                         setNumber = log.sets.size + 1,
                         weightKg = weightKg,
                         reps = reps,
-                        rpe = rpe
+                        rpe = rpe,
+                        isFailure = isFailure
                     )
                     log.copy(sets = log.sets + setLog)
                 }
             }
-            state.copy(exerciseLogs = exerciseLogs, restTimerSecondsRemaining = REST_DURATION_SECONDS)
+            state.copy(
+                exerciseLogs = exerciseLogs,
+                expandedExerciseId = null,
+                restTimerForExerciseId = exerciseId,
+                restTimerSecondsRemaining = REST_DURATION_SECONDS
+            )
         }
         startRestTimer()
     }
 
+    fun onDeleteSet(exerciseId: Int, setIndex: Int) {
+        _uiState.update { state ->
+            val exerciseLogs = state.exerciseLogs.map { log ->
+                if (log.exercise.id != exerciseId) log
+                else {
+                    val newSets = log.sets.toMutableList()
+                        .also { it.removeAt(setIndex) }
+                        .mapIndexed { i, s -> s.copy(setNumber = i + 1) }
+                    log.copy(sets = newSets)
+                }
+            }
+            state.copy(exerciseLogs = exerciseLogs)
+        }
+    }
+
     fun onSkipRest() {
         restTimerJob?.cancel()
-        _uiState.update { it.copy(restTimerSecondsRemaining = null) }
+        _uiState.update { it.copy(restTimerSecondsRemaining = null, restTimerForExerciseId = null) }
     }
 
     fun onAdjustRestTimer(deltaSec: Int) {
         val current = _uiState.value.restTimerSecondsRemaining ?: return
-        val newSec = (current + deltaSec).coerceIn(10, 600)
-        startRestTimerFrom(newSec)
+        startRestTimerFrom((current + deltaSec).coerceIn(10, 600))
     }
 
     private fun startRestTimer() = startRestTimerFrom(REST_DURATION_SECONDS)
@@ -115,7 +151,7 @@ class ActiveWorkoutViewModel @Inject constructor(
                 _uiState.update { it.copy(restTimerSecondsRemaining = secondsLeft) }
                 delay(1_000)
             }
-            _uiState.update { it.copy(restTimerSecondsRemaining = null) }
+            _uiState.update { it.copy(restTimerSecondsRemaining = null, restTimerForExerciseId = null) }
         }
     }
 
@@ -123,7 +159,7 @@ class ActiveWorkoutViewModel @Inject constructor(
         val exerciseLogs = _uiState.value.exerciseLogs.filter { it.sets.isNotEmpty() }
         if (exerciseLogs.isEmpty()) return
         restTimerJob?.cancel()
-        _uiState.update { it.copy(restTimerSecondsRemaining = null) }
+        _uiState.update { it.copy(restTimerSecondsRemaining = null, restTimerForExerciseId = null) }
         viewModelScope.launch {
             val session = completeSessionUseCase.execute(
                 dateMs = sessionStartMs,

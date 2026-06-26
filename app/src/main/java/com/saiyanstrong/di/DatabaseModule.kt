@@ -22,11 +22,18 @@ object DatabaseModule {
     @Singleton
     fun provideAppDatabase(@ApplicationContext context: Context): AppDatabase =
         Room.databaseBuilder(context, AppDatabase::class.java, "saiyanstrong.db")
-            .addMigrations(object : androidx.room.migration.Migration(1, 2) {
-                override fun migrate(database: androidx.sqlite.db.SupportSQLiteDatabase) {
-                    database.execSQL("ALTER TABLE sessions ADD COLUMN title TEXT NOT NULL DEFAULT ''")
+            .addMigrations(
+                object : androidx.room.migration.Migration(1, 2) {
+                    override fun migrate(database: androidx.sqlite.db.SupportSQLiteDatabase) {
+                        database.execSQL("ALTER TABLE sessions ADD COLUMN title TEXT NOT NULL DEFAULT ''")
+                    }
+                },
+                object : androidx.room.migration.Migration(2, 3) {
+                    override fun migrate(database: androidx.sqlite.db.SupportSQLiteDatabase) {
+                        database.execSQL("ALTER TABLE set_logs ADD COLUMN is_failure INTEGER NOT NULL DEFAULT 0")
+                    }
                 }
-            })
+            )
             .build()
 
     @Provides

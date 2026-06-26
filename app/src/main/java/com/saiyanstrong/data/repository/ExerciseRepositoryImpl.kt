@@ -1,6 +1,7 @@
 package com.saiyanstrong.data.repository
 
 import com.saiyanstrong.data.local.dao.ExerciseDao
+import com.saiyanstrong.data.local.dao.ExerciseLogDao
 import com.saiyanstrong.data.mapper.toDomain
 import com.saiyanstrong.domain.model.Exercise
 import com.saiyanstrong.domain.repository.ExerciseRepository
@@ -11,7 +12,8 @@ import javax.inject.Singleton
 
 @Singleton
 class ExerciseRepositoryImpl @Inject constructor(
-    private val exerciseDao: ExerciseDao
+    private val exerciseDao: ExerciseDao,
+    private val exerciseLogDao: ExerciseLogDao
 ) : ExerciseRepository {
 
     override fun getAllExercises(): Flow<List<Exercise>> =
@@ -19,4 +21,7 @@ class ExerciseRepositoryImpl @Inject constructor(
 
     override fun getExerciseById(exerciseId: Int): Flow<Exercise?> =
         exerciseDao.getById(exerciseId).map { it?.toDomain() }
+
+    override fun getExerciseUsageCounts(): Flow<Map<Int, Int>> =
+        exerciseLogDao.getUsageCounts().map { list -> list.associate { it.exerciseId to it.count } }
 }

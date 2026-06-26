@@ -10,6 +10,7 @@ import com.saiyanstrong.data.local.entity.SessionEntity
 import com.saiyanstrong.data.mapper.toDomain
 import com.saiyanstrong.data.mapper.toEntity
 import com.saiyanstrong.domain.model.ExerciseLog
+import com.saiyanstrong.domain.model.SetLog
 import com.saiyanstrong.domain.model.WorkoutSession
 import com.saiyanstrong.domain.repository.SessionRepository
 import kotlinx.coroutines.flow.Flow
@@ -54,6 +55,11 @@ class SessionRepositoryImpl @Inject constructor(
 
     override suspend fun updateTitle(sessionId: Long, title: String) =
         sessionDao.updateTitle(sessionId, title)
+
+    override suspend fun getLastSetsForExercise(exerciseId: Int): List<SetLog> {
+        val logId = exerciseLogDao.getMostRecentExerciseLogId(exerciseId) ?: return emptyList()
+        return setLogDao.getForExerciseLog(logId).first().map { it.toDomain() }
+    }
 
     private suspend fun SessionEntity.toDomainWithDetails(): WorkoutSession {
         val exerciseLogEntities = exerciseLogDao.getForSession(id).first()

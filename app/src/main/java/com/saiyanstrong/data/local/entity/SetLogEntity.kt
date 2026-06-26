@@ -25,6 +25,7 @@ data class SetLogEntity(
     @ColumnInfo(name = "weight_kg") val weightKg: Double,
     val reps: Int,
     val rpe: Float? = null,
+    @ColumnInfo(name = "is_failure") val isFailure: Boolean = false,
     @ColumnInfo(name = "volume_kg") val volumeKg: Double,
     @ColumnInfo(name = "timestamp_ms") val timestampMs: Long
 )

@@ -9,6 +9,7 @@ fun SetLogEntity.toDomain(): SetLog = SetLog(
     weightKg = weightKg,
     reps = reps,
     rpe = rpe,
+    isFailure = isFailure,
     volumeKg = volumeKg,
     timestampMs = timestampMs
 )
@@ -20,6 +21,7 @@ fun SetLog.toEntity(exerciseLogId: Long): SetLogEntity = SetLogEntity(
     weightKg = weightKg,
     reps = reps,
     rpe = rpe,
+    isFailure = isFailure,
     volumeKg = volumeKg,
     timestampMs = timestampMs
 )

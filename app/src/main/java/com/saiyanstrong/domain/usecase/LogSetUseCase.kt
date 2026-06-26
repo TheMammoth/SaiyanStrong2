@@ -4,11 +4,12 @@ import com.saiyanstrong.domain.model.SetLog
 import javax.inject.Inject
 
 class LogSetUseCase @Inject constructor() {
-    fun execute(setNumber: Int, weightKg: Double, reps: Int, rpe: Float? = null): SetLog =
+    fun execute(setNumber: Int, weightKg: Double, reps: Int, rpe: Float? = null, isFailure: Boolean = false): SetLog =
         SetLog(
             setNumber = setNumber,
             weightKg = weightKg,
             reps = reps,
-            rpe = rpe
+            rpe = rpe,
+            isFailure = isFailure
         )
 }

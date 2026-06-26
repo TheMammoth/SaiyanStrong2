@@ -1,6 +1,7 @@
 package com.saiyanstrong.presentation.screens.history
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -11,7 +12,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.Button
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -33,7 +34,11 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.saiyanstrong.domain.model.WorkoutSession
 import com.saiyanstrong.presentation.theme.DangerRed
+import com.saiyanstrong.presentation.theme.NeonGreen
+import com.saiyanstrong.presentation.theme.PowerAmber
+import com.saiyanstrong.presentation.theme.SaiyanGray
 import com.saiyanstrong.presentation.theme.SaiyanTheme
+import com.saiyanstrong.presentation.theme.TelemetryGreen
 import com.saiyanstrong.util.WeightFormatter
 import java.text.DateFormat
 import java.util.Date
@@ -45,9 +50,8 @@ fun HistoryScreen(
     viewModel: HistoryViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-
     HistoryContent(
-        sessions = uiState.sessions,
+        items = uiState.items,
         onSessionClick = onSessionClick,
         onDeleteSession = viewModel::deleteSession,
         onBack = onBack
@@ -56,7 +60,7 @@ fun HistoryScreen(
 
 @Composable
 internal fun HistoryContent(
-    sessions: List<WorkoutSession>,
+    items: List<HistoryItem>,
     onSessionClick: (Long) -> Unit,
     onDeleteSession: (Long) -> Unit,
     onBack: () -> Unit
@@ -70,26 +74,73 @@ internal fun HistoryContent(
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("History", style = MaterialTheme.typography.headlineSmall)
-                Button(onClick = onBack) { Text("Back") }
+                Text(
+                    "HISTORY",
+                    style = MaterialTheme.typography.headlineSmall,
+                    color = PowerAmber,
+                    fontWeight = FontWeight.Black
+                )
+                Text(
+                    "< BACK",
+                    color = NeonGreen,
+                    style = MaterialTheme.typography.labelLarge,
+                    modifier = Modifier.clickable(onClick = onBack).padding(8.dp)
+                )
             }
 
-            if (sessions.isEmpty()) {
-                Text("No sessions logged yet.", modifier = Modifier.padding(top = 16.dp))
+            if (items.isEmpty()) {
+                Text("NO SESSIONS LOGGED YET.", color = TelemetryGreen, modifier = Modifier.padding(top = 16.dp))
             }
 
-            LazyColumn(modifier = Modifier.fillMaxWidth()) {
-                items(sessions, key = { it.id }) { session ->
-                    SwipeableSessionRow(
-                        session = session,
-                        onClick = { onSessionClick(session.id) },
-                        onDelete = { onDeleteSession(session.id) }
-                    )
+            LazyColumn(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                items(items, key = { item ->
+                    when (item) {
+                        is HistoryItem.MonthHeader -> "header_${item.label}"
+                        is HistoryItem.SessionCard -> "session_${item.session.id}"
+                    }
+                }) { item ->
+                    when (item) {
+                        is HistoryItem.MonthHeader -> MonthHeaderRow(item)
+                        is HistoryItem.SessionCard -> SwipeableSessionRow(
+                            session = item.session,
+                            prCount = item.prCount,
+                            onClick = { onSessionClick(item.session.id) },
+                            onDelete = { onDeleteSession(item.session.id) }
+                        )
+                    }
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun MonthHeaderRow(header: HistoryItem.MonthHeader) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 12.dp, bottom = 4.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            header.label.uppercase(),
+            color = TelemetryGreen,
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = 2.sp
+        )
+        Text(
+            "${header.count} SESSION${if (header.count != 1) "S" else ""}",
+            color = TelemetryGreen.copy(alpha = 0.6f),
+            style = MaterialTheme.typography.labelSmall
+        )
     }
 }
 
@@ -97,6 +148,7 @@ internal fun HistoryContent(
 @Composable
 internal fun SwipeableSessionRow(
     session: WorkoutSession,
+    prCount: Int = 0,
     onClick: () -> Unit,
     onDelete: () -> Unit
 ) {
@@ -121,24 +173,68 @@ internal fun SwipeableSessionRow(
         },
         enableDismissFromStartToEnd = false
     ) {
-        SessionRow(session = session, onClick = onClick)
+        SessionCard(session = session, prCount = prCount, onClick = onClick)
     }
 }
 
 @Composable
-internal fun SessionRow(session: WorkoutSession, onClick: () -> Unit) {
+internal fun SessionCard(session: WorkoutSession, prCount: Int = 0, onClick: () -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.background)
+            .background(SaiyanGray, RoundedCornerShape(4.dp))
+            .border(1.dp, NeonGreen.copy(alpha = 0.2f), RoundedCornerShape(4.dp))
             .clickable(onClick = onClick)
-            .padding(vertical = 12.dp)
+            .padding(12.dp)
     ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                session.title.ifBlank { DateFormat.getDateInstance().format(Date(session.dateMs)) },
+                style = MaterialTheme.typography.titleSmall,
+                color = Color.White,
+                fontWeight = FontWeight.Bold
+            )
+            if (prCount > 0) {
+                Box(
+                    modifier = Modifier
+                        .background(PowerAmber.copy(alpha = 0.15f), RoundedCornerShape(4.dp))
+                        .border(1.dp, PowerAmber, RoundedCornerShape(4.dp))
+                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                ) {
+                    Text("$prCount PR${if (prCount > 1) "s" else ""}", color = PowerAmber, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+
         Text(
-            session.title.ifBlank { DateFormat.getDateInstance().format(Date(session.dateMs)) },
-            style = MaterialTheme.typography.titleMedium
+            "${WeightFormatter.formatVolume(session.totalVolumeKg)}  ·  +${session.powerEarned} power",
+            color = TelemetryGreen,
+            style = MaterialTheme.typography.bodySmall
         )
-        Text("${WeightFormatter.formatVolume(session.totalVolumeKg)} · +${session.powerEarned} power")
+
+        session.exerciseLogs.take(3).forEach { log ->
+            val bestSet = log.sets.maxByOrNull { s ->
+                if (s.reps == 1) s.weightKg else s.weightKg * (1.0 + s.reps / 30.0)
+            }
+            if (bestSet != null) {
+                Text(
+                    "  ${log.exercise.name} — ${WeightFormatter.format(bestSet.weightKg)} × ${bestSet.reps}",
+                    color = Color.White.copy(alpha = 0.5f),
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+        }
+        if (session.exerciseLogs.size > 3) {
+            Text(
+                "  +${session.exerciseLogs.size - 3} more",
+                color = Color.White.copy(alpha = 0.3f),
+                style = MaterialTheme.typography.bodySmall
+            )
+        }
     }
 }
 
@@ -148,14 +244,11 @@ internal fun SessionRow(session: WorkoutSession, onClick: () -> Unit) {
 internal fun HistoryContentPreview() {
     SaiyanTheme {
         HistoryContent(
-            sessions = listOf(
-                WorkoutSession(
-                    id = 1,
-                    dateMs = System.currentTimeMillis(),
-                    durationMs = 3_600_000,
-                    exerciseLogs = emptyList(),
-                    totalVolumeKg = 4250.0,
-                    powerEarned = 612
+            items = listOf(
+                HistoryItem.MonthHeader("June 2026", 3),
+                HistoryItem.SessionCard(
+                    WorkoutSession(1, System.currentTimeMillis(), 3_600_000, emptyList(), 4250.0, 612),
+                    prCount = 2
                 )
             ),
             onSessionClick = {},

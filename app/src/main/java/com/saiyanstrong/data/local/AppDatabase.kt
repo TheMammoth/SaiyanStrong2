@@ -18,7 +18,7 @@ import com.saiyanstrong.data.local.entity.SetLogEntity
         ExerciseLogEntity::class,
         SetLogEntity::class
     ],
-    version = 2,
+    version = 3,
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
