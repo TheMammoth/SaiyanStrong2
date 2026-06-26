@@ -101,17 +101,25 @@ class HomeViewModel @Inject constructor(
         viewModelScope.launch {
             _updateStatus.value = "checking…"
             val retryDelaysMs = listOf(0L, 5_000L, 15_000L)
+            var lastError: String? = null
             for ((attempt, delayMs) in retryDelaysMs.withIndex()) {
                 if (delayMs > 0L) delay(delayMs)
                 _updateStatus.value = "try ${attempt + 1}/3…"
-                val result = checkForUpdateUseCase.execute(BuildConfig.VERSION_NAME)
-                if (result != null) {
-                    _updateAvailable.value = result
-                    _updateStatus.value = "update ready: ${result.tagName}"
+                try {
+                    val result = checkForUpdateUseCase.execute(BuildConfig.VERSION_NAME)
+                    if (result != null) {
+                        _updateAvailable.value = result
+                        _updateStatus.value = "update ready: ${result.tagName}"
+                        return@launch
+                    }
+                    // null = genuinely up to date, no need to retry
+                    _updateStatus.value = "up to date (v${BuildConfig.VERSION_NAME})"
                     return@launch
+                } catch (e: Exception) {
+                    lastError = e.message
                 }
             }
-            _updateStatus.value = "up to date (v${BuildConfig.VERSION_NAME})"
+            _updateStatus.value = "check failed: $lastError"
         }
     }
 
