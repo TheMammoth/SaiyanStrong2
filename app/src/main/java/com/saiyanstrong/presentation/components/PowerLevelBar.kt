@@ -69,16 +69,21 @@ fun PowerLevelBar(powerLevel: PowerLevel, modifier: Modifier = Modifier) {
 }
 
 @Composable
-fun SegmentedBar(progress: Float, modifier: Modifier = Modifier) {
+fun SegmentedBar(
+    progress: Float,
+    modifier: Modifier = Modifier,
+    flameSize: androidx.compose.ui.unit.Dp = 100.dp,
+    barWidth: androidx.compose.ui.unit.Dp = CANVAS_WIDTH_DP,
+    barHeight: androidx.compose.ui.unit.Dp = CANVAS_HEIGHT_DP
+) {
     val density = LocalDensity.current
 
-    // Hoist brush — stable for the lifetime of this composition
-    val canvasHeightPx = remember(density) { with(density) { CANVAS_HEIGHT_DP.toPx() } }
-    val activeBrush: Brush = remember(density) {
+    val canvasHeightPx = remember(density, barHeight) { with(density) { barHeight.toPx() } }
+    val activeBrush: Brush = remember(density, barHeight) {
         Brush.verticalGradient(
             colors = listOf(
-                Color(0xFFFF3B3B), // DangerRed — top
-                Color(0xFFF5A623)  // PowerAmber — bottom
+                Color(0xFFFF3B3B),
+                Color(0xFFF5A623)
             ),
             startY = 0f,
             endY = canvasHeightPx
@@ -94,8 +99,7 @@ fun SegmentedBar(progress: Float, modifier: Modifier = Modifier) {
         modifier = modifier,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // TODO: Insert Lottie Flame Animation here.
-        Box(modifier = Modifier.size(100.dp), contentAlignment = Alignment.Center) {
+        Box(modifier = Modifier.size(flameSize), contentAlignment = Alignment.Center) {
             val infiniteTransition = rememberInfiniteTransition(label = "flame_pulse")
             val flameAlpha by infiniteTransition.animateFloat(
                 initialValue = 0.5f,
@@ -116,8 +120,8 @@ fun SegmentedBar(progress: Float, modifier: Modifier = Modifier) {
 
         Canvas(
             modifier = Modifier
-                .width(CANVAS_WIDTH_DP)
-                .height(CANVAS_HEIGHT_DP)
+                .width(barWidth)
+                .height(barHeight)
         ) {
             val gapPx = GAP_DP.toPx()
             val totalGapPx = (SEGMENT_COUNT - 1) * gapPx
