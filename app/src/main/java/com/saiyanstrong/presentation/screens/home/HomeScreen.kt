@@ -55,6 +55,7 @@ import com.saiyanstrong.presentation.theme.SaiyanGray
 import com.saiyanstrong.presentation.theme.SaiyanTheme
 import com.saiyanstrong.presentation.theme.TelemetryGreen
 import com.saiyanstrong.util.WeightFormatter
+import com.saiyanstrong.BuildConfig
 
 @Composable
 fun HomeScreen(
@@ -219,7 +220,7 @@ internal fun HomeContent(
             }
 
             Text(
-                "// POWER LEVEL: ${powerLevel?.current ?: "---"} //",
+                "// POWER LEVEL: ${powerLevel?.current ?: "---"}  |  v${BuildConfig.VERSION_NAME} //",
                 color = TelemetryGreen,
                 style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier

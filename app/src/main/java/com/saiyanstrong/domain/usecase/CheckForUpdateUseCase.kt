@@ -18,6 +18,7 @@ class CheckForUpdateUseCase @Inject constructor() {
             val conn = (url.openConnection() as HttpURLConnection).apply {
                 requestMethod = "GET"
                 setRequestProperty("Accept", "application/vnd.github+json")
+                setRequestProperty("User-Agent", "SaiyanStrong-Android")
                 connectTimeout = 8_000
                 readTimeout = 8_000
             }
