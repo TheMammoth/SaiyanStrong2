@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Dragon Ball palette: Super Saiyan gold → Goku gi orange -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android">
+    <gradient
+        android:startColor="#FFD600"
+        android:centerColor="#FF8F00"
+        android:endColor="#E64A19"
+        android:type="linear"
+        android:angle="135" />
+</shape>
