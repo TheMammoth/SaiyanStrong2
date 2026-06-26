@@ -2,13 +2,15 @@ package com.saiyanstrong.presentation.screens.workout
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -27,11 +29,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
-import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -41,7 +44,6 @@ import com.saiyanstrong.domain.model.ExerciseCategory
 import com.saiyanstrong.domain.model.ExerciseLog
 import com.saiyanstrong.domain.model.MuscleGroup
 import com.saiyanstrong.domain.model.SetLog
-import com.saiyanstrong.presentation.components.SaiyanButton
 import com.saiyanstrong.presentation.components.scanlineTexture
 import com.saiyanstrong.presentation.theme.DangerRed
 import com.saiyanstrong.presentation.theme.NeonGreen
@@ -51,6 +53,11 @@ import com.saiyanstrong.presentation.theme.SaiyanTheme
 import com.saiyanstrong.presentation.theme.TelemetryGreen
 import com.saiyanstrong.util.WeightFormatter
 
+private val CompletedSetBg = Color(0xFF0D2B14)   // dark green tint
+private val CompletedCheckBg = Color(0xFF2E7D32)  // filled green for ✓
+private val PendingSetBg = Color(0xFF111111)
+private val RestLabelColor = Color(0xFF4CAF50)    // teal-green
+
 @Composable
 fun ActiveWorkoutScreen(
     onWorkoutFinished: (Long) -> Unit,
@@ -58,6 +65,7 @@ fun ActiveWorkoutScreen(
     workoutViewModel: ActiveWorkoutViewModel = hiltViewModel()
 ) {
     val uiState by workoutViewModel.uiState.collectAsStateWithLifecycle()
+    val elapsedSeconds by workoutViewModel.elapsedSeconds.collectAsStateWithLifecycle()
 
     LaunchedEffect(uiState.completedSessionId) {
         uiState.completedSessionId?.let(onWorkoutFinished)
@@ -65,6 +73,8 @@ fun ActiveWorkoutScreen(
 
     ActiveWorkoutContent(
         uiState = uiState,
+        elapsedSeconds = elapsedSeconds,
+        restDurationSeconds = workoutViewModel.restDurationSeconds,
         onViewHistory = onViewHistory,
         onAddExerciseClicked = workoutViewModel::onAddExerciseClicked,
         onExerciseSelected = workoutViewModel::onExerciseSelected,
@@ -81,6 +91,8 @@ fun ActiveWorkoutScreen(
 @Composable
 internal fun ActiveWorkoutContent(
     uiState: ActiveWorkoutUiState,
+    elapsedSeconds: Int = 0,
+    restDurationSeconds: Int = 90,
     onViewHistory: () -> Unit,
     onAddExerciseClicked: () -> Unit,
     onExerciseSelected: (Exercise) -> Unit,
@@ -94,12 +106,8 @@ internal fun ActiveWorkoutContent(
 ) {
     val totalSets = uiState.exerciseLogs.sumOf { it.sets.size }
     val totalVolumeKg = uiState.exerciseLogs.sumOf { log -> log.sets.sumOf { it.volumeKg } }
-    val expandedLog = uiState.exerciseLogs.find { it.exercise.id == uiState.expandedExerciseId }
-    val headerSubtitle = when {
-        expandedLog != null -> "${expandedLog.exercise.name} — SET ${expandedLog.sets.size + 1}"
-        uiState.exerciseLogs.isNotEmpty() -> "${uiState.exerciseLogs.size} EXERCISE${if (uiState.exerciseLogs.size != 1) "S" else ""} LOADED"
-        else -> "SELECT AN EXERCISE TO BEGIN"
-    }
+    val elapsedFormatted = formatElapsed(elapsedSeconds)
+    val restLabel = formatRestLabel(restDurationSeconds)
 
     Scaffold { padding ->
         Column(
@@ -108,26 +116,48 @@ internal fun ActiveWorkoutContent(
                 .scanlineTexture()
                 .padding(padding)
         ) {
+            // ── Top bar ─────────────────────────────────────────
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(SaiyanGray)
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("←", color = Color.White, fontSize = 20.sp,
+                    modifier = Modifier.clickable { onViewHistory() }.padding(4.dp))
+                Spacer(Modifier.weight(1f))
+                Text(elapsedFormatted, color = Color.White, fontSize = 15.sp,
+                    fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.weight(1f))
+                TextButton(onClick = onFinishWorkout, contentPadding = PaddingValues(horizontal = 8.dp)) {
+                    Text("FINISH", color = NeonGreen, fontWeight = FontWeight.Black,
+                        fontSize = 15.sp, letterSpacing = 1.sp)
+                }
+            }
+
+            // ── Workout title ───────────────────────────────────
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .background(SaiyanGray)
-                    .padding(horizontal = 16.dp, vertical = 12.dp)
+                    .padding(horizontal = 16.dp, vertical = 10.dp)
             ) {
                 Text(
-                    "SAIYAN STRONG",
-                    color = PowerAmber,
+                    "TRAINING SESSION",
+                    color = Color.White,
                     style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Black,
-                    letterSpacing = 3.sp
+                    fontWeight = FontWeight.Black
                 )
-                Text(headerSubtitle, color = Color.White, style = MaterialTheme.typography.titleMedium)
+                Text(elapsedFormatted, color = Color.White.copy(alpha = 0.55f),
+                    fontSize = 13.sp, fontFamily = FontFamily.Monospace)
             }
 
+            // ── Exercise cards ──────────────────────────────────
             LazyColumn(
                 modifier = Modifier.fillMaxWidth().weight(1f),
-                contentPadding = PaddingValues(16.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                contentPadding = PaddingValues(12.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 items(uiState.exerciseLogs, key = { it.exercise.id }) { exerciseLog ->
                     ExerciseLogCard(
@@ -136,6 +166,7 @@ internal fun ActiveWorkoutContent(
                         isSetInputExpanded = exerciseLog.exercise.id == uiState.expandedExerciseId,
                         restTimerSecondsRemaining = if (exerciseLog.exercise.id == uiState.restTimerForExerciseId)
                             uiState.restTimerSecondsRemaining else null,
+                        restLabel = restLabel,
                         onAddSetClicked = { onAddSetClicked(exerciseLog.exercise.id) },
                         onLogSet = { weightKg, reps, rpe, isFailure ->
                             onLogSet(exerciseLog.exercise.id, weightKg, reps, rpe, isFailure)
@@ -145,23 +176,23 @@ internal fun ActiveWorkoutContent(
                         onAdjustRest = onAdjustRest
                     )
                 }
+
+                item {
+                    Column(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        TextButton(onClick = onAddExerciseClicked) {
+                            Text("ADD EXERCISE", color = NeonGreen, fontWeight = FontWeight.Bold,
+                                fontSize = 15.sp, letterSpacing = 1.sp)
+                        }
+                    }
+                }
             }
 
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                SaiyanButton(onClick = onAddExerciseClicked, modifier = Modifier.weight(1f)) {
-                    Text("+ EXERCISE", fontWeight = FontWeight.Bold)
-                }
-                SaiyanButton(onClick = onViewHistory) { Text("LOG") }
-                SaiyanButton(onClick = onFinishWorkout, modifier = Modifier.weight(1f)) {
-                    Text("FINISH", fontWeight = FontWeight.Bold)
-                }
-            }
-
+            // ── Telemetry bar ───────────────────────────────────
             Text(
-                text = "// SETS: $totalSets  |  VOL: ${WeightFormatter.formatVolume(totalVolumeKg)} //",
+                "// SETS: $totalSets  |  VOL: ${WeightFormatter.formatVolume(totalVolumeKg)} //",
                 color = TelemetryGreen,
                 style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier
@@ -182,12 +213,15 @@ internal fun ActiveWorkoutContent(
     }
 }
 
+// ── Exercise card ────────────────────────────────────────────────────────────
+
 @Composable
 internal fun ExerciseLogCard(
     exerciseLog: ExerciseLog,
     previousSets: List<SetLog> = emptyList(),
     isSetInputExpanded: Boolean = false,
     restTimerSecondsRemaining: Int? = null,
+    restLabel: String = "1:30",
     onAddSetClicked: () -> Unit = {},
     onLogSet: (Double, Int, Float?, Boolean) -> Unit = { _, _, _, _ -> },
     onDeleteSet: (Int) -> Unit = {},
@@ -204,218 +238,284 @@ internal fun ExerciseLogCard(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(SaiyanGray, RoundedCornerShape(4.dp))
-            .border(
-                1.dp,
-                NeonGreen.copy(alpha = if (isSetInputExpanded) 0.6f else 0.2f),
-                RoundedCornerShape(4.dp)
-            )
-            .padding(12.dp)
+            .background(SaiyanGray, RoundedCornerShape(6.dp))
+            .border(1.dp, NeonGreen.copy(alpha = if (isSetInputExpanded) 0.6f else 0.22f), RoundedCornerShape(6.dp))
     ) {
-        Text(
-            exerciseLog.exercise.name.uppercase(),
-            color = if (isSetInputExpanded) NeonGreen else Color.White,
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold
-        )
-
-        if (exerciseLog.sets.isEmpty() && !isSetInputExpanded) {
+        // ── Exercise header ─────────────────────────────────
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
             Text(
-                "NO SETS LOGGED",
-                color = Color.White.copy(alpha = 0.35f),
-                style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.padding(top = 4.dp, bottom = 4.dp)
+                exerciseLog.exercise.name,
+                color = NeonGreen,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.weight(1f)
             )
         }
 
-        if (exerciseLog.sets.isNotEmpty()) {
+        // ── Column headers ──────────────────────────────────
+        if (exerciseLog.sets.isNotEmpty() || isSetInputExpanded) {
             Row(
-                modifier = Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 2.dp),
+                modifier = Modifier.fillMaxWidth()
+                    .padding(horizontal = 14.dp)
+                    .padding(bottom = 4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("SET", color = TelemetryGreen, style = MaterialTheme.typography.labelSmall, modifier = Modifier.width(28.dp))
-                Text("PREV", color = TelemetryGreen, style = MaterialTheme.typography.labelSmall, modifier = Modifier.weight(1.2f))
-                Text("KG", color = TelemetryGreen, style = MaterialTheme.typography.labelSmall, modifier = Modifier.weight(0.8f), textAlign = TextAlign.Center)
-                Text("REPS", color = TelemetryGreen, style = MaterialTheme.typography.labelSmall, modifier = Modifier.weight(0.7f), textAlign = TextAlign.Center)
-                Text("×", color = TelemetryGreen, style = MaterialTheme.typography.labelSmall, modifier = Modifier.width(28.dp), textAlign = TextAlign.Center)
-            }
-            exerciseLog.sets.forEachIndexed { index, set ->
-                SetTableRow(set = set, previousSet = previousSets.getOrNull(index), onDelete = { onDeleteSet(index) })
+                Text("SET", color = TelemetryGreen, fontSize = 10.sp, modifier = Modifier.width(32.dp))
+                Text("PREVIOUS", color = TelemetryGreen, fontSize = 10.sp, modifier = Modifier.weight(1.2f))
+                Text("KG", color = TelemetryGreen, fontSize = 10.sp, modifier = Modifier.weight(1f), textAlign = TextAlign.Center)
+                Text("REPS", color = TelemetryGreen, fontSize = 10.sp, modifier = Modifier.weight(0.8f), textAlign = TextAlign.Center)
+                Text("✓", color = TelemetryGreen, fontSize = 10.sp, modifier = Modifier.width(40.dp), textAlign = TextAlign.Center)
             }
         }
 
+        // ── Completed sets ──────────────────────────────────
+        exerciseLog.sets.forEachIndexed { index, set ->
+            CompletedSetRow(
+                set = set,
+                previousSet = previousSets.getOrNull(index),
+                onDelete = { onDeleteSet(index)},
+                modifier = Modifier.padding(horizontal = 10.dp, vertical = 2.dp)
+            )
+            val showRestLabel = index < exerciseLog.sets.size - 1 || restTimerSecondsRemaining != null || isSetInputExpanded
+            if (showRestLabel) {
+                Text(
+                    restLabel,
+                    color = RestLabelColor,
+                    fontSize = 11.sp,
+                    fontFamily = FontFamily.Monospace,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
+                )
+            }
+        }
+
+        // ── Active rest timer bar ───────────────────────────
         if (restTimerSecondsRemaining != null) {
-            InlineRestTimer(
+            RestTimerBar(
                 secondsRemaining = restTimerSecondsRemaining,
                 onSkip = onSkipRest,
                 onAdjust = onAdjustRest,
-                modifier = Modifier.padding(top = 8.dp)
+                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
             )
         }
 
+        // ── Pending set row ─────────────────────────────────
         if (isSetInputExpanded) {
-            InlineSetInput(
+            PendingSetRow(
+                setNumber = exerciseLog.sets.size + 1,
+                previousSet = previousSets.getOrNull(exerciseLog.sets.size),
                 initialWeightKg = lastWeight,
-                weightStepKg = stepKg,
                 initialReps = lastReps,
+                weightStepKg = stepKg,
                 onLogSet = onLogSet,
-                modifier = Modifier.padding(top = 8.dp)
+                modifier = Modifier.padding(horizontal = 10.dp, vertical = 2.dp)
             )
-        } else {
-            SaiyanButton(
-                onClick = onAddSetClicked,
-                modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+        }
+
+        // ── ADD SET ─────────────────────────────────────────
+        if (restTimerSecondsRemaining == null) {
+            Column(
+                modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Text("+ ADD SET  >>>", fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                TextButton(onClick = onAddSetClicked) {
+                    Text("ADD SET ($restLabel)", color = NeonGreen,
+                        fontWeight = FontWeight.Bold, fontSize = 13.sp, letterSpacing = 0.5.sp)
+                }
             }
         }
     }
 }
 
-@Composable
-private fun SetTableRow(set: SetLog, previousSet: SetLog?, onDelete: () -> Unit) {
-    val prevText = previousSet?.let {
-        "${WeightFormatter.format(it.weightKg)} × ${it.reps}${if (it.isFailure) "[F]" else ""}"
-    } ?: "—"
+// ── Completed set row ────────────────────────────────────────────────────────
 
+@Composable
+private fun CompletedSetRow(set: SetLog, previousSet: SetLog?, onDelete: () -> Unit, modifier: Modifier = Modifier) {
+    val prevText = previousSet?.let {
+        "${WeightFormatter.format(it.weightKg)} × ${it.reps}${if (it.isFailure) " [F]" else ""}"
+    } ?: "—"
     Row(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
-            .background(NeonGreen.copy(alpha = 0.07f), RoundedCornerShape(2.dp))
-            .padding(vertical = 4.dp, horizontal = 2.dp),
+            .background(CompletedSetBg, RoundedCornerShape(4.dp))
+            .padding(vertical = 6.dp, horizontal = 4.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
-            text = if (set.isFailure) "F" else "${set.setNumber}",
-            color = if (set.isFailure) DangerRed else NeonGreen,
-            style = MaterialTheme.typography.bodySmall,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.width(28.dp)
+            if (set.isFailure) "F" else "${set.setNumber}",
+            color = if (set.isFailure) DangerRed else Color.White,
+            fontSize = 13.sp, fontWeight = FontWeight.Bold,
+            modifier = Modifier.width(32.dp)
         )
-        Text(prevText, color = Color.White.copy(alpha = 0.45f), style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1.2f))
-        Text(WeightFormatter.format(set.weightKg), color = Color.White, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold, modifier = Modifier.weight(0.8f), textAlign = TextAlign.Center)
-        Text("${set.reps}", color = Color.White, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold, modifier = Modifier.weight(0.7f), textAlign = TextAlign.Center)
-        TextButton(
-            onClick = onDelete,
-            modifier = Modifier.width(28.dp),
-            contentPadding = PaddingValues(0.dp)
+        Text(prevText, color = Color.White.copy(alpha = 0.5f), fontSize = 12.sp, modifier = Modifier.weight(1.2f))
+        Text(
+            WeightFormatter.format(set.weightKg).replace(" kg", ""),
+            color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold,
+            modifier = Modifier.weight(1f), textAlign = TextAlign.Center
+        )
+        Text(
+            "${set.reps}",
+            color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold,
+            modifier = Modifier.weight(0.8f), textAlign = TextAlign.Center
+        )
+        Column(
+            modifier = Modifier
+                .width(36.dp)
+                .height(32.dp)
+                .clip(RoundedCornerShape(4.dp))
+                .background(CompletedCheckBg)
+                .clickable { onDelete() },
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
         ) {
-            Text("×", color = DangerRed.copy(alpha = 0.7f), style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
+            Text("✓", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Black)
         }
     }
 }
 
+// ── Pending set row ──────────────────────────────────────────────────────────
+
 @Composable
-private fun InlineSetInput(
+private fun PendingSetRow(
+    setNumber: Int,
+    previousSet: SetLog?,
     initialWeightKg: Double,
-    weightStepKg: Double = 5.0,
-    initialReps: Int = 5,
+    initialReps: Int,
+    weightStepKg: Double,
     onLogSet: (Double, Int, Float?, Boolean) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var weightKg by remember { mutableStateOf(initialWeightKg) }
     var reps by remember { mutableIntStateOf(initialReps) }
     var isFailure by remember { mutableStateOf(false) }
+    val prevText = previousSet?.let { "${WeightFormatter.format(it.weightKg)} × ${it.reps}" } ?: "—"
 
-    Column(
+    Row(
         modifier = modifier
             .fillMaxWidth()
-            .background(NeonGreen.copy(alpha = 0.05f), RoundedCornerShape(4.dp))
-            .border(1.dp, NeonGreen.copy(alpha = 0.3f), RoundedCornerShape(4.dp))
-            .padding(10.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
+            .background(PendingSetBg, RoundedCornerShape(4.dp))
+            .border(1.dp, NeonGreen.copy(alpha = 0.35f), RoundedCornerShape(4.dp))
+            .padding(vertical = 4.dp, horizontal = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            TextButton(onClick = { weightKg = (weightKg - weightStepKg).coerceAtLeast(0.0) }) {
-                Text("-${weightStepKg.toInt()}", color = NeonGreen, fontWeight = FontWeight.Bold)
-            }
-            Text(
-                WeightFormatter.format(weightKg),
-                color = Color.White,
-                style = MaterialTheme.typography.bodyLarge,
-                fontWeight = FontWeight.Bold,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.weight(1f)
-            )
-            TextButton(onClick = { weightKg += weightStepKg }) {
-                Text("+${weightStepKg.toInt()}", color = NeonGreen, fontWeight = FontWeight.Bold)
-            }
+        Text(
+            if (isFailure) "F" else "$setNumber",
+            color = if (isFailure) DangerRed else Color.White.copy(alpha = 0.6f),
+            fontSize = 13.sp, fontWeight = FontWeight.Bold,
+            modifier = Modifier.width(32.dp)
+        )
+        Text(prevText, color = Color.White.copy(alpha = 0.4f), fontSize = 11.sp, modifier = Modifier.weight(1.2f))
 
-            Box(
-                modifier = Modifier
-                    .width(1.dp)
-                    .padding(vertical = 8.dp)
-                    .background(TelemetryGreen.copy(alpha = 0.3f))
-            )
-
-            TextButton(onClick = { if (reps > 1) reps-- }) {
-                Text("−", color = NeonGreen, fontSize = 20.sp, fontWeight = FontWeight.Black)
-            }
+        // KG stepper
+        Row(modifier = Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
+            Text("−", color = NeonGreen, fontSize = 16.sp, fontWeight = FontWeight.Black,
+                modifier = Modifier.clickable { weightKg = (weightKg - weightStepKg).coerceAtLeast(0.0) }.padding(horizontal = 4.dp))
             Text(
-                "$reps",
-                color = Color.White,
-                style = MaterialTheme.typography.bodyLarge,
-                fontWeight = FontWeight.Bold,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.width(32.dp)
+                weightKg.let { if (it == it.toLong().toDouble()) "${it.toLong()}" else "%.1f".format(it) },
+                color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center, modifier = Modifier.width(36.dp)
             )
-            TextButton(onClick = { reps++ }) {
-                Text("+", color = NeonGreen, fontSize = 20.sp, fontWeight = FontWeight.Black)
-            }
+            Text("+", color = NeonGreen, fontSize = 16.sp, fontWeight = FontWeight.Black,
+                modifier = Modifier.clickable { weightKg += weightStepKg }.padding(horizontal = 4.dp))
         }
 
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            SaiyanButton(onClick = { isFailure = !isFailure }, modifier = Modifier.weight(1f)) {
-                Text("[F]", color = if (isFailure) DangerRed else Color.White.copy(alpha = 0.4f), fontWeight = FontWeight.Bold)
-            }
-            SaiyanButton(
-                onClick = { onLogSet(weightKg, reps, null, isFailure) },
-                modifier = Modifier.weight(2.5f)
-            ) {
-                Text("LOG SET  >>>", fontWeight = FontWeight.Black, fontSize = 15.sp, letterSpacing = 1.sp)
-            }
+        // REPS stepper
+        Row(modifier = Modifier.weight(0.8f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
+            Text("−", color = NeonGreen, fontSize = 16.sp, fontWeight = FontWeight.Black,
+                modifier = Modifier.clickable { if (reps > 1) reps-- }.padding(horizontal = 3.dp))
+            Text("$reps", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center, modifier = Modifier.width(24.dp))
+            Text("+", color = NeonGreen, fontSize = 16.sp, fontWeight = FontWeight.Black,
+                modifier = Modifier.clickable { reps++ }.padding(horizontal = 3.dp))
         }
+
+        // LOG ✓ button
+        Column(
+            modifier = Modifier
+                .width(40.dp)
+                .height(36.dp)
+                .clip(RoundedCornerShape(4.dp))
+                .background(NeonGreen.copy(alpha = 0.25f))
+                .border(1.dp, NeonGreen.copy(alpha = 0.6f), RoundedCornerShape(4.dp))
+                .clickable { onLogSet(weightKg, reps, null, isFailure) },
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Text("✓", color = NeonGreen, fontSize = 16.sp, fontWeight = FontWeight.Black)
+        }
+    }
+
+    // Failure toggle below
+    TextButton(onClick = { isFailure = !isFailure }, modifier = Modifier.fillMaxWidth()) {
+        Text("[F] FAILURE SET", color = if (isFailure) DangerRed else Color.White.copy(alpha = 0.3f),
+            fontSize = 10.sp, fontWeight = FontWeight.Bold)
     }
 }
 
+// ── Rest timer bar ───────────────────────────────────────────────────────────
+
 @Composable
-private fun InlineRestTimer(
+private fun RestTimerBar(
     secondsRemaining: Int,
     onSkip: () -> Unit,
     onAdjust: (Int) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    Row(
+    Column(
         modifier = modifier
             .fillMaxWidth()
-            .background(PowerAmber.copy(alpha = 0.15f), RoundedCornerShape(4.dp))
-            .border(1.dp, PowerAmber.copy(alpha = 0.5f), RoundedCornerShape(4.dp))
-            .padding(horizontal = 8.dp, vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween
+            .clip(RoundedCornerShape(6.dp))
+            .background(PowerAmber)
     ) {
-        Text("⏱ ${secondsRemaining}s", color = PowerAmber, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
-        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            SaiyanButton(onClick = { onAdjust(-30) }) { Text("-30s", fontSize = 10.sp) }
-            SaiyanButton(onClick = { onAdjust(30) }) { Text("+30s", fontSize = 10.sp) }
-            SaiyanButton(onClick = onSkip) { Text("SKIP", fontSize = 10.sp) }
+        Text(
+            formatElapsed(secondsRemaining),
+            color = Color.Black,
+            fontSize = 26.sp,
+            fontWeight = FontWeight.Black,
+            fontFamily = FontFamily.Monospace,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            TextButton(onClick = { onAdjust(-30) }) { Text("-30s", color = Color.Black, fontWeight = FontWeight.Bold) }
+            TextButton(onClick = { onAdjust(30) }) { Text("+30s", color = Color.Black, fontWeight = FontWeight.Bold) }
+            TextButton(onClick = onSkip) { Text("SKIP", color = Color.Black, fontWeight = FontWeight.Black, fontSize = 13.sp) }
         }
     }
 }
 
-@Preview(showBackground = true)
-@PreviewLightDark
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+private fun formatElapsed(totalSeconds: Int): String {
+    val h = totalSeconds / 3600
+    val m = (totalSeconds % 3600) / 60
+    val s = totalSeconds % 60
+    return if (h > 0) "%d:%02d:%02d".format(h, m, s)
+    else "%d:%02d".format(m, s)
+}
+
+private fun formatRestLabel(seconds: Int): String {
+    val m = seconds / 60
+    val s = seconds % 60
+    return if (s == 0) "$m:00" else "%d:%02d".format(m, s)
+}
+
+// ── Previews ─────────────────────────────────────────────────────────────────
+
+@Preview(showBackground = true, backgroundColor = 0xFF0D0D0D)
 @Composable
 internal fun ActiveWorkoutEmptyPreview() {
     SaiyanTheme {
         ActiveWorkoutContent(
             uiState = ActiveWorkoutUiState(),
+            elapsedSeconds = 10,
             onViewHistory = {}, onAddExerciseClicked = {}, onExerciseSelected = {},
             onExercisePickerDismissed = {}, onAddSetClicked = {},
             onLogSet = { _, _, _, _, _ -> }, onDeleteSet = { _, _ -> },
@@ -424,28 +524,34 @@ internal fun ActiveWorkoutEmptyPreview() {
     }
 }
 
-@Preview(showBackground = true)
-@PreviewLightDark
+@Preview(showBackground = true, backgroundColor = 0xFF0D0D0D)
 @Composable
 internal fun ActiveWorkoutWithSetsPreview() {
     val mockExercise = Exercise(
-        1, "Barbell Squat", ExerciseCategory.SQUAT,
+        1, "Deadlift (Barbell)", ExerciseCategory.SQUAT,
         listOf(MuscleGroup.QUADRICEPS), emptyList(), "", "muscle_squat"
     )
     val mockLog = ExerciseLog(
         1, mockExercise,
-        listOf(SetLog(1, 1, 100.0, 5), SetLog(2, 2, 105.0, 5, isFailure = true)),
+        listOf(
+            SetLog(1, 1, 150.0, 2),
+            SetLog(2, 2, 160.0, 2),
+            SetLog(3, 3, 180.0, 5)
+        ),
         0
     )
     SaiyanTheme {
         ActiveWorkoutContent(
             uiState = ActiveWorkoutUiState(
                 exerciseLogs = listOf(mockLog),
-                previousPerformance = mapOf(1 to listOf(SetLog(0, 1, 95.0, 5), SetLog(0, 2, 100.0, 5))),
+                previousPerformance = mapOf(1 to listOf(
+                    SetLog(0, 1, 150.0, 2), SetLog(0, 2, 160.0, 2), SetLog(0, 3, 180.0, 5)
+                )),
                 restTimerForExerciseId = 1,
-                restTimerSecondsRemaining = 62,
+                restTimerSecondsRemaining = 238,
                 expandedExerciseId = 1
             ),
+            elapsedSeconds = 610,
             onViewHistory = {}, onAddExerciseClicked = {}, onExerciseSelected = {},
             onExercisePickerDismissed = {}, onAddSetClicked = {},
             onLogSet = { _, _, _, _, _ -> }, onDeleteSet = { _, _ -> },

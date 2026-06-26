@@ -1,146 +1,142 @@
-# SaiyanStrong — Sprint 9 Spec: SessionCompleteScreen Full HUD Rebuild
+# SaiyanStrong — Sprint 10 Spec: ActiveWorkoutScreen layout rebuild
 
-## Reference
-Target layout: 3-column neon green HUD with flame power bar (see reference image).
+## Reference: provided screenshot
 
-## Status: IN PROGRESS
+## Status: COMPLETE — v0.8.0
 
 ---
 
-## Layout (top-level)
+## Differences between reference and current UI
+
+| Area | Reference | Current (before this sprint) |
+|------|-----------|------------------------------|
+| Top bar | ← icon · timer · FINISH right | No top bar |
+| Header | Workout name bold + elapsed | "SAIYAN STRONG" static |
+| Exercise name | Accent color, 16sp | Uppercase white/green, smaller |
+| Columns | SET / PREVIOUS / KG / REPS / ✓ | SET / PREV / KG / REPS / × |
+| Completed rows | **Solid green bg**, filled ✓ button | Faint tint, × delete |
+| Rest label between sets | "4:00" teal text between each row | Nothing |
+| Active timer | **Full-width solid colored bar** | Small amber bordered row with buttons |
+| Pending set | Inline table row with input boxes | Collapsed panel, hidden |
+| Add set button | `ADD SET (1:30)` text button | `+ ADD SET >>>` SaiyanButton |
+| Add exercise | Bottom text button | Row button with LOG/FINISH |
+
+---
+
+## Layout spec
 
 ```
 Column {
-    "SAIYAN STRONG"        ← amber, bold, large, centered
-    "Session Complete!"    ← amber, medium, centered
-
-    Row {
-        HudPanel(weight=0.30) { LeftPanel }
-        HudPanel(weight=0.40) { CenterPanel }
-        HudPanel(weight=0.30) { RightPanel }
+    // TOP BAR
+    Row(SaiyanGray bg) {
+        Text("←", white)
+        Spacer(weight=1)
+        Text(elapsed "M:SS", white)
+        Spacer(weight=1)
+        TextButton("FINISH", NeonGreen)
     }
 
-    Image(ic_launcher_foreground, ~180dp, centered)  ← decorative barbell
+    // WORKOUT TITLE
+    Column(padding=16) {
+        Text("TRAINING SESSION", white, bold, 20sp)
+        Text(elapsed, white alpha 0.6, 13sp)
+    }
+
+    // EXERCISE CARDS
+    LazyColumn(weight=1f) {
+        items(exerciseLogs) { log ->
+            ExerciseLogCard(log, ...)
+        }
+        item { TextButton("ADD EXERCISE", NeonGreen) }
+    }
+
+    // TELEMETRY
+    Text("// SETS: N | VOL: X //", TelemetryGreen, black bg)
 }
 ```
 
 ---
 
-## HudPanel composable
+## ExerciseLogCard layout spec
 
-- Background: MatteBlack (#0D0D0D)
-- Border: 1.5dp NeonGreen, RoundedCornerShape(8dp)
-- Glow: drawBehind secondary rect at alpha 0.2f, spread 4dp
-- Padding: 8dp inside
+```
+Column(SaiyanGray bg, NeonGreen border) {
+    Row {
+        Text(exerciseName, NeonGreen, 16sp, bold)
+        Spacer
+    }
 
----
+    // Headers
+    Row { "SET" | "PREVIOUS" | "KG" | "REPS" | "✓" }  ← TelemetryGreen
 
-## Left Panel
+    forEach(completedSets, index) {
+        CompletedSetRow(set, previousSet)   ← NeonGreen bg alpha 0.18f
+        if (not last OR rest timer running OR pending open) {
+            RestLabel("1:30")  ← TelemetryGreen, 10sp, centered
+        }
+    }
 
-### StrengthLineChart (Canvas, height ~140dp)
+    // Active rest timer (if running)
+    if (restSecondsRemaining != null) {
+        RestTimerBar(seconds)  ← full-width, PowerAmber solid bg
+    }
 
-Data: last 8 weeks of volumeKg from weeklyBars.
-- Y-axis: TelemetryGreen labels, 8sp
-- X-axis: week date labels, 8sp
-- Line: NeonGreen, 2dp stroke
-- Dots: NeonGreen filled, 4dp radius
-- Grid: NeonGreen alpha 0.12f
+    // Pending set row (if expanded)
+    if (isExpanded) {
+        PendingSetRow(...)
+    }
 
-### ExerciseStatsTable
-
-Headers: LIFT | EST. 1RM | REPS
-Rows per exercise: name (≤12 chars) | estOneRmKg (WeightFormatter) | totalReps
-Font: monospace 10sp; alternating row tint NeonGreen alpha 0.05f
-
----
-
-## Center Panel
-
-Inner Row split ~55/45:
-
-### Left half — Volume + Stats + Mini Chart
-
-Volume hero box (inner border NeonGreen alpha 0.4f):
-- "TOTAL VOLUME:"   → TelemetryGreen monospace 11sp
-- "[X,XXX kg]"      → NeonGreen FontWeight.Black 28sp (comma-separated)
-
-Stats (white monospace 10sp):
-- "Max [ExerciseName]: [weight]"
-- "Total Reps: [n]"
-- "Duration: [Xh Xm]"
-- "Muscle Fatigue: [Low/Med/High]"  (Low <10 sets, Med <20, High ≥20)
-
-Strength Progress mini chart (height ~56dp):
-- Label: "Strength Progress: +X% Week/Week"  amber 9sp
-- Canvas: same line as left panel but compact; NeonGreen fill gradient below line
-
-### Right half — Power Section
-
-(top→bottom, centered)
-1. Flame icon: Icons.Filled.LocalFireDepartment, 48dp, #F5A623, pulsing alpha 0.5→1.0
-2. PowerLevelBar (existing component), height=180dp
-3. "Level [n] ([StageName])"  → NeonGreen 10sp
-4. "POWER LEVEL"              → amber 9sp letter-spacing
-
----
-
-## Right Panel
-
-### Estimated 1RM Table
-
-Header: "EST. 1RM" | "KG"  → NeonGreen 11sp bold
-Rows: exerciseName | estOneRmKg (WeightFormatter.formatOneRm)
-0.5dp divider lines NeonGreen alpha 0.25f
-
-### Time Spent Table (below a Spacer(8dp))
-
-Header: "EXERCISE" | "TIME"  → NeonGreen 11sp bold
-Rows: exerciseName | "~[n]m" (totalSets * 3 min proxy)
-
----
-
-## ViewModel additions (SessionCompleteViewModel)
-
-New data class (in same file):
-```kotlin
-data class ExerciseRow(
-    val name: String,
-    val bestWeightKg: Double,
-    val estOneRmKg: Double,
-    val totalReps: Int,
-    val totalSets: Int
-)
+    // ADD SET
+    TextButton("ADD SET (1:30)", NeonGreen, centered)
+}
 ```
 
-New StateFlows injected from SessionRepository.getAllSessions():
-- `weeklyBars: StateFlow<List<WeekBar>>`  (reuse HomeViewModel buildWeekBars logic)
-- `strengthProgressPct: StateFlow<Float>` (thisWeek vol - prevWeek vol / prevWeek * 100)
-- `exerciseRows: StateFlow<List<ExerciseRow>>`  (derived from session)
+---
+
+## Component details
+
+### CompletedSetRow
+- Background: `NeonGreen.copy(alpha = 0.15f)`, RoundedCornerShape(3.dp)
+- ✓ button: `Color(0xFF2E7D32)` green filled, white "✓" text → tapping = delete
+
+### RestLabel
+- Text `"1:30"`, color = `TelemetryGreen`, 10sp, centered, full width
+
+### RestTimerBar
+- Full-width `Row`, background = `PowerAmber`, padding vertical 10dp
+- Centered large `Text(M:SS)`, white, 22sp, bold
+- Small row below: `-30s` · `+30s` · `SKIP` TextButtons in white
+
+### PendingSetRow
+- Background: dark (`Color(0xFF111111)`)
+- SET column: next set number
+- PREVIOUS: previousSet?.let { "Xkg × N" } ?: "—"
+- KG: `[-] [value] [+]` inline (weightStepKg steps)
+- REPS: `[-] [value] [+]` inline
+- ✓: NeonGreen filled square → logs the set
+
+### AddExerciseButton
+- Centered `TextButton`, text "ADD EXERCISE", NeonGreen, 15sp bold
 
 ---
 
-## Acceptance criteria
-
-- [ ] 3-column HUD layout visible on 6" device (landscape natural fit; portrait scrollable)
-- [ ] NeonGreen glowing borders on all 3 panels
-- [ ] Line chart renders from real session history
-- [ ] Volume and 1RM use kg (WeightFormatter), never lb
-- [ ] PowerLevelBar + flame correct position in center-right
-- [ ] Bottom barbell image renders
-- [ ] assembleDebug SUCCESSFUL
+## ViewModel addition
+```kotlin
+private val _elapsedSeconds = MutableStateFlow(0)
+val elapsedSeconds: StateFlow<Int> = _elapsedSeconds.asStateFlow()
+// ticks every second in init coroutine
+```
 
 ---
 
-## Files to change
-
-1. `SessionCompleteViewModel.kt` — add weeklyBars, exerciseRows, strengthProgressPct
-2. `SessionCompleteScreen.kt` — full rewrite to 3-column HUD
+## Files changed
+1. `ActiveWorkoutViewModel.kt` — add elapsedSeconds StateFlow
+2. `ActiveWorkoutScreen.kt` — full rewrite
 
 ---
 
-## Sprint 10 backlog
-
-- [ ] Lottie flame animation (replace Icon placeholder)
+## Sprint 11 backlog
+- [ ] Lottie flame (SessionComplete)
 - [ ] Exercise detail screen
-- [ ] Rest timer push notification
-- [ ] Portrait/landscape adaptive layout
+- [ ] Rest timer notification
+- [ ] Pre-planned pending sets (add multiple sets upfront)

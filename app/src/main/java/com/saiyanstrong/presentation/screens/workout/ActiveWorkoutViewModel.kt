@@ -49,6 +49,11 @@ class ActiveWorkoutViewModel @Inject constructor(
     private val sessionStartMs = System.currentTimeMillis()
     private var restTimerJob: Job? = null
 
+    private val _elapsedSeconds = MutableStateFlow(0)
+    val elapsedSeconds: StateFlow<Int> = _elapsedSeconds.asStateFlow()
+
+    val restDurationSeconds: Int = REST_DURATION_SECONDS
+
     init {
         combine(
             exerciseRepository.getAllExercises(),
@@ -56,6 +61,13 @@ class ActiveWorkoutViewModel @Inject constructor(
         ) { exercises, usageCounts ->
             _uiState.update { it.copy(availableExercises = exercises, exerciseUsageCounts = usageCounts) }
         }.launchIn(viewModelScope)
+
+        viewModelScope.launch {
+            while (true) {
+                delay(1000)
+                _elapsedSeconds.value = ((System.currentTimeMillis() - sessionStartMs) / 1000).toInt()
+            }
+        }
     }
 
     fun onAddExerciseClicked() {
