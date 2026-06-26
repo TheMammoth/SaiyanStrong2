@@ -8,6 +8,7 @@ import androidx.lifecycle.viewModelScope
 import com.saiyanstrong.BuildConfig
 import com.saiyanstrong.domain.model.AppUpdate
 import com.saiyanstrong.domain.model.PowerLevel
+import com.saiyanstrong.domain.model.WorkoutSession
 import com.saiyanstrong.domain.repository.SessionRepository
 import com.saiyanstrong.domain.usecase.CheckForUpdateUseCase
 import com.saiyanstrong.domain.usecase.GetEvolutionStageUseCase
@@ -29,6 +30,13 @@ import javax.inject.Inject
 
 data class WeekBar(val label: String, val count: Int)
 
+data class WeekStats(
+    val sessions: Int = 0,
+    val volumeKg: Double = 0.0,
+    val topLiftKg: Double = 0.0,
+    val topLiftName: String = ""
+)
+
 sealed class UpdateDownloadState {
     data object Idle : UpdateDownloadState()
     data object Downloading : UpdateDownloadState()
@@ -47,9 +55,16 @@ class HomeViewModel @Inject constructor(
     val powerLevel: StateFlow<PowerLevel?> = getEvolutionStageUseCase.execute()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
-    val weeklyBars: StateFlow<List<WeekBar>> = sessionRepository.getAllSessions()
+    private val allSessions: StateFlow<List<WorkoutSession>> = sessionRepository.getAllSessions()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val weeklyBars: StateFlow<List<WeekBar>> = allSessions
         .map { sessions -> buildWeekBars(sessions.map { it.dateMs }) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val thisWeekStats: StateFlow<WeekStats> = allSessions
+        .map { sessions -> computeWeekStats(sessions) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), WeekStats())
 
     private val _updateAvailable = MutableStateFlow<AppUpdate?>(null)
     val updateAvailable: StateFlow<AppUpdate?> = _updateAvailable.asStateFlow()
@@ -100,6 +115,31 @@ class HomeViewModel @Inject constructor(
                 }
             }
         }
+    }
+
+    private fun computeWeekStats(sessions: List<WorkoutSession>): WeekStats {
+        val weekStart = Calendar.getInstance().apply {
+            set(Calendar.DAY_OF_WEEK, Calendar.MONDAY)
+            set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
+        }.timeInMillis
+        val thisSessions = sessions.filter { it.dateMs >= weekStart }
+        if (thisSessions.isEmpty()) return WeekStats()
+
+        var topLiftKg = 0.0
+        var topLiftName = ""
+        thisSessions.forEach { session ->
+            session.exerciseLogs.forEach { log ->
+                val best = log.sets.maxOfOrNull { it.weightKg } ?: 0.0
+                if (best > topLiftKg) { topLiftKg = best; topLiftName = log.exercise.name }
+            }
+        }
+        return WeekStats(
+            sessions = thisSessions.size,
+            volumeKg = thisSessions.sumOf { it.totalVolumeKg },
+            topLiftKg = topLiftKg,
+            topLiftName = topLiftName
+        )
     }
 
     private fun buildWeekBars(sessionDates: List<Long>): List<WeekBar> =

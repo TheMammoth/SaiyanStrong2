@@ -54,6 +54,7 @@ import com.saiyanstrong.presentation.theme.PowerAmber
 import com.saiyanstrong.presentation.theme.SaiyanGray
 import com.saiyanstrong.presentation.theme.SaiyanTheme
 import com.saiyanstrong.presentation.theme.TelemetryGreen
+import com.saiyanstrong.util.WeightFormatter
 
 @Composable
 fun HomeScreen(
@@ -63,6 +64,7 @@ fun HomeScreen(
 ) {
     val powerLevel by viewModel.powerLevel.collectAsStateWithLifecycle()
     val weeklyBars by viewModel.weeklyBars.collectAsStateWithLifecycle()
+    val thisWeekStats by viewModel.thisWeekStats.collectAsStateWithLifecycle()
     val updateAvailable by viewModel.updateAvailable.collectAsStateWithLifecycle()
     val downloadState by viewModel.downloadState.collectAsStateWithLifecycle()
     val context = LocalContext.current
@@ -82,6 +84,7 @@ fun HomeScreen(
     HomeContent(
         powerLevel = powerLevel,
         weeklyBars = weeklyBars,
+        thisWeekStats = thisWeekStats,
         updateAvailable = updateAvailable,
         downloadState = downloadState,
         onStartWorkout = onStartWorkout,
@@ -105,6 +108,7 @@ fun HomeScreen(
 internal fun HomeContent(
     powerLevel: PowerLevel?,
     weeklyBars: List<WeekBar>,
+    thisWeekStats: WeekStats,
     updateAvailable: AppUpdate?,
     downloadState: UpdateDownloadState,
     onStartWorkout: () -> Unit,
@@ -161,6 +165,15 @@ internal fun HomeContent(
                 )
             }
 
+            if (thisWeekStats.sessions > 0) {
+                ThisWeekRow(
+                    stats = thisWeekStats,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp)
+                )
+            }
+
             if (weeklyBars.isNotEmpty()) {
                 Text(
                     "WORKOUTS / WEEK",
@@ -214,6 +227,65 @@ internal fun HomeContent(
                     .background(Color.Black)
                     .padding(horizontal = 16.dp, vertical = 6.dp)
             )
+        }
+    }
+}
+
+@Composable
+private fun ThisWeekRow(stats: WeekStats, modifier: Modifier = Modifier) {
+    Column(modifier = modifier) {
+        Text(
+            "THIS WEEK",
+            color = TelemetryGreen,
+            style = MaterialTheme.typography.labelSmall,
+            letterSpacing = 2.sp
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(top = 6.dp, bottom = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            MiniStatChip(
+                label = "SESSIONS",
+                value = "${stats.sessions}",
+                modifier = Modifier.weight(1f)
+            )
+            MiniStatChip(
+                label = "VOLUME",
+                value = WeightFormatter.formatVolume(stats.volumeKg),
+                modifier = Modifier.weight(1f)
+            )
+            MiniStatChip(
+                label = "TOP LIFT",
+                value = if (stats.topLiftKg > 0.0) WeightFormatter.format(stats.topLiftKg) else "—",
+                sub = stats.topLiftName.take(8).uppercase(),
+                modifier = Modifier.weight(1f)
+            )
+        }
+    }
+}
+
+@Composable
+private fun MiniStatChip(
+    label: String,
+    value: String,
+    modifier: Modifier = Modifier,
+    sub: String = ""
+) {
+    Column(
+        modifier = modifier
+            .background(SaiyanGray, androidx.compose.foundation.shape.RoundedCornerShape(6.dp))
+            .padding(8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(label, color = TelemetryGreen, style = MaterialTheme.typography.labelSmall, fontSize = 9.sp)
+        Text(
+            value,
+            color = NeonGreen,
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.Black
+        )
+        if (sub.isNotEmpty()) {
+            Text(sub, color = Color.White.copy(alpha = 0.5f), style = MaterialTheme.typography.labelSmall, fontSize = 8.sp)
         }
     }
 }
@@ -334,7 +406,8 @@ internal fun HomeContentPreview() {
                 WeekBar("6/23", 4), WeekBar("6/30", 1), WeekBar("7/7", 3),
                 WeekBar("7/14", 0), WeekBar("7/21", 2)
             ),
-            updateAvailable = AppUpdate("v0.5.0", ""),
+            thisWeekStats = WeekStats(sessions = 3, volumeKg = 1850.0, topLiftKg = 130.0, topLiftName = "Deadlift"),
+            updateAvailable = AppUpdate("v0.6.0", ""),
             downloadState = UpdateDownloadState.Idle,
             onStartWorkout = {},
             onViewHistory = {},

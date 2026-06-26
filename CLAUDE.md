@@ -588,3 +588,19 @@ _(Claude Code appends here after each completed task)_
   with PowerLevelBar on right; stat chips row (POWER/TIME/EXERCISES); side-by-side
   EST. 1RM and SETS LOG OutlinedCards; session title input; DONE/DELETE buttons;
   telemetry bar. Build verified: assembleDebug SUCCESSFUL.
+- [x] Sprint 7a — in-app updater: CheckForUpdateUseCase polls GitHub Releases API
+  (api.github.com/repos/TheMammoth/SaiyanStrong2/releases/latest), compares tag_name
+  against BuildConfig.VERSION_NAME, returns AppUpdate with APK browser_download_url.
+  UpdateInstaller wraps DownloadManager: enqueue to public Downloads, poll
+  STATUS_SUCCESSFUL every 500ms, return content:// URI via getUriForDownloadedFile().
+  HomeViewModel checks on init; exposes updateAvailable + UpdateDownloadState (Idle/
+  Downloading/Ready). HomeScreen amber banner slides in with animated visibility;
+  UPDATE button checks canRequestPackageInstalls() first — if not granted opens
+  Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES; on Ready fires ACTION_VIEW with APK
+  MIME type. Permissions: INTERNET, REQUEST_INSTALL_PACKAGES, WRITE_EXTERNAL_STORAGE
+  (maxSdkVersion=28). buildConfig=true; versionCode 1→4, versionName 1.0→0.4.0.
+- [x] Sprint 7b — HomeScreen this-week stats row: WeekStats data class (sessions,
+  volumeKg, topLiftKg, topLiftName) computed from getAllSessions() filtered to current
+  ISO week. HomeViewModel exposes thisWeekStats: StateFlow<WeekStats>. HomeScreen
+  shows ThisWeekRow with three MiniStatChip composables (SESSIONS / VOLUME / TOP LIFT)
+  in NeonGreen on SaiyanGray cards, visible only when sessions > 0.
