@@ -100,10 +100,18 @@ class ActiveWorkoutViewModel @Inject constructor(
         _uiState.update { it.copy(restTimerSecondsRemaining = null) }
     }
 
-    private fun startRestTimer() {
+    fun onAdjustRestTimer(deltaSec: Int) {
+        val current = _uiState.value.restTimerSecondsRemaining ?: return
+        val newSec = (current + deltaSec).coerceIn(10, 600)
+        startRestTimerFrom(newSec)
+    }
+
+    private fun startRestTimer() = startRestTimerFrom(REST_DURATION_SECONDS)
+
+    private fun startRestTimerFrom(seconds: Int) {
         restTimerJob?.cancel()
         restTimerJob = viewModelScope.launch {
-            for (secondsLeft in REST_DURATION_SECONDS downTo 1) {
+            for (secondsLeft in seconds downTo 1) {
                 _uiState.update { it.copy(restTimerSecondsRemaining = secondsLeft) }
                 delay(1_000)
             }

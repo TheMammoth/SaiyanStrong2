@@ -45,6 +45,16 @@ class SessionRepositoryImpl @Inject constructor(
             sessionId
         }
 
+    override suspend fun deleteSession(sessionId: Long) =
+        appDatabase.withTransaction {
+            setLogDao.deleteForSession(sessionId)
+            exerciseLogDao.deleteForSession(sessionId)
+            sessionDao.deleteById(sessionId)
+        }
+
+    override suspend fun updateTitle(sessionId: Long, title: String) =
+        sessionDao.updateTitle(sessionId, title)
+
     private suspend fun SessionEntity.toDomainWithDetails(): WorkoutSession {
         val exerciseLogEntities = exerciseLogDao.getForSession(id).first()
         val exerciseLogs = exerciseLogEntities.map { logEntity ->

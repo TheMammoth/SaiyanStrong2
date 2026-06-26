@@ -45,11 +45,14 @@ fun VisualizerScreen(
                 }
 
                 is VisualizerState.Static -> {
-                    AnatomyOverlayCanvas(
-                        assetName = state.exercise.svgAssetName,
-                        highlightedMuscles = state.highlightedMuscles
-                    )
                     Text(state.exercise.name, style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        state.highlightedMuscles.joinToString(", ") { m ->
+                            m.name.replace('_', ' ').lowercase()
+                                .replaceFirstChar { it.uppercase() }
+                        },
+                        style = MaterialTheme.typography.bodySmall
+                    )
                     Button(onClick = onBeginSet) { Text("Begin Set") }
                 }
 

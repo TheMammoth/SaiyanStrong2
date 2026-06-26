@@ -13,4 +13,7 @@ interface ExerciseLogDao {
 
     @Insert
     suspend fun insert(exerciseLog: ExerciseLogEntity): Long
+
+    @Query("DELETE FROM exercise_logs WHERE session_id = :sessionId")
+    suspend fun deleteForSession(sessionId: Long)
 }

@@ -11,7 +11,8 @@ fun WorkoutSession.toEntity(): SessionEntity = SessionEntity(
     durationMs = durationMs,
     totalVolumeKg = totalVolumeKg,
     powerEarned = powerEarned,
-    notes = notes
+    notes = notes,
+    title = title
 )
 
 fun SessionEntity.toDomain(exerciseLogs: List<ExerciseLog>): WorkoutSession = WorkoutSession(
@@ -21,7 +22,8 @@ fun SessionEntity.toDomain(exerciseLogs: List<ExerciseLog>): WorkoutSession = Wo
     exerciseLogs = exerciseLogs,
     totalVolumeKg = totalVolumeKg,
     powerEarned = powerEarned,
-    notes = notes
+    notes = notes,
+    title = title
 )
 
 fun ExerciseLog.toEntity(sessionId: Long): ExerciseLogEntity = ExerciseLogEntity(

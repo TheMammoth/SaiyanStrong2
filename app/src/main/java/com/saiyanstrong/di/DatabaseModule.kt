@@ -21,7 +21,13 @@ object DatabaseModule {
     @Provides
     @Singleton
     fun provideAppDatabase(@ApplicationContext context: Context): AppDatabase =
-        Room.databaseBuilder(context, AppDatabase::class.java, "saiyanstrong.db").build()
+        Room.databaseBuilder(context, AppDatabase::class.java, "saiyanstrong.db")
+            .addMigrations(object : androidx.room.migration.Migration(1, 2) {
+                override fun migrate(database: androidx.sqlite.db.SupportSQLiteDatabase) {
+                    database.execSQL("ALTER TABLE sessions ADD COLUMN title TEXT NOT NULL DEFAULT ''")
+                }
+            })
+            .build()
 
     @Provides
     @Singleton

@@ -16,4 +16,10 @@ interface SessionDao {
 
     @Insert
     suspend fun insert(session: SessionEntity): Long
+
+    @Query("DELETE FROM sessions WHERE id = :sessionId")
+    suspend fun deleteById(sessionId: Long)
+
+    @Query("UPDATE sessions SET title = :title WHERE id = :id")
+    suspend fun updateTitle(id: Long, title: String)
 }

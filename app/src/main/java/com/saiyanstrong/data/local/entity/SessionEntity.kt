@@ -11,5 +11,6 @@ data class SessionEntity(
     @ColumnInfo(name = "duration_ms") val durationMs: Long,
     @ColumnInfo(name = "total_volume_kg") val totalVolumeKg: Double,
     @ColumnInfo(name = "power_earned") val powerEarned: Int,
-    val notes: String = ""
+    val notes: String = "",
+    val title: String = ""
 )

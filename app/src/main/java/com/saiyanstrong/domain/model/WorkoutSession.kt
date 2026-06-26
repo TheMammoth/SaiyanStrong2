@@ -7,5 +7,6 @@ data class WorkoutSession(
     val exerciseLogs: List<ExerciseLog>,
     val totalVolumeKg: Double,
     val powerEarned: Int,
-    val notes: String = ""
+    val notes: String = "",
+    val title: String = ""
 )

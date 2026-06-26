@@ -13,4 +13,7 @@ interface SetLogDao {
 
     @Insert
     suspend fun insert(setLog: SetLogEntity): Long
+
+    @Query("DELETE FROM set_logs WHERE exercise_log_id IN (SELECT id FROM exercise_logs WHERE session_id = :sessionId)")
+    suspend fun deleteForSession(sessionId: Long)
 }

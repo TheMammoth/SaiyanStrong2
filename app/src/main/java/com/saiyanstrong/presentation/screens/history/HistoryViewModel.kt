@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 data class HistoryUiState(
@@ -19,7 +20,7 @@ data class HistoryUiState(
 
 @HiltViewModel
 class HistoryViewModel @Inject constructor(
-    sessionRepository: SessionRepository
+    private val sessionRepository: SessionRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(HistoryUiState())
@@ -29,5 +30,9 @@ class HistoryViewModel @Inject constructor(
         sessionRepository.getAllSessions()
             .onEach { sessions -> _uiState.value = HistoryUiState(sessions = sessions, isLoading = false) }
             .launchIn(viewModelScope)
+    }
+
+    fun deleteSession(sessionId: Long) {
+        viewModelScope.launch { sessionRepository.deleteSession(sessionId) }
     }
 }

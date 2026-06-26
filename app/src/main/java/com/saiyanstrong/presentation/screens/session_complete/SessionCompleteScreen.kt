@@ -1,5 +1,6 @@
 package com.saiyanstrong.presentation.screens.session_complete
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -14,15 +15,20 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -35,6 +41,7 @@ import com.saiyanstrong.domain.model.WorkoutSession
 import com.saiyanstrong.presentation.components.PowerLevelBar
 import com.saiyanstrong.presentation.components.SaiyanButton
 import com.saiyanstrong.presentation.components.scanlineTexture
+import com.saiyanstrong.presentation.theme.DangerRed
 import com.saiyanstrong.presentation.theme.NeonGreen
 import com.saiyanstrong.presentation.theme.PowerAmber
 import com.saiyanstrong.presentation.theme.SaiyanGray
@@ -45,22 +52,32 @@ import com.saiyanstrong.util.WeightFormatter
 @Composable
 fun SessionCompleteScreen(
     onDone: () -> Unit,
+    onDeleted: () -> Unit,
     viewModel: SessionCompleteViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 
+    LaunchedEffect(uiState.isDone) { if (uiState.isDone) onDone() }
+    LaunchedEffect(uiState.isDeleted) { if (uiState.isDeleted) onDeleted() }
+
     SessionCompleteContent(
         session = uiState.session,
         powerLevel = uiState.powerLevel,
-        onDone = onDone
+        titleInput = uiState.titleInput,
+        onTitleChange = viewModel::onTitleChange,
+        onDone = viewModel::onDone,
+        onDeleteSession = viewModel::onDeleteSession
     )
 }
 
 @Composable
-private fun SessionCompleteContent(
+internal fun SessionCompleteContent(
     session: WorkoutSession?,
     powerLevel: PowerLevel?,
-    onDone: () -> Unit
+    titleInput: String,
+    onTitleChange: (String) -> Unit,
+    onDone: () -> Unit,
+    onDeleteSession: () -> Unit
 ) {
     Scaffold { padding ->
         Column(
@@ -69,7 +86,6 @@ private fun SessionCompleteContent(
                 .scanlineTexture()
                 .padding(padding)
         ) {
-            // Header
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -97,7 +113,6 @@ private fun SessionCompleteContent(
                 contentPadding = PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                // Stats row
                 item {
                     if (session != null) {
                         Row(
@@ -124,7 +139,6 @@ private fun SessionCompleteContent(
                     }
                 }
 
-                // Power level bar
                 item {
                     powerLevel?.let {
                         Column(
@@ -145,7 +159,16 @@ private fun SessionCompleteContent(
                     }
                 }
 
-                // Exercise breakdown header
+                item {
+                    OutlinedTextField(
+                        value = titleInput,
+                        onValueChange = onTitleChange,
+                        label = { Text("Session title (optional)") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+
                 session?.exerciseLogs?.takeIf { it.isNotEmpty() }?.let {
                     item {
                         Text(
@@ -160,17 +183,26 @@ private fun SessionCompleteContent(
                 }
             }
 
-            // Done button
             SaiyanButton(
                 onClick = onDone,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp)
+                    .padding(horizontal = 16.dp, vertical = 4.dp)
             ) {
                 Text("DONE  >>>", fontWeight = FontWeight.Black, fontSize = 16.sp)
             }
 
-            // Telemetry bar
+            OutlinedButton(
+                onClick = onDeleteSession,
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = DangerRed),
+                border = BorderStroke(1.dp, DangerRed),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp)
+            ) {
+                Text("DELETE SESSION", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+            }
+
             if (session != null) {
                 Text(
                     "// EXERCISES: ${session.exerciseLogs.size}  |  SETS: ${session.exerciseLogs.sumOf { it.sets.size }} //",
@@ -241,7 +273,7 @@ private fun ExerciseResultCard(exerciseLog: ExerciseLog) {
         Spacer(Modifier.height(4.dp))
         exerciseLog.sets.forEach { set ->
             Text(
-                "SET ${set.setNumber}  ${WeightFormatter.format(set.weightKg)} × ${set.reps}",
+                "SET ${set.setNumber}  ${WeightFormatter.format(set.weightKg)} x ${set.reps}",
                 color = TelemetryGreen,
                 style = MaterialTheme.typography.bodySmall
             )
@@ -254,9 +286,10 @@ private fun formatDuration(ms: Long): String {
     return "%02d:%02d:%02d".format(s / 3600, (s % 3600) / 60, s % 60)
 }
 
+@Preview(showBackground = true)
 @PreviewLightDark
 @Composable
-private fun SessionCompleteContentPreview() {
+internal fun SessionCompleteContentPreview() {
     SaiyanTheme {
         SessionCompleteContent(
             session = WorkoutSession(
@@ -267,7 +300,10 @@ private fun SessionCompleteContentPreview() {
                 current = 9_613, stage = SaiyanStage.BASE,
                 nextStageThreshold = 20_000, progressToNext = 0.48f
             ),
-            onDone = {}
+            titleInput = "",
+            onTitleChange = {},
+            onDone = {},
+            onDeleteSession = {}
         )
     }
 }
