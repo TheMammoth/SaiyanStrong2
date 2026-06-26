@@ -14,8 +14,8 @@ android {
         applicationId = "com.saiyanstrong"
         minSdk = 26
         targetSdk = 35
-        versionCode = 8
-        versionName = "0.6.3"
+        versionCode = 9
+        versionName = "0.7.1"
     }
 
     buildTypes {
