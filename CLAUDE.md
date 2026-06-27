@@ -622,6 +622,47 @@ _(Claude Code appends here after each completed task)_
   (6) versionName kept in sync with release tags from v0.6.1 onward (versionCode 8,
   versionName 0.6.3 as of v0.6.4 build). Rule: bump both on every release.
 
+- [x] Sprint 11 — equipment variants + 5-tab nav + multi-pending rows (v0.9.0–v0.9.1):
+  19 exercises renamed with (Barbell)/(Dumbbell) suffixes; DB version 3→4, MIGRATION_3_4
+  clears and re-seeds exercises. 5-tab NavigationBar (Home|History|Workout|Exercises|Settings)
+  in NavGraph; hidden on ActiveWorkout + SessionComplete routes; ExerciseBrowserScreen +
+  ExerciseBrowserViewModel added for Exercises tab. ActiveWorkoutUiState: replaced
+  expandedExerciseId with `pendingSetCounts: Map<Int,Int>` — each exercise tracks its own
+  visible pending row count independently. HomeScreen gear icon removed (Settings = bottom tab).
+  CheckForUpdateUseCase no longer swallows exceptions (was returning null = "Up to date"
+  on network errors); HomeViewModel retry loop now shows real error. Root cause was private
+  GitHub repo; fixed by making repo public. Released v0.9.0 and v0.9.1.
+- [x] Sprint 12 — ActiveWorkoutScreen full redesign (v0.9.2):
+  Flat table layout: SET | PREVIOUS | KG | REPS | ✓. No +/- buttons anywhere.
+  Completed rows: Color(0xFF1A3A1A) full green background, visual-only ✓, long-press=delete,
+  tap SET number=toggle failure (F). Active rest timer: full-width PowerAmber bar with
+  large countdown + -30s/+30s/SKIP text buttons. Rest label: small centered green text
+  between sets. Pending rows: muted gray style, NeonGreen-outlined ✓ button logs set.
+  Exercise header: NeonGreen bold name + Link + MoreVert placeholder icons. Top bar:
+  ExpandMore + Refresh left, session timer center, FINISH right. ADD SET (X:XX) per card.
+  All weight through WeightFormatter.format().replace(" kg",""). lint.checkReleaseBuilds=false
+  to bypass UAST/SDK crash in lintVitalAnalyzeRelease.
+- [x] Fixed signing — persistent keystore (v0.9.2):
+  app/saiyanstrong.keystore generated (RSA-2048, 10000 days, alias=saiyanstrong).
+  keystore.properties added to .gitignore (credentials never committed). build.gradle.kts
+  reads keystore.properties via Properties() and wires signingConfigs.release to both
+  debug and release buildTypes. APKs from any machine with keystore.properties install
+  as upgrades over previous builds.
+- [x] Sprint 12b — inline KG/REPS editing, no dialogs (v0.9.3):
+  AlertDialog NumberInputDialog removed entirely. KG and REPS cells are now BasicTextField
+  (SetCell composable): KeyboardType.Decimal/Number, ImeAction.Next moves focus KG→REPS,
+  ImeAction.Done logs/saves. Active cell gets NeonGreen border + faint green background.
+  NeonGreen cursor. ✓ button on pending rows still works as alternative to DONE.
+- [x] Bug fixes (v0.9.4):
+  (1) Update banner reappear fix: last_dismissed_update_version stringPreferencesKey added
+  to DataStore; UserRepository interface + UserRepositoryImpl expose getLastDismissedUpdateVersion()
+  / saveDismissedUpdateVersion(); HomeViewModel reads dismissed tag at check time and skips
+  banner if tag matches; saves on both dismiss (✕) and UPDATE tap. Banner never reappears
+  for the same release.
+  (2) KG/REPS select-all on focus: SetCell switched from String to TextFieldValue state;
+  LaunchedEffect(isFocused) with rememberUpdatedState selects TextRange(0, length) when
+  field gains focus — first keystroke replaces the old number instead of appending.
+
 ## Release rules
 
 - Always build APK locally (`.\gradlew assembleDebug`) and upload with
