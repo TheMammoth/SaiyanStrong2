@@ -10,6 +10,7 @@ import com.saiyanstrong.domain.model.AppUpdate
 import com.saiyanstrong.domain.model.PowerLevel
 import com.saiyanstrong.domain.model.WorkoutSession
 import com.saiyanstrong.domain.repository.SessionRepository
+import com.saiyanstrong.domain.repository.UserRepository
 import com.saiyanstrong.domain.usecase.CheckForUpdateUseCase
 import com.saiyanstrong.domain.usecase.GetEvolutionStageUseCase
 import com.saiyanstrong.util.UpdateInstaller
@@ -21,6 +22,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -48,6 +50,7 @@ class HomeViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     getEvolutionStageUseCase: GetEvolutionStageUseCase,
     sessionRepository: SessionRepository,
+    private val userRepository: UserRepository,
     private val checkForUpdateUseCase: CheckForUpdateUseCase,
     private val updateInstaller: UpdateInstaller
 ) : ViewModel() {
@@ -88,18 +91,25 @@ class HomeViewModel @Inject constructor(
         if (_downloadState.value is UpdateDownloadState.Downloading) return
         _downloadState.value = UpdateDownloadState.Downloading
         viewModelScope.launch {
+            userRepository.saveDismissedUpdateVersion(update.tagName)
             val downloadId = updateInstaller.startDownload(update)
             pollUntilDone(downloadId)
         }
     }
 
-    fun onDismissUpdate() { _updateAvailable.value = null }
+    fun onDismissUpdate() {
+        viewModelScope.launch {
+            _updateAvailable.value?.let { userRepository.saveDismissedUpdateVersion(it.tagName) }
+            _updateAvailable.value = null
+        }
+    }
 
     fun onInstallConsumed() { _downloadState.value = UpdateDownloadState.Idle }
 
     private fun checkForUpdate() {
         viewModelScope.launch {
             _updateStatus.value = "checking…"
+            val dismissed = userRepository.getLastDismissedUpdateVersion().first()
             val retryDelaysMs = listOf(0L, 5_000L, 15_000L)
             var lastError: String? = null
             for ((attempt, delayMs) in retryDelaysMs.withIndex()) {
@@ -108,11 +118,14 @@ class HomeViewModel @Inject constructor(
                 try {
                     val result = checkForUpdateUseCase.execute(BuildConfig.VERSION_NAME)
                     if (result != null) {
-                        _updateAvailable.value = result
-                        _updateStatus.value = "update ready: ${result.tagName}"
+                        if (result.tagName != dismissed) {
+                            _updateAvailable.value = result
+                            _updateStatus.value = "update ready: ${result.tagName}"
+                        } else {
+                            _updateStatus.value = "up to date (v${BuildConfig.VERSION_NAME})"
+                        }
                         return@launch
                     }
-                    // null = genuinely up to date, no need to retry
                     _updateStatus.value = "up to date (v${BuildConfig.VERSION_NAME})"
                     return@launch
                 } catch (e: Exception) {

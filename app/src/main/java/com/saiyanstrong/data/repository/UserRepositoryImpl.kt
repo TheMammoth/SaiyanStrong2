@@ -14,7 +14,14 @@ class UserRepositoryImpl @Inject constructor(
     override fun getLifetimePowerEarned(): Flow<Int> =
         userPreferencesDataStore.lifetimePowerEarned
 
+    override fun getLastDismissedUpdateVersion(): Flow<String> =
+        userPreferencesDataStore.lastDismissedUpdateVersion
+
     override suspend fun addPowerEarned(amount: Int) {
         userPreferencesDataStore.addPowerEarned(amount)
+    }
+
+    override suspend fun saveDismissedUpdateVersion(version: String) {
+        userPreferencesDataStore.saveDismissedUpdateVersion(version)
     }
 }
