@@ -1,9 +1,16 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.ksp)
     alias(libs.plugins.hilt)
+}
+
+val keystoreProps = Properties().also { props ->
+    rootProject.file("keystore.properties").takeIf { it.exists() }
+        ?.inputStream()?.use { props.load(it) }
 }
 
 android {
@@ -18,8 +25,21 @@ android {
         versionName = "0.9.2"
     }
 
+    signingConfigs {
+        create("release") {
+            storeFile     = file(keystoreProps["storeFile"] as? String ?: "saiyanstrong.keystore")
+            storePassword = keystoreProps["storePassword"] as? String ?: ""
+            keyAlias      = keystoreProps["keyAlias"]      as? String ?: ""
+            keyPassword   = keystoreProps["keyPassword"]   as? String ?: ""
+        }
+    }
+
     buildTypes {
+        debug {
+            signingConfig = signingConfigs.getByName("release")
+        }
         release {
+            signingConfig  = signingConfigs.getByName("release")
             isMinifyEnabled = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
         }
