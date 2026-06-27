@@ -39,6 +39,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -49,11 +50,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -313,10 +316,10 @@ private fun CompletedSetRow(
     onDelete: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var kgText   by remember(set.id, setIndex) { mutableStateOf(set.weightKg.fmtKg()) }
-    var repsText by remember(set.id, setIndex) { mutableStateOf("${set.reps}") }
+    var kgTfv    by remember(set.id, setIndex) { mutableStateOf(TextFieldValue(set.weightKg.fmtKg())) }
+    var repsTfv  by remember(set.id, setIndex) { mutableStateOf(TextFieldValue("${set.reps}")) }
     var editFail by remember(set.id, setIndex) { mutableStateOf(set.isFailure) }
-    val kgFocus  = remember { FocusRequester() }
+    val kgFocus   = remember { FocusRequester() }
     val repsFocus = remember { FocusRequester() }
     val focusMgr  = LocalFocusManager.current
 
@@ -325,8 +328,8 @@ private fun CompletedSetRow(
     } ?: "—"
 
     fun confirm() {
-        val kg = kgText.toDoubleOrNull() ?: set.weightKg
-        val r  = repsText.toIntOrNull()  ?: set.reps
+        val kg = kgTfv.text.toDoubleOrNull() ?: set.weightKg
+        val r  = repsTfv.text.toIntOrNull()  ?: set.reps
         onEdit(kg, r, editFail)
         focusMgr.clearFocus()
     }
@@ -345,18 +348,18 @@ private fun CompletedSetRow(
             fontSize = 13.sp, fontWeight = FontWeight.Bold,
             modifier = Modifier.width(28.dp).clickable {
                 val f = !editFail; editFail = f
-                onEdit(kgText.toDoubleOrNull() ?: set.weightKg, repsText.toIntOrNull() ?: set.reps, f)
+                onEdit(kgTfv.text.toDoubleOrNull() ?: set.weightKg, repsTfv.text.toIntOrNull() ?: set.reps, f)
             }
         )
         Text(prevText, color = Color.White.copy(alpha = 0.45f), fontSize = 11.sp, modifier = Modifier.weight(1.2f))
         SetCell(
-            text = kgText, onValueChange = { kgText = it },
+            value = kgTfv, onValueChange = { kgTfv = it },
             keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Next,
             onImeAction = { repsFocus.requestFocus() },
             focusRequester = kgFocus, modifier = Modifier.weight(1f)
         )
         SetCell(
-            text = repsText, onValueChange = { repsText = it },
+            value = repsTfv, onValueChange = { repsTfv = it },
             keyboardType = KeyboardType.Number, imeAction = ImeAction.Done,
             onImeAction = { confirm() },
             focusRequester = repsFocus, modifier = Modifier.weight(0.8f)
@@ -380,8 +383,8 @@ private fun PendingSetRow(
     onLogSet: (Double, Int, Float?, Boolean) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var kgText    by remember { mutableStateOf(initialWeightKg.fmtKg()) }
-    var repsText  by remember { mutableStateOf("$initialReps") }
+    var kgTfv     by remember { mutableStateOf(TextFieldValue(initialWeightKg.fmtKg())) }
+    var repsTfv   by remember { mutableStateOf(TextFieldValue("$initialReps")) }
     var isFailure by remember { mutableStateOf(false) }
     val kgFocus   = remember { FocusRequester() }
     val repsFocus = remember { FocusRequester() }
@@ -390,8 +393,8 @@ private fun PendingSetRow(
     val prevText = previousSet?.let { "${it.weightKg.fmtKg()} × ${it.reps}" } ?: "—"
 
     fun logSet() {
-        val kg = (kgText.toDoubleOrNull() ?: initialWeightKg).coerceAtLeast(0.0)
-        val r  = (repsText.toIntOrNull()  ?: initialReps).coerceAtLeast(1)
+        val kg = (kgTfv.text.toDoubleOrNull() ?: initialWeightKg).coerceAtLeast(0.0)
+        val r  = (repsTfv.text.toIntOrNull()  ?: initialReps).coerceAtLeast(1)
         onLogSet(kg, r, null, isFailure)
         focusMgr.clearFocus()
     }
@@ -412,13 +415,13 @@ private fun PendingSetRow(
         )
         Text(prevText, color = Color.White.copy(alpha = 0.38f), fontSize = 11.sp, modifier = Modifier.weight(1.2f))
         SetCell(
-            text = kgText, onValueChange = { kgText = it },
+            value = kgTfv, onValueChange = { kgTfv = it },
             keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Next,
             onImeAction = { repsFocus.requestFocus() },
             focusRequester = kgFocus, modifier = Modifier.weight(1f)
         )
         SetCell(
-            text = repsText, onValueChange = { repsText = it },
+            value = repsTfv, onValueChange = { repsTfv = it },
             keyboardType = KeyboardType.Number, imeAction = ImeAction.Done,
             onImeAction = { logSet() },
             focusRequester = repsFocus, modifier = Modifier.weight(0.8f)
@@ -463,8 +466,8 @@ private fun RestTimerBar(
 
 @Composable
 private fun SetCell(
-    text: String,
-    onValueChange: (String) -> Unit,
+    value: TextFieldValue,
+    onValueChange: (TextFieldValue) -> Unit,
     keyboardType: KeyboardType,
     imeAction: ImeAction,
     onImeAction: () -> Unit,
@@ -473,8 +476,19 @@ private fun SetCell(
 ) {
     val source  = remember { MutableInteractionSource() }
     val focused by source.collectIsFocusedAsState()
+    val latestValue by rememberUpdatedState(value)
+    val latestOnChange by rememberUpdatedState(onValueChange)
+
+    // Select all text the moment the field gains focus so first keystroke replaces it
+    LaunchedEffect(focused) {
+        if (focused) {
+            val v = latestValue
+            latestOnChange(v.copy(selection = TextRange(0, v.text.length)))
+        }
+    }
+
     BasicTextField(
-        value = text,
+        value = value,
         onValueChange = onValueChange,
         modifier = modifier
             .focusRequester(focusRequester)
