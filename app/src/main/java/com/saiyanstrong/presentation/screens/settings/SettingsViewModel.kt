@@ -1,6 +1,5 @@
 package com.saiyanstrong.presentation.screens.settings
 
-import android.app.DownloadManager
 import android.content.Context
 import android.net.Uri
 import androidx.lifecycle.ViewModel
@@ -12,15 +11,12 @@ import com.saiyanstrong.domain.usecase.CheckForUpdateUseCase
 import com.saiyanstrong.util.UpdateInstaller
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
 sealed class UpdateCheckState {
@@ -33,7 +29,7 @@ sealed class UpdateCheckState {
 
 sealed class DownloadState {
     data object Idle : DownloadState()
-    data object InProgress : DownloadState()
+    data class InProgress(val percent: Int) : DownloadState()
     data class Ready(val uri: Uri) : DownloadState()
     data class Failed(val reason: String) : DownloadState()
 }
@@ -80,33 +76,18 @@ class SettingsViewModel @Inject constructor(
 
     fun downloadUpdate(update: AppUpdate) {
         if (_downloadState.value is DownloadState.InProgress) return
-        _downloadState.value = DownloadState.InProgress
+        _downloadState.value = DownloadState.InProgress(0)
         viewModelScope.launch {
-            val downloadId = updateInstaller.startDownload(update)
-            pollUntilDone(downloadId)
+            val uri = updateInstaller.downloadToCache(update) { percent ->
+                _downloadState.value = DownloadState.InProgress(percent)
+            }
+            _downloadState.value =
+                if (uri != null) DownloadState.Ready(uri)
+                else DownloadState.Failed("Download failed — check connection and retry")
         }
     }
 
     fun canInstallPackages(): Boolean = updateInstaller.canInstallPackages()
 
     fun consumeInstall() { _downloadState.value = DownloadState.Idle }
-
-    private suspend fun pollUntilDone(downloadId: Long) = withContext(Dispatchers.IO) {
-        while (true) {
-            delay(500)
-            when (updateInstaller.queryStatus(downloadId)) {
-                DownloadManager.STATUS_SUCCESSFUL -> {
-                    val uri = updateInstaller.getDownloadedUri(downloadId)
-                    _downloadState.value =
-                        if (uri != null) DownloadState.Ready(uri)
-                        else DownloadState.Failed("Could not get download URI")
-                    break
-                }
-                DownloadManager.STATUS_FAILED, -1 -> {
-                    _downloadState.value = DownloadState.Failed("Download failed")
-                    break
-                }
-            }
-        }
-    }
 }

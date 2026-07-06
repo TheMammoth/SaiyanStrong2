@@ -1,6 +1,5 @@
 package com.saiyanstrong.presentation.screens.home
 
-import android.app.DownloadManager
 import android.content.Context
 import android.net.Uri
 import androidx.lifecycle.ViewModel
@@ -18,7 +17,6 @@ import com.saiyanstrong.domain.usecase.GetEvolutionStageUseCase
 import com.saiyanstrong.util.UpdateInstaller
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -29,7 +27,6 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import java.util.Calendar
 import javax.inject.Inject
 
@@ -58,7 +55,7 @@ data class WeekStats(
 
 sealed class UpdateDownloadState {
     data object Idle : UpdateDownloadState()
-    data object Downloading : UpdateDownloadState()
+    data class Downloading(val percent: Int) : UpdateDownloadState()
     data class Ready(val uri: Uri) : UpdateDownloadState()
 }
 
@@ -141,11 +138,17 @@ class HomeViewModel @Inject constructor(
     fun onDownloadUpdate() {
         val update = _updateAvailable.value ?: return
         if (_downloadState.value is UpdateDownloadState.Downloading) return
-        _downloadState.value = UpdateDownloadState.Downloading
+        _downloadState.value = UpdateDownloadState.Downloading(0)
         viewModelScope.launch {
-            userRepository.saveDismissedUpdateVersion(update.tagName)
-            val downloadId = updateInstaller.startDownload(update)
-            pollUntilDone(downloadId)
+            val uri = updateInstaller.downloadToCache(update) { percent ->
+                _downloadState.value = UpdateDownloadState.Downloading(percent)
+            }
+            if (uri != null) {
+                _downloadState.value = UpdateDownloadState.Ready(uri)
+            } else {
+                _downloadState.value = UpdateDownloadState.Idle
+                _updateStatus.value = "download failed — tap to retry"
+            }
         }
     }
 
@@ -185,25 +188,6 @@ class HomeViewModel @Inject constructor(
                 }
             }
             _updateStatus.value = "check failed: $lastError"
-        }
-    }
-
-    private suspend fun pollUntilDone(downloadId: Long) = withContext(Dispatchers.IO) {
-        while (true) {
-            delay(500)
-            when (updateInstaller.queryStatus(downloadId)) {
-                DownloadManager.STATUS_SUCCESSFUL -> {
-                    val uri = updateInstaller.getDownloadedUri(downloadId)
-                    _downloadState.value =
-                        if (uri != null) UpdateDownloadState.Ready(uri)
-                        else UpdateDownloadState.Idle
-                    break
-                }
-                DownloadManager.STATUS_FAILED, -1 -> {
-                    _downloadState.value = UpdateDownloadState.Idle
-                    break
-                }
-            }
         }
     }
 

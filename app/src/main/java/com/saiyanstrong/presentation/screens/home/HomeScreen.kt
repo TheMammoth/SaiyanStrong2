@@ -569,6 +569,8 @@ private fun UpdateBanner(
         }
         when (downloadState) {
             is UpdateDownloadState.Downloading -> {
+                Text("${downloadState.percent}%", color = PowerAmber, fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold)
                 CircularProgressIndicator(
                     modifier = Modifier.size(20.dp),
                     color = PowerAmber,

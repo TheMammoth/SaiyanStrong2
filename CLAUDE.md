@@ -748,6 +748,20 @@ _(Claude Code appends here after each completed task)_
   exercises gracefully show text-only as before. Manifest: android:theme
   Theme.Material.NoActionBar (kills redundant "SaiyanStrong" ActionBar on every screen +
   suspected top-gap decor bug on detail screen). versionCode 22, versionName 0.12.0.
+- [x] Updater rewrite (v0.12.1) — root cause of "can't update": DownloadManager stalls on
+  GitHub's 302→objects.githubusercontent.com redirect chain and the 500ms poll loop only
+  exits on SUCCESSFUL/FAILED, so downloads spun forever. UpdateInstaller rewritten:
+  suspend downloadToCache() does direct HttpURLConnection download (manual redirect
+  follow ≤5 hops, User-Agent, 64KB buffer, onProgress callback %) into
+  cacheDir/updates/, returns FileProvider uri (new provider com.saiyanstrong.fileprovider
+  + res/xml/file_paths.xml cache-path). DownloadManager/poll code deleted from both
+  HomeViewModel and SettingsViewModel; Downloading/InProgress states now carry percent
+  (shown in banner + Settings row). Second bug fixed: onDownloadUpdate no longer saves
+  dismissed version on UPDATE tap (a failed download used to hide the banner forever);
+  dismissed is saved only on ✕. Verified v0.11.0↔v0.12.0 APKs share signing cert
+  59ae14f6… and release asset is byte-identical to local build — install path was fine,
+  only download was broken. NOTE: devices on ≤0.12.0 must sideload once (old downloader);
+  updater self-heals from 0.12.1 onward. versionCode 23, versionName 0.12.1.
 
 ## Release rules
 

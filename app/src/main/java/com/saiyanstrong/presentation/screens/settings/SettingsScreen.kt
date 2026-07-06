@@ -166,7 +166,7 @@ fun SettingsScreen(
                             is DownloadState.InProgress -> {
                                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                                     CircularProgressIndicator(modifier = Modifier.size(16.dp), color = PowerAmber, strokeWidth = 2.dp)
-                                    Text("Downloading…", color = PowerAmber, fontSize = 13.sp)
+                                    Text("Downloading… ${dl.percent}%", color = PowerAmber, fontSize = 13.sp)
                                 }
                             }
                             is DownloadState.Failed -> {
