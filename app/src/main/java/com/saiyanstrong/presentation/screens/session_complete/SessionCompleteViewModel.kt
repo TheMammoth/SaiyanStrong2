@@ -54,24 +54,6 @@ class SessionCompleteViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(SessionCompleteUiState())
     val uiState: StateFlow<SessionCompleteUiState> = _uiState.asStateFlow()
 
-    private val allSessions = sessionRepository.getAllSessions()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
-
-    val weeklyBars: StateFlow<List<Pair<String, Int>>> = allSessions
-        .map { sessions -> buildWeekBars(sessions.map { it.dateMs }) }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
-
-    val strengthProgressPct: StateFlow<Float> = weeklyBars
-        .map { bars ->
-            if (bars.size < 2) 0f
-            else {
-                val last = bars.last().second.toFloat()
-                val prev = bars[bars.size - 2].second.toFloat()
-                if (prev == 0f) 0f else (last - prev) / prev * 100f
-            }
-        }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0f)
-
     val exerciseRows: StateFlow<List<ExerciseRow>> = _uiState
         .map { state ->
             state.session?.exerciseLogs?.map { log ->
@@ -138,18 +120,4 @@ class SessionCompleteViewModel @Inject constructor(
             _uiState.update { it.copy(isDeleted = true) }
         }
     }
-
-    private fun buildWeekBars(sessionDates: List<Long>): List<Pair<String, Int>> =
-        (7 downTo 0).map { weeksAgo ->
-            val cal = Calendar.getInstance().apply {
-                add(Calendar.WEEK_OF_YEAR, -weeksAgo)
-                set(Calendar.DAY_OF_WEEK, Calendar.MONDAY)
-                set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0)
-                set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
-            }
-            val weekEnd = cal.timeInMillis + 7L * 24 * 60 * 60 * 1000
-            val count = sessionDates.count { it >= cal.timeInMillis && it < weekEnd }
-            val label = "${cal.get(Calendar.MONTH) + 1}/${cal.get(Calendar.DAY_OF_MONTH)}"
-            Pair(label, count)
-        }
 }

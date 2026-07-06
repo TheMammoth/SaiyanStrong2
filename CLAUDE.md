@@ -699,6 +699,18 @@ _(Claude Code appends here after each completed task)_
   sessions; streak tolerates empty current week; matchesLift(SQ/BP/DL) shared by DOTS +
   big-three (DOTS refactored onto it). SESSION HISTORY button dropped (bottom tab covers it).
   versionCode 19, versionName 0.10.1.
+- [x] Sprint 14b — bottom-nav padding fix + SessionComplete rework (v0.10.2):
+  (1) BUG: NavGraph Scaffold computed innerPadding for the bottom NavigationBar but never
+  applied it — every tab screen's content (incl. Home BEGIN TRAINING button) slid under
+  the bar. Fixed: NavHost(modifier = Modifier.padding(innerPadding)).
+  (2) SessionCompleteScreen rebuilt from scratch: the 3-panel HUD (7–9sp text, colliding
+  1RM/REPS columns, 58%-height panels of dead space, floating barbell image) replaced with
+  single-column dashboard-language layout — SESSION COMPLETE header + date, volume hero
+  tile (32sp mono volume + POWER EARNED amber), DURATION/SETS/EXERCISES tiles, power stage
+  card w/ thin amber StageProgressBar Canvas, RESULTS list (name + sets·reps | BEST kg +
+  e1RM per row), title input, SAVE AS TEMPLATE; DELETE/DONE pinned at bottom outside the
+  scroll so they're always visible. SessionCompleteViewModel: weeklyBars/strengthProgressPct/
+  buildWeekBars/allSessions removed (charts gone). versionCode 20, versionName 0.10.2.
 
 ## Release rules
 
