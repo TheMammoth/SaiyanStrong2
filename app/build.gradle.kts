@@ -21,8 +21,8 @@ android {
         applicationId = "com.saiyanstrong"
         minSdk = 26
         targetSdk = 35
-        versionCode = 21
-        versionName = "0.11.0"
+        versionCode = 22
+        versionName = "0.12.0"
     }
 
     signingConfigs {
@@ -104,6 +104,7 @@ dependencies {
     implementation(libs.hilt.navigation.compose)
 
     implementation(libs.lottie.compose)
+    implementation(libs.coil.compose)
 
     implementation(libs.kotlinx.coroutines.android)
 }

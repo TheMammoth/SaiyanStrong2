@@ -1,14 +1,18 @@
 package com.saiyanstrong.presentation.screens.exercises
 
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -25,16 +29,19 @@ import androidx.compose.material3.TabRowDefaults
 import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Fill
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -42,7 +49,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import coil.compose.AsyncImage
+import com.saiyanstrong.domain.model.ExerciseMedia
 import com.saiyanstrong.presentation.components.scanlineTexture
+import kotlinx.coroutines.delay
 import com.saiyanstrong.presentation.theme.DangerRed
 import com.saiyanstrong.presentation.theme.MatteBlack
 import com.saiyanstrong.presentation.theme.NeonGreen
@@ -61,7 +71,8 @@ fun ExerciseDetailScreen(
     viewModel: ExerciseDetailViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    var selectedTab by remember { mutableIntStateOf(1) }  // default CHARTS
+    val media by viewModel.media.collectAsStateWithLifecycle()
+    var selectedTab by remember { mutableIntStateOf(0) }  // default ABOUT
 
     Scaffold { padding ->
         Column(
@@ -121,7 +132,7 @@ fun ExerciseDetailScreen(
             }
 
             when (selectedTab) {
-                0 -> AboutTab(uiState)
+                0 -> AboutTab(uiState, media)
                 1 -> ChartsTab(uiState)
                 2 -> RecordsTab(uiState)
                 else -> HistoryTab(uiState)
@@ -133,12 +144,15 @@ fun ExerciseDetailScreen(
 // ── ABOUT ─────────────────────────────────────────────────────────────────────
 
 @Composable
-private fun AboutTab(uiState: ExerciseDetailUiState) {
+private fun AboutTab(uiState: ExerciseDetailUiState, media: ExerciseMedia?) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
+        if (media != null && media.imageUrls.isNotEmpty()) {
+            item { FlipBookImage(media.imageUrls) }
+        }
         uiState.exercise?.let { exercise ->
             item {
                 DetailSection("CATEGORY") {
@@ -164,6 +178,26 @@ private fun AboutTab(uiState: ExerciseDetailUiState) {
                     }
                 }
             }
+            if (!media?.instructions.isNullOrEmpty()) {
+                item {
+                    DetailSection("INSTRUCTIONS") {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            media?.instructions?.forEachIndexed { index, step ->
+                                Row {
+                                    Text(
+                                        "${index + 1}.",
+                                        color = NeonGreen, fontSize = 13.sp, fontWeight = FontWeight.Black,
+                                        fontFamily = FontFamily.Monospace,
+                                        modifier = Modifier.padding(end = 8.dp)
+                                    )
+                                    Text(step, color = Color.White.copy(alpha = 0.8f), fontSize = 13.sp,
+                                        lineHeight = 19.sp)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
             item {
                 DetailSection("LIFETIME") {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -172,6 +206,35 @@ private fun AboutTab(uiState: ExerciseDetailUiState) {
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun FlipBookImage(imageUrls: List<String>) {
+    var frame by remember { mutableIntStateOf(0) }
+    LaunchedEffect(imageUrls) {
+        if (imageUrls.size < 2) return@LaunchedEffect
+        while (true) {
+            delay(900)
+            frame = (frame + 1) % imageUrls.size
+        }
+    }
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .aspectRatio(1.5f)
+            .clip(RoundedCornerShape(6.dp))
+            .background(Color.White)
+            .border(1.dp, NeonGreen.copy(alpha = 0.35f), RoundedCornerShape(6.dp))
+    ) {
+        Crossfade(targetState = frame, animationSpec = tween(350), label = "flipbook") { index ->
+            AsyncImage(
+                model = imageUrls[index],
+                contentDescription = null,
+                contentScale = ContentScale.Fit,
+                modifier = Modifier.fillMaxSize()
+            )
         }
     }
 }

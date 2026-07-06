@@ -4,15 +4,22 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.saiyanstrong.domain.model.Exercise
+import com.saiyanstrong.domain.model.ExerciseMedia
 import com.saiyanstrong.domain.model.ExerciseSetHistory
+import com.saiyanstrong.domain.repository.ExerciseMediaRepository
 import com.saiyanstrong.domain.repository.ExerciseRepository
 import com.saiyanstrong.domain.repository.SessionRepository
 import com.saiyanstrong.domain.usecase.EstimateOneRepMaxUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 data class ChartPoint(
@@ -51,10 +58,21 @@ class ExerciseDetailViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     exerciseRepository: ExerciseRepository,
     sessionRepository: SessionRepository,
-    private val estimateOneRepMaxUseCase: EstimateOneRepMaxUseCase
+    private val estimateOneRepMaxUseCase: EstimateOneRepMaxUseCase,
+    private val exerciseMediaRepository: ExerciseMediaRepository
 ) : ViewModel() {
 
     private val exerciseId: Int = checkNotNull(savedStateHandle["exerciseId"])
+
+    private val _media = MutableStateFlow<ExerciseMedia?>(null)
+    val media: StateFlow<ExerciseMedia?> = _media.asStateFlow()
+
+    init {
+        viewModelScope.launch {
+            val exercise = exerciseRepository.getExerciseById(exerciseId).filterNotNull().first()
+            _media.value = runCatching { exerciseMediaRepository.getMediaFor(exercise.name) }.getOrNull()
+        }
+    }
 
     val uiState: StateFlow<ExerciseDetailUiState> = combine(
         exerciseRepository.getExerciseById(exerciseId),

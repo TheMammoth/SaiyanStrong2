@@ -734,6 +734,20 @@ _(Claude Code appends here after each completed task)_
   Sets | Best set two-column exercise list ("6 × Deadlift (Barbell)" | "190 kg × 6 [F]"),
   footer icon chips (Schedule=duration, FitnessCenter=volume, EmojiEvents=PR count amber
   when >0). versionCode 21, versionName 0.11.0.
+- [x] Sprint 16 — exercise media on ABOUT tab (v0.12.0): free-exercise-db integration
+  (github.com/yuhonas/free-exercise-db, Unlicense/public domain, 800+ exercises).
+  ExerciseMedia model + ExerciseMediaRepository interface; ExerciseMediaRepositoryImpl
+  downloads dist/exercises.json once (User-Agent header, cached to filesDir/
+  free_exercise_db.json, parsed lazily under Mutex with org.json), matches our exercise
+  names by token-overlap score (|ours∩theirs|/|ours| ≥ 0.75, prefers highest coverage then
+  fewest extra tokens), returns raw.githubusercontent image URLs + step instructions.
+  Coil 2.7.0 added (coil-compose in catalog). ExerciseDetailViewModel exposes
+  media: StateFlow<ExerciseMedia?> loaded after exercise name resolves. AboutTab (now
+  default tab): FlipBookImage — white 1.5:1 card, Crossfade(350ms) between start/end
+  photos every 900ms = flip-book animation; numbered INSTRUCTIONS section; unmatched
+  exercises gracefully show text-only as before. Manifest: android:theme
+  Theme.Material.NoActionBar (kills redundant "SaiyanStrong" ActionBar on every screen +
+  suspected top-gap decor bug on detail screen). versionCode 22, versionName 0.12.0.
 
 ## Release rules
 

@@ -1,9 +1,11 @@
 package com.saiyanstrong.di
 
+import com.saiyanstrong.data.repository.ExerciseMediaRepositoryImpl
 import com.saiyanstrong.data.repository.ExerciseRepositoryImpl
 import com.saiyanstrong.data.repository.SessionRepositoryImpl
 import com.saiyanstrong.data.repository.TemplateRepositoryImpl
 import com.saiyanstrong.data.repository.UserRepositoryImpl
+import com.saiyanstrong.domain.repository.ExerciseMediaRepository
 import com.saiyanstrong.domain.repository.ExerciseRepository
 import com.saiyanstrong.domain.repository.SessionRepository
 import com.saiyanstrong.domain.repository.TemplateRepository
@@ -28,4 +30,7 @@ abstract class RepositoryModule {
 
     @Binds
     abstract fun bindTemplateRepository(impl: TemplateRepositoryImpl): TemplateRepository
+
+    @Binds
+    abstract fun bindExerciseMediaRepository(impl: ExerciseMediaRepositoryImpl): ExerciseMediaRepository
 }
