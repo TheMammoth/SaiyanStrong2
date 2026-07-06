@@ -11,6 +11,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -20,10 +21,12 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material3.CircularProgressIndicator
@@ -41,7 +44,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
@@ -50,19 +52,18 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
-import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.saiyanstrong.BuildConfig
 import com.saiyanstrong.domain.model.AppUpdate
 import com.saiyanstrong.domain.model.BodyWeightLog
 import com.saiyanstrong.domain.model.PowerLevel
 import com.saiyanstrong.domain.model.SaiyanStage
-import com.saiyanstrong.presentation.components.PowerLevelBar
 import com.saiyanstrong.presentation.components.SaiyanButton
+import com.saiyanstrong.presentation.components.ScouterGauge
 import com.saiyanstrong.presentation.components.scanlineTexture
 import com.saiyanstrong.presentation.theme.DangerRed
 import com.saiyanstrong.presentation.theme.NeonGreen
@@ -71,7 +72,6 @@ import com.saiyanstrong.presentation.theme.SaiyanGray
 import com.saiyanstrong.presentation.theme.SaiyanTheme
 import com.saiyanstrong.presentation.theme.TelemetryGreen
 import com.saiyanstrong.util.WeightFormatter
-import com.saiyanstrong.BuildConfig
 
 @Composable
 fun HomeScreen(
@@ -81,7 +81,7 @@ fun HomeScreen(
     viewModel: HomeViewModel = hiltViewModel()
 ) {
     val powerLevel by viewModel.powerLevel.collectAsStateWithLifecycle()
-    val weeklyBars by viewModel.weeklyBars.collectAsStateWithLifecycle()
+    val dashboardStats by viewModel.dashboardStats.collectAsStateWithLifecycle()
     val thisWeekStats by viewModel.thisWeekStats.collectAsStateWithLifecycle()
     val bodyWeightLogs by viewModel.bodyWeightLogs.collectAsStateWithLifecycle()
     val dotsScore by viewModel.dotsScore.collectAsStateWithLifecycle()
@@ -104,8 +104,10 @@ fun HomeScreen(
 
     HomeContent(
         powerLevel = powerLevel,
-        weeklyBars = weeklyBars,
+        dashboardStats = dashboardStats,
         thisWeekStats = thisWeekStats,
+        bodyWeightLogs = bodyWeightLogs,
+        dotsScore = dotsScore,
         updateAvailable = updateAvailable,
         downloadState = downloadState,
         onStartWorkout = onStartWorkout,
@@ -124,9 +126,6 @@ fun HomeScreen(
         onDismissUpdate = viewModel::onDismissUpdate,
         updateStatus = updateStatus,
         onRetryUpdateCheck = viewModel::retryUpdateCheck,
-        onSettings = onSettings,
-        bodyWeightLogs = bodyWeightLogs,
-        dotsScore = dotsScore,
         onLogBodyWeight = viewModel::onLogBodyWeight
     )
 }
@@ -134,7 +133,7 @@ fun HomeScreen(
 @Composable
 internal fun HomeContent(
     powerLevel: PowerLevel?,
-    weeklyBars: List<WeekBar>,
+    dashboardStats: DashboardStats,
     thisWeekStats: WeekStats,
     updateAvailable: AppUpdate?,
     downloadState: UpdateDownloadState,
@@ -144,7 +143,6 @@ internal fun HomeContent(
     onDismissUpdate: () -> Unit,
     updateStatus: String = "",
     onRetryUpdateCheck: () -> Unit = {},
-    onSettings: () -> Unit = {},
     bodyWeightLogs: List<BodyWeightLog> = emptyList(),
     dotsScore: Double? = null,
     onLogBodyWeight: (Double) -> Unit = {}
@@ -156,111 +154,154 @@ internal fun HomeContent(
                 .scanlineTexture()
                 .padding(padding)
         ) {
-            Row(
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(SaiyanGray)
-                    .padding(horizontal = 16.dp, vertical = 16.dp),
-                verticalAlignment = Alignment.CenterVertically
+                    .weight(1f)
+                    .verticalScroll(rememberScrollState())
             ) {
-                Column(modifier = Modifier.weight(1f)) {
+                // ── Header ──────────────────────────────────────────
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     Text(
                         "SAIYAN STRONG",
                         color = PowerAmber,
-                        style = MaterialTheme.typography.headlineLarge,
+                        fontSize = 16.sp,
                         fontWeight = FontWeight.Black,
-                        letterSpacing = 4.sp
+                        letterSpacing = 4.sp,
+                        modifier = Modifier.weight(1f)
                     )
                     Text(
-                        powerLevel?.stage?.label?.uppercase() ?: "INITIALIZING...",
-                        color = Color.White,
-                        style = MaterialTheme.typography.titleMedium
+                        "SCOUTER ONLINE",
+                        color = TelemetryGreen,
+                        fontSize = 9.sp,
+                        letterSpacing = 2.sp,
+                        fontFamily = FontFamily.Monospace
                     )
                 }
-            }
 
-            AnimatedVisibility(
-                visible = updateAvailable != null,
-                enter = slideInVertically { -it },
-                exit = slideOutVertically { -it }
-            ) {
-                UpdateBanner(
-                    tagName = updateAvailable?.tagName ?: "",
-                    downloadState = downloadState,
-                    onDownload = onDownloadUpdate,
-                    onDismiss = onDismissUpdate
-                )
-            }
+                AnimatedVisibility(
+                    visible = updateAvailable != null,
+                    enter = slideInVertically { -it },
+                    exit = slideOutVertically { -it }
+                ) {
+                    UpdateBanner(
+                        tagName = updateAvailable?.tagName ?: "",
+                        downloadState = downloadState,
+                        onDownload = onDownloadUpdate,
+                        onDismiss = onDismissUpdate
+                    )
+                }
 
-            powerLevel?.let {
-                PowerLevelBar(
-                    powerLevel = it,
+                // ── Scouter gauge (hero) ────────────────────────────
+                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    ScouterGauge(
+                        powerCurrent = powerLevel?.current ?: 0,
+                        stageLabel = powerLevel?.stage?.label ?: "SCANNING…",
+                        progressToNext = powerLevel?.progressToNext ?: 0f
+                    )
+                }
+                powerLevel?.let { level ->
+                    val next = SaiyanStage.entries.firstOrNull { it.threshold > level.current }
+                    Text(
+                        if (next != null)
+                            "NEXT: ${next.label.uppercase()} · ${"%,d".format(next.threshold)}"
+                        else "MAXIMUM STAGE REACHED",
+                        color = Color.White.copy(alpha = 0.45f),
+                        fontSize = 10.sp,
+                        fontFamily = FontFamily.Monospace,
+                        letterSpacing = 1.sp,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 14.dp),
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                    )
+                }
+
+                // ── Stat tiles ──────────────────────────────────────
+                Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 16.dp)
-                )
-            }
+                        .padding(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    StatTile(
+                        label = "STREAK",
+                        value = "${dashboardStats.streakWeeks}w",
+                        modifier = Modifier.weight(1f)
+                    )
+                    StatTile(
+                        label = "THIS WEEK",
+                        value = if (thisWeekStats.sessions > 0)
+                            WeightFormatter.formatVolume(thisWeekStats.volumeKg) else "—",
+                        sub = if (thisWeekStats.sessions > 0) "${thisWeekStats.sessions} SESSIONS" else "",
+                        modifier = Modifier.weight(1f)
+                    )
+                    StatTile(
+                        label = "DOTS",
+                        value = dotsScore?.let { "%.1f".format(it) } ?: "—",
+                        valueColor = PowerAmber,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
 
-            if (thisWeekStats.sessions > 0) {
-                ThisWeekRow(
-                    stats = thisWeekStats,
+                // ── Big three ───────────────────────────────────────
+                if (dashboardStats.bigThree.any { it.bestE1RmKg > 0.0 }) {
+                    SectionLabel("BIG THREE · EST. 1RM")
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        dashboardStats.bigThree.forEach { lift ->
+                            LiftChip(lift = lift, modifier = Modifier.weight(1f))
+                        }
+                    }
+                }
+
+                // ── Consistency heat ────────────────────────────────
+                SectionLabel("CONSISTENCY · 12 WEEKS")
+                HeatStrip(
+                    heat = dashboardStats.heat,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp)
+                        .clickable { onViewHistory() }
+                )
+
+                Spacer(Modifier.height(12.dp))
+
+                BodyWeightCard(
+                    logs = bodyWeightLogs,
+                    dotsScore = null,  // DOTS already shown in the tile row
+                    onLogBodyWeight = onLogBodyWeight,
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp)
                 )
+
+                Spacer(Modifier.height(16.dp))
             }
 
-            BodyWeightCard(
-                logs = bodyWeightLogs,
-                dotsScore = dotsScore,
-                onLogBodyWeight = onLogBodyWeight,
+            // ── CTA + telemetry (pinned) ────────────────────────────
+            SaiyanButton(
+                onClick = onStartWorkout,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 4.dp)
-            )
-
-            if (weeklyBars.isNotEmpty()) {
-                Text(
-                    "WORKOUTS / WEEK",
-                    color = TelemetryGreen,
-                    style = MaterialTheme.typography.labelSmall,
-                    letterSpacing = 2.sp,
-                    modifier = Modifier.padding(horizontal = 16.dp)
-                )
-                WorkoutsPerWeekChart(
-                    weekBars = weeklyBars,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 8.dp)
-                )
-            }
-
-            Spacer(Modifier.weight(1f))
-
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 24.dp, vertical = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+                    .padding(horizontal = 24.dp, vertical = 10.dp)
             ) {
-                SaiyanButton(
-                    onClick = onStartWorkout,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text(
-                        "BEGIN TRAINING",
-                        fontWeight = FontWeight.Black,
-                        fontSize = 18.sp,
-                        letterSpacing = 2.sp,
-                        modifier = Modifier.padding(vertical = 6.dp)
-                    )
-                }
-                SaiyanButton(
-                    onClick = onViewHistory,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("SESSION HISTORY", letterSpacing = 1.sp)
-                }
+                Text(
+                    "▶  BEGIN TRAINING",
+                    fontWeight = FontWeight.Black,
+                    fontSize = 17.sp,
+                    letterSpacing = 2.sp,
+                    modifier = Modifier.padding(vertical = 6.dp)
+                )
             }
 
             Text(
@@ -277,64 +318,111 @@ internal fun HomeContent(
     }
 }
 
+// ── Dashboard pieces ─────────────────────────────────────────────────────────
+
 @Composable
-private fun ThisWeekRow(stats: WeekStats, modifier: Modifier = Modifier) {
-    Column(modifier = modifier) {
-        Text(
-            "THIS WEEK",
-            color = TelemetryGreen,
-            style = MaterialTheme.typography.labelSmall,
-            letterSpacing = 2.sp
-        )
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(top = 6.dp, bottom = 12.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            MiniStatChip(
-                label = "SESSIONS",
-                value = "${stats.sessions}",
-                modifier = Modifier.weight(1f)
-            )
-            MiniStatChip(
-                label = "VOLUME",
-                value = WeightFormatter.formatVolume(stats.volumeKg),
-                modifier = Modifier.weight(1f)
-            )
-            MiniStatChip(
-                label = "TOP LIFT",
-                value = if (stats.topLiftKg > 0.0) WeightFormatter.format(stats.topLiftKg) else "—",
-                sub = stats.topLiftName.take(8).uppercase(),
-                modifier = Modifier.weight(1f)
-            )
+private fun SectionLabel(text: String) {
+    Text(
+        text,
+        color = TelemetryGreen,
+        fontSize = 10.sp,
+        letterSpacing = 2.sp,
+        fontFamily = FontFamily.Monospace,
+        modifier = Modifier.padding(start = 16.dp, top = 14.dp, bottom = 6.dp)
+    )
+}
+
+@Composable
+private fun StatTile(
+    label: String,
+    value: String,
+    modifier: Modifier = Modifier,
+    sub: String = "",
+    valueColor: Color = NeonGreen
+) {
+    Column(
+        modifier = modifier
+            .background(SaiyanGray, RoundedCornerShape(6.dp))
+            .border(1.dp, NeonGreen.copy(alpha = 0.18f), RoundedCornerShape(6.dp))
+            .padding(horizontal = 10.dp, vertical = 10.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(label, color = TelemetryGreen, fontSize = 9.sp, letterSpacing = 1.5.sp,
+            fontFamily = FontFamily.Monospace)
+        Text(value, color = valueColor, fontSize = 16.sp, fontWeight = FontWeight.Black,
+            fontFamily = FontFamily.Monospace, maxLines = 1)
+        if (sub.isNotEmpty()) {
+            Text(sub, color = Color.White.copy(alpha = 0.4f), fontSize = 8.sp,
+                fontFamily = FontFamily.Monospace)
         }
     }
 }
 
 @Composable
-private fun MiniStatChip(
-    label: String,
-    value: String,
-    modifier: Modifier = Modifier,
-    sub: String = ""
-) {
+private fun LiftChip(lift: LiftStat, modifier: Modifier = Modifier) {
     Column(
         modifier = modifier
-            .background(SaiyanGray, androidx.compose.foundation.shape.RoundedCornerShape(6.dp))
-            .padding(8.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
+            .background(SaiyanGray, RoundedCornerShape(6.dp))
+            .border(1.dp, PowerAmber.copy(alpha = 0.25f), RoundedCornerShape(6.dp))
+            .padding(horizontal = 10.dp, vertical = 8.dp)
     ) {
-        Text(label, color = TelemetryGreen, style = MaterialTheme.typography.labelSmall, fontSize = 9.sp)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(lift.label, color = PowerAmber, fontSize = 11.sp, fontWeight = FontWeight.Black,
+                letterSpacing = 1.sp, modifier = Modifier.weight(1f))
+            SparkLine(values = lift.spark, modifier = Modifier.width(40.dp).height(16.dp))
+        }
         Text(
-            value,
-            color = NeonGreen,
-            style = MaterialTheme.typography.titleSmall,
-            fontWeight = FontWeight.Black
+            if (lift.bestE1RmKg > 0.0) WeightFormatter.formatOneRm(lift.bestE1RmKg) else "—",
+            color = NeonGreen, fontSize = 14.sp, fontWeight = FontWeight.Black,
+            fontFamily = FontFamily.Monospace, maxLines = 1
         )
-        if (sub.isNotEmpty()) {
-            Text(sub, color = Color.White.copy(alpha = 0.5f), style = MaterialTheme.typography.labelSmall, fontSize = 8.sp)
+    }
+}
+
+@Composable
+private fun SparkLine(values: List<Double>, modifier: Modifier = Modifier) {
+    Canvas(modifier = modifier) {
+        if (values.size < 2) return@Canvas
+        val minVal = values.min()
+        val maxVal = values.max()
+        val range = (maxVal - minVal).takeIf { it > 0.0 } ?: 1.0
+        val stepX = size.width / (values.size - 1).toFloat()
+        val pts = values.mapIndexed { i, v ->
+            Offset(i * stepX, size.height * (1f - ((v - minVal) / range).toFloat() * 0.8f - 0.1f))
+        }
+        for (i in 0 until pts.size - 1) {
+            drawLine(NeonGreen.copy(alpha = 0.8f), pts[i], pts[i + 1], strokeWidth = 1.5.dp.toPx())
         }
     }
 }
+
+@Composable
+private fun HeatStrip(heat: List<Int>, modifier: Modifier = Modifier) {
+    Row(modifier = modifier, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+        heat.forEachIndexed { index, count ->
+            val alpha = when {
+                count <= 0 -> 0.07f
+                count == 1 -> 0.35f
+                count == 2 -> 0.6f
+                else -> 0.9f
+            }
+            val isCurrentWeek = index == heat.lastIndex
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(22.dp)
+                    .background(NeonGreen.copy(alpha = alpha), RoundedCornerShape(3.dp))
+                    .then(
+                        if (isCurrentWeek)
+                            Modifier.border(1.dp, PowerAmber.copy(alpha = 0.8f), RoundedCornerShape(3.dp))
+                        else Modifier
+                    )
+            )
+        }
+    }
+}
+
+// ── Bodyweight card ──────────────────────────────────────────────────────────
 
 @Composable
 private fun BodyWeightCard(
@@ -446,6 +534,8 @@ private fun BodyWeightSparkline(logs: List<BodyWeightLog>, modifier: Modifier = 
     }
 }
 
+// ── Update banner ────────────────────────────────────────────────────────────
+
 @Composable
 private fun UpdateBanner(
     tagName: String,
@@ -497,73 +587,33 @@ private fun UpdateBanner(
     }
 }
 
-@Composable
-private fun WorkoutsPerWeekChart(weekBars: List<WeekBar>, modifier: Modifier = Modifier) {
-    val maxCount = weekBars.maxOfOrNull { it.count }?.coerceAtLeast(1) ?: 1
-
-    Column(modifier = modifier) {
-        Canvas(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(72.dp)
-        ) {
-            val slotWidth = size.width / weekBars.size
-            val barWidth = slotWidth * 0.55f
-            val barMargin = slotWidth * 0.225f
-
-            weekBars.forEachIndexed { i, bar ->
-                val barHeight = (bar.count.toFloat() / maxCount) * size.height
-                if (barHeight > 0f) {
-                    drawRect(
-                        color = NeonGreen,
-                        topLeft = Offset(i * slotWidth + barMargin, size.height - barHeight),
-                        size = Size(barWidth, barHeight)
-                    )
-                } else {
-                    drawRect(
-                        color = NeonGreen.copy(alpha = 0.2f),
-                        topLeft = Offset(i * slotWidth + barMargin, size.height - 2f),
-                        size = Size(barWidth, 2f)
-                    )
-                }
-            }
-        }
-
-        Row(modifier = Modifier.fillMaxWidth()) {
-            weekBars.forEach { bar ->
-                Text(
-                    bar.label,
-                    color = TelemetryGreen.copy(alpha = 0.7f),
-                    style = MaterialTheme.typography.labelSmall,
-                    fontSize = 8.sp,
-                    modifier = Modifier.weight(1f),
-                    textAlign = TextAlign.Center,
-                    maxLines = 1
-                )
-            }
-        }
-    }
-}
-
-@Preview(showBackground = true)
-@PreviewLightDark
+@Preview(showBackground = true, backgroundColor = 0xFF0D0D0D)
 @Composable
 internal fun HomeContentPreview() {
     SaiyanTheme {
         HomeContent(
             powerLevel = PowerLevel(
-                current = 9_613,
-                stage = SaiyanStage.BASE,
-                nextStageThreshold = 20_000,
-                progressToNext = 0.48f
+                current = 32_450,
+                stage = SaiyanStage.SSJ1,
+                nextStageThreshold = 50_000,
+                progressToNext = 0.62f
             ),
-            weeklyBars = listOf(
-                WeekBar("6/2", 3), WeekBar("6/9", 5), WeekBar("6/16", 2),
-                WeekBar("6/23", 4), WeekBar("6/30", 1), WeekBar("7/7", 3),
-                WeekBar("7/14", 0), WeekBar("7/21", 2)
+            dashboardStats = DashboardStats(
+                streakWeeks = 4,
+                bigThree = listOf(
+                    LiftStat("SQ", 172.5, listOf(150.0, 155.0, 160.0, 158.0, 165.0, 172.5)),
+                    LiftStat("BP", 117.5, listOf(105.0, 110.0, 108.0, 112.5, 117.5)),
+                    LiftStat("DL", 210.0, listOf(180.0, 190.0, 195.0, 205.0, 210.0))
+                ),
+                heat = listOf(1, 2, 0, 3, 2, 2, 1, 3, 2, 4, 3, 2)
             ),
-            thisWeekStats = WeekStats(sessions = 3, volumeKg = 1850.0, topLiftKg = 130.0, topLiftName = "Deadlift"),
-            updateAvailable = AppUpdate("v0.6.0", ""),
+            thisWeekStats = WeekStats(sessions = 3, volumeKg = 12_400.0, topLiftKg = 210.0, topLiftName = "Deadlift"),
+            bodyWeightLogs = listOf(
+                BodyWeightLog(2, 1_700_100_000_000, 84.2),
+                BodyWeightLog(1, 1_700_000_000_000, 84.8)
+            ),
+            dotsScore = 312.4,
+            updateAvailable = null,
             downloadState = UpdateDownloadState.Idle,
             onStartWorkout = {},
             onViewHistory = {},

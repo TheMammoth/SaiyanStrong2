@@ -684,6 +684,21 @@ _(Claude Code appends here after each completed task)_
   Settings under new TRAINING section. versionCode 18, versionName 0.10.0.
   NOTE: rtk hook rewrites `./gradlew` → `rtk gradlew` in Bash tool and hangs — build via
   PowerShell `.\gradlew assembleDebug` instead. Build verified SUCCESSFUL.
+- [x] Sprint 14 — scouter dashboard (v0.10.1): HomeScreen fully reworked.
+  New components/ScouterGauge.kt: 250dp Canvas arc gauge (240° sweep from 150°, round-cap
+  stroke, 25 radial ticks w/ brighter majors, amber reticle dot at sweep tip, inner hairline
+  ring), center readout POWER LEVEL / %,d number / stage label; progress animates via
+  animateFloatAsState tween 900ms. HomeContent rebuilt: quiet header (SAIYAN STRONG +
+  "SCOUTER ONLINE"), gauge hero + "NEXT: stage · threshold" line, 3 stat tiles
+  (STREAK / THIS WEEK volume+sessions / DOTS amber), BIG THREE row (SQ/BP/DL chips with
+  best e1RM + 10-point sparkline), 12-week CONSISTENCY heat strip (alpha by session count,
+  amber border marks current week, tap → History), slim BodyWeightCard retained (DOTS chip
+  suppressed there — lives in tile row), pinned "▶ BEGIN TRAINING" CTA + telemetry bar,
+  content scrolls above pinned footer. HomeViewModel: WeekBar/buildWeekBars/weeklyBars
+  removed; DashboardStats(streakWeeks, bigThree: List<LiftStat>, heat 12wk) computed from
+  sessions; streak tolerates empty current week; matchesLift(SQ/BP/DL) shared by DOTS +
+  big-three (DOTS refactored onto it). SESSION HISTORY button dropped (bottom tab covers it).
+  versionCode 19, versionName 0.10.1.
 
 ## Release rules
 

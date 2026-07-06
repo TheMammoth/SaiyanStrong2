@@ -33,7 +33,17 @@ import kotlinx.coroutines.withContext
 import java.util.Calendar
 import javax.inject.Inject
 
-data class WeekBar(val label: String, val count: Int)
+data class LiftStat(
+    val label: String,       // SQ / BP / DL
+    val bestE1RmKg: Double,
+    val spark: List<Double>  // per-session best e1RM, oldest → newest
+)
+
+data class DashboardStats(
+    val streakWeeks: Int = 0,
+    val bigThree: List<LiftStat> = emptyList(),
+    val heat: List<Int> = emptyList()  // sessions per week, oldest → newest (12 weeks)
+)
 
 // DOTS polynomial coefficients (denominator = a + b·x + c·x² + d·x³ + e·x⁴, x = bodyweight kg)
 private val DOTS_MALE   = doubleArrayOf(-307.75076, 24.0900756, -0.1918759221, 0.0007391293, -0.000001093)
@@ -69,9 +79,9 @@ class HomeViewModel @Inject constructor(
     private val allSessions: StateFlow<List<WorkoutSession>> = sessionRepository.getAllSessions()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    val weeklyBars: StateFlow<List<WeekBar>> = allSessions
-        .map { sessions -> buildWeekBars(sessions.map { it.dateMs }) }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    val dashboardStats: StateFlow<DashboardStats> = allSessions
+        .map { sessions -> computeDashboard(sessions) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), DashboardStats())
 
     val thisWeekStats: StateFlow<WeekStats> = allSessions
         .map { sessions -> computeWeekStats(sessions) }
@@ -101,27 +111,7 @@ class HomeViewModel @Inject constructor(
     ): Double? {
         if (bodyWeightKg == null || bodyWeightKg < 20.0) return null
 
-        var bestSquat = 0.0
-        var bestBench = 0.0
-        var bestDeadlift = 0.0
-        sessions.forEach { session ->
-            session.exerciseLogs.forEach { log ->
-                val name = log.exercise.name
-                val bestE1Rm = log.sets.maxOfOrNull {
-                    estimateOneRepMaxUseCase.execute(it.weightKg, it.reps)
-                } ?: 0.0
-                when {
-                    name.contains("Squat", ignoreCase = true) && name.contains("Barbell", ignoreCase = true) ->
-                        if (bestE1Rm > bestSquat) bestSquat = bestE1Rm
-                    name.contains("Bench Press", ignoreCase = true) && name.contains("Barbell", ignoreCase = true) ->
-                        if (bestE1Rm > bestBench) bestBench = bestE1Rm
-                    name.contains("Deadlift", ignoreCase = true) && !name.contains("Romanian", ignoreCase = true) &&
-                        !name.contains("Stiff", ignoreCase = true) ->
-                        if (bestE1Rm > bestDeadlift) bestDeadlift = bestE1Rm
-                }
-            }
-        }
-        val total = bestSquat + bestBench + bestDeadlift
+        val total = LIFT_LABELS.sumOf { label -> bestE1RmForLift(sessions, label) }
         if (total <= 0.0) return null
 
         val c = if (useFemale) DOTS_FEMALE else DOTS_MALE
@@ -242,17 +232,68 @@ class HomeViewModel @Inject constructor(
         )
     }
 
-    private fun buildWeekBars(sessionDates: List<Long>): List<WeekBar> =
-        (7 downTo 0).map { weeksAgo ->
-            val weekStart = Calendar.getInstance().apply {
-                add(Calendar.WEEK_OF_YEAR, -weeksAgo)
-                set(Calendar.DAY_OF_WEEK, Calendar.MONDAY)
-                set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0)
-                set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
-            }
-            val weekEnd = weekStart.timeInMillis + 7L * 24 * 60 * 60 * 1000
-            val count = sessionDates.count { it >= weekStart.timeInMillis && it < weekEnd }
-            val label = "${weekStart.get(Calendar.MONTH) + 1}/${weekStart.get(Calendar.DAY_OF_MONTH)}"
-            WeekBar(label, count)
+    private fun weekStartMs(weeksAgo: Int): Long = Calendar.getInstance().apply {
+        add(Calendar.WEEK_OF_YEAR, -weeksAgo)
+        set(Calendar.DAY_OF_WEEK, Calendar.MONDAY)
+        set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0)
+        set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
+    }.timeInMillis
+
+    private fun sessionsInWeek(sessionDates: List<Long>, weeksAgo: Int): Int {
+        val start = weekStartMs(weeksAgo)
+        val end = start + 7L * 24 * 60 * 60 * 1000
+        return sessionDates.count { it >= start && it < end }
+    }
+
+    private fun computeDashboard(sessions: List<WorkoutSession>): DashboardStats {
+        val dates = sessions.map { it.dateMs }
+
+        val heat = (11 downTo 0).map { weeksAgo -> sessionsInWeek(dates, weeksAgo) }
+
+        // Streak: consecutive weeks with ≥1 session; an empty current week doesn't break it yet
+        var weeksAgo = if (sessionsInWeek(dates, 0) == 0) 1 else 0
+        var streak = 0
+        while (weeksAgo < 104 && sessionsInWeek(dates, weeksAgo) > 0) {
+            streak++
+            weeksAgo++
         }
+
+        val bigThree = LIFT_LABELS.map { label ->
+            val perSessionBests = sessions
+                .sortedBy { it.dateMs }
+                .mapNotNull { session ->
+                    session.exerciseLogs
+                        .filter { matchesLift(label, it.exercise.name) }
+                        .flatMap { it.sets }
+                        .maxOfOrNull { estimateOneRepMaxUseCase.execute(it.weightKg, it.reps) }
+                }
+            LiftStat(
+                label = label,
+                bestE1RmKg = perSessionBests.maxOrNull() ?: 0.0,
+                spark = perSessionBests.takeLast(10)
+            )
+        }
+
+        return DashboardStats(streakWeeks = streak, bigThree = bigThree, heat = heat)
+    }
+
+    private fun bestE1RmForLift(sessions: List<WorkoutSession>, label: String): Double =
+        sessions.maxOfOrNull { session ->
+            session.exerciseLogs
+                .filter { matchesLift(label, it.exercise.name) }
+                .flatMap { it.sets }
+                .maxOfOrNull { estimateOneRepMaxUseCase.execute(it.weightKg, it.reps) } ?: 0.0
+        } ?: 0.0
+
+    private fun matchesLift(label: String, name: String): Boolean = when (label) {
+        "SQ" -> name.contains("Squat", ignoreCase = true) && name.contains("Barbell", ignoreCase = true)
+        "BP" -> name.contains("Bench Press", ignoreCase = true) && name.contains("Barbell", ignoreCase = true)
+        else -> name.contains("Deadlift", ignoreCase = true) &&
+            !name.contains("Romanian", ignoreCase = true) &&
+            !name.contains("Stiff", ignoreCase = true)
+    }
+
+    companion object {
+        private val LIFT_LABELS = listOf("SQ", "BP", "DL")
+    }
 }
