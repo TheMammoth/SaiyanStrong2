@@ -12,8 +12,14 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.EmojiEvents
+import androidx.compose.material.icons.filled.FitnessCenter
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SwipeToDismissBox
@@ -39,9 +45,11 @@ import com.saiyanstrong.presentation.theme.PowerAmber
 import com.saiyanstrong.presentation.theme.SaiyanGray
 import com.saiyanstrong.presentation.theme.SaiyanTheme
 import com.saiyanstrong.presentation.theme.TelemetryGreen
+import androidx.compose.ui.text.style.TextOverflow
 import com.saiyanstrong.util.WeightFormatter
-import java.text.DateFormat
+import java.text.SimpleDateFormat
 import java.util.Date
+import java.util.Locale
 
 @Composable
 fun HistoryScreen(
@@ -182,60 +190,90 @@ internal fun SessionCard(session: WorkoutSession, prCount: Int = 0, onClick: () 
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(SaiyanGray, RoundedCornerShape(4.dp))
-            .border(1.dp, NeonGreen.copy(alpha = 0.2f), RoundedCornerShape(4.dp))
+            .background(SaiyanGray, RoundedCornerShape(6.dp))
+            .border(1.dp, NeonGreen.copy(alpha = 0.2f), RoundedCornerShape(6.dp))
             .clickable(onClick = onClick)
-            .padding(12.dp)
+            .padding(14.dp)
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                session.title.ifBlank { DateFormat.getDateInstance().format(Date(session.dateMs)) },
-                style = MaterialTheme.typography.titleSmall,
-                color = Color.White,
-                fontWeight = FontWeight.Bold
-            )
-            if (prCount > 0) {
-                Box(
-                    modifier = Modifier
-                        .background(PowerAmber.copy(alpha = 0.15f), RoundedCornerShape(4.dp))
-                        .border(1.dp, PowerAmber, RoundedCornerShape(4.dp))
-                        .padding(horizontal = 6.dp, vertical = 2.dp)
-                ) {
-                    Text("$prCount PR${if (prCount > 1) "s" else ""}", color = PowerAmber, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+        // Title + full date
+        Text(
+            session.title.ifBlank { "Workout" },
+            style = MaterialTheme.typography.titleSmall,
+            color = Color.White,
+            fontWeight = FontWeight.Bold
+        )
+        Text(
+            SimpleDateFormat("EEEE, MMMM d, yyyy 'at' h:mm a", Locale.getDefault())
+                .format(Date(session.dateMs)),
+            color = Color.White.copy(alpha = 0.45f),
+            fontSize = 11.sp
+        )
+
+        // Sets | Best set columns
+        if (session.exerciseLogs.isNotEmpty()) {
+            Row(Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 2.dp)) {
+                Text("Sets", color = TelemetryGreen, fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold, modifier = Modifier.weight(0.58f))
+                Text("Best set", color = TelemetryGreen, fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold, modifier = Modifier.weight(0.42f))
+            }
+            session.exerciseLogs.forEach { log ->
+                val bestSet = log.sets.maxByOrNull { s ->
+                    if (s.reps == 1) s.weightKg else s.weightKg * (1.0 + s.reps / 30.0)
+                }
+                if (bestSet != null) {
+                    Row(Modifier.fillMaxWidth().padding(vertical = 1.dp)) {
+                        Text(
+                            "${log.sets.size} × ${log.exercise.name}",
+                            color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp,
+                            maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(0.58f)
+                        )
+                        Text(
+                            "${WeightFormatter.format(bestSet.weightKg)} × ${bestSet.reps}" +
+                                if (bestSet.isFailure) " [F]" else "",
+                            color = if (bestSet.isFailure) DangerRed else Color.White.copy(alpha = 0.85f),
+                            fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(0.42f)
+                        )
+                    }
                 }
             }
         }
 
-        Text(
-            "${WeightFormatter.formatVolume(session.totalVolumeKg)}  ·  +${session.powerEarned} power",
-            color = TelemetryGreen,
-            style = MaterialTheme.typography.bodySmall
-        )
-
-        session.exerciseLogs.take(3).forEach { log ->
-            val bestSet = log.sets.maxByOrNull { s ->
-                if (s.reps == 1) s.weightKg else s.weightKg * (1.0 + s.reps / 30.0)
-            }
-            if (bestSet != null) {
-                Text(
-                    "  ${log.exercise.name} — ${WeightFormatter.format(bestSet.weightKg)} × ${bestSet.reps}",
-                    color = Color.White.copy(alpha = 0.5f),
-                    style = MaterialTheme.typography.bodySmall
-                )
-            }
-        }
-        if (session.exerciseLogs.size > 3) {
-            Text(
-                "  +${session.exerciseLogs.size - 3} more",
-                color = Color.White.copy(alpha = 0.3f),
-                style = MaterialTheme.typography.bodySmall
+        // Footer chips: duration · volume · PRs
+        Row(
+            Modifier.fillMaxWidth().padding(top = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            FooterStat(Icons.Default.Schedule, formatDuration(session.durationMs))
+            FooterStat(Icons.Default.FitnessCenter, WeightFormatter.formatVolume(session.totalVolumeKg))
+            FooterStat(
+                Icons.Default.EmojiEvents,
+                "$prCount PR${if (prCount != 1) "s" else ""}",
+                tint = if (prCount > 0) PowerAmber else Color.White.copy(alpha = 0.4f)
             )
         }
     }
+}
+
+@Composable
+private fun FooterStat(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    text: String,
+    tint: Color = Color.White.copy(alpha = 0.55f)
+) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(14.dp))
+        Text(text, color = tint, fontSize = 11.sp, fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(start = 4.dp))
+    }
+}
+
+private fun formatDuration(ms: Long): String {
+    val s = ms / 1000
+    return if (s >= 3600) "${s / 3600}h ${(s % 3600) / 60}m" else "${s / 60}m"
 }
 
 @Preview(showBackground = true)

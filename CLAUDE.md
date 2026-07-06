@@ -711,6 +711,29 @@ _(Claude Code appends here after each completed task)_
   e1RM per row), title input, SAVE AS TEMPLATE; DELETE/DONE pinned at bottom outside the
   scroll so they're always visible. SessionCompleteViewModel: weeklyBars/strengthProgressPct/
   buildWeekBars/allSessions removed (charts gone). versionCode 20, versionName 0.10.2.
+- [x] Sprint 15 — Strong-inspired UX (v0.11.0), four features from reference screenshots:
+  (1) Workout landing page: new Screen.WorkoutLanding ("workout_landing") is the Workout
+  tab + Home BEGIN TRAINING target — START AN EMPTY WORKOUT SaiyanButton, REPEAT LAST
+  WORKOUT row (amber, exercise-name preview), MY TEMPLATES (n) 2-col LazyVerticalGrid
+  (TemplateCard: tap=start, long-press=delete). ActiveWorkout route now
+  "workout?templateId={id}&repeatLast={bool}" (nav args, defaults -1/false);
+  ActiveWorkoutViewModel takes SavedStateHandle and preloads exercises from template or
+  last session; QuickStartPanel + templates/lastSessionExerciseIds removed from active
+  screen/uiState. WorkoutLandingViewModel/Screen added.
+  (2) Rest timer inline bar: restTimerTotalSeconds in uiState (set on every
+  startRestTimerFrom); RestTimerBar restyled Strong-like — slim 36dp pill, PowerAmber fill
+  fraction = remaining/total draining left-to-right, countdown centered (flips amber when
+  fill < 45%), -30s/+30s/SKIP small text row. Active-workout header shows time-of-day
+  title (MORNING/AFTERNOON/EVENING/NIGHT WORKOUT).
+  (3) Exercise detail tabs: ABOUT (category, primary/secondary muscles, lifetime chips) /
+  CHARTS (est. 1RM, max weight, session volume line charts w/ peak value) / RECORDS
+  (Estimated 1RM, Max weight, Max session volume rows + rep-max table 1–10: best
+  performance + date + Epley est.) / HISTORY (per-session set list). ChartPoint replaces
+  E1RmChartPoint; RepMaxRecord + maxSessionVolumeKg + weight/volume charts added to VM.
+  (4) History cards Strong-style: title + "EEEE, MMMM d, yyyy 'at' h:mm a" date,
+  Sets | Best set two-column exercise list ("6 × Deadlift (Barbell)" | "190 kg × 6 [F]"),
+  footer icon chips (Schedule=duration, FitnessCenter=volume, EmojiEvents=PR count amber
+  when >0). versionCode 21, versionName 0.11.0.
 
 ## Release rules
 

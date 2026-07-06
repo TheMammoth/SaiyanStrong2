@@ -7,10 +7,12 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -68,7 +70,6 @@ import com.saiyanstrong.domain.model.ExerciseCategory
 import com.saiyanstrong.domain.model.ExerciseLog
 import com.saiyanstrong.domain.model.MuscleGroup
 import com.saiyanstrong.domain.model.SetLog
-import com.saiyanstrong.domain.model.WorkoutTemplate
 import com.saiyanstrong.presentation.components.scanlineTexture
 import com.saiyanstrong.presentation.theme.DangerRed
 import com.saiyanstrong.presentation.theme.NeonGreen
@@ -109,10 +110,7 @@ fun ActiveWorkoutScreen(
         onDeleteSet = workoutViewModel::onDeleteSet,
         onSkipRest = workoutViewModel::onSkipRest,
         onAdjustRest = workoutViewModel::onAdjustRestTimer,
-        onFinishWorkout = workoutViewModel::onFinishWorkout,
-        onStartFromTemplate = workoutViewModel::onStartFromTemplate,
-        onRepeatLastWorkout = workoutViewModel::onRepeatLastWorkout,
-        onDeleteTemplate = workoutViewModel::onDeleteTemplate
+        onFinishWorkout = workoutViewModel::onFinishWorkout
     )
 }
 
@@ -133,10 +131,7 @@ internal fun ActiveWorkoutContent(
     onDeleteSet: (Int, Int) -> Unit,
     onSkipRest: () -> Unit,
     onAdjustRest: (Int) -> Unit,
-    onFinishWorkout: () -> Unit,
-    onStartFromTemplate: (WorkoutTemplate) -> Unit = {},
-    onRepeatLastWorkout: () -> Unit = {},
-    onDeleteTemplate: (Long) -> Unit = {}
+    onFinishWorkout: () -> Unit
 ) {
     val totalSets = uiState.exerciseLogs.sumOf { it.sets.size }
     val totalVolumeKg = uiState.exerciseLogs.sumOf { log -> log.sets.sumOf { it.volumeKg } }
@@ -167,8 +162,9 @@ internal fun ActiveWorkoutContent(
             }
 
             // ── Workout header ───────────────────────────────────
+            val workoutTitle = remember { timeOfDayWorkoutTitle() }
             Column(Modifier.fillMaxWidth().background(SaiyanGray).padding(horizontal = 16.dp, vertical = 8.dp)) {
-                Text("TRAINING SESSION", color = Color.White,
+                Text(workoutTitle, color = Color.White,
                     style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
                 Text(elapsed, color = Color.White.copy(alpha = 0.5f), fontSize = 12.sp, fontFamily = FontFamily.Monospace)
             }
@@ -179,17 +175,6 @@ internal fun ActiveWorkoutContent(
                 contentPadding = PaddingValues(12.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                if (uiState.exerciseLogs.isEmpty()) {
-                    item {
-                        QuickStartPanel(
-                            templates = uiState.templates,
-                            canRepeatLast = uiState.lastSessionExerciseIds.isNotEmpty(),
-                            onStartFromTemplate = onStartFromTemplate,
-                            onRepeatLastWorkout = onRepeatLastWorkout,
-                            onDeleteTemplate = onDeleteTemplate
-                        )
-                    }
-                }
                 items(uiState.exerciseLogs, key = { it.exercise.id }) { log ->
                     ExerciseLogCard(
                         exerciseLog = log,
@@ -197,6 +182,7 @@ internal fun ActiveWorkoutContent(
                         pendingCount = uiState.pendingSetCounts[log.exercise.id] ?: 0,
                         restTimerSecondsRemaining = if (log.exercise.id == uiState.restTimerForExerciseId)
                             uiState.restTimerSecondsRemaining else null,
+                        restTimerTotalSeconds = uiState.restTimerTotalSeconds,
                         restLabel = restLabel,
                         onAddSetClicked = { onAddSetClicked(log.exercise.id) },
                         onLogSet = { kg, reps, rpe, fail -> onLogSet(log.exercise.id, kg, reps, rpe, fail) },
@@ -242,6 +228,7 @@ internal fun ExerciseLogCard(
     previousSets: List<SetLog> = emptyList(),
     pendingCount: Int = 0,
     restTimerSecondsRemaining: Int? = null,
+    restTimerTotalSeconds: Int = 90,
     restLabel: String = "1:30",
     onAddSetClicked: () -> Unit = {},
     onLogSet: (Double, Int, Float?, Boolean) -> Unit = { _, _, _, _ -> },
@@ -294,7 +281,8 @@ internal fun ExerciseLogCard(
             when {
                 idx < exerciseLog.sets.size - 1 -> RestLabel(restLabel)
                 restTimerSecondsRemaining != null ->
-                    RestTimerBar(restTimerSecondsRemaining, onSkipRest = onSkipRest, onAdjust = onAdjustRest,
+                    RestTimerBar(restTimerSecondsRemaining, restTimerTotalSeconds,
+                        onSkipRest = onSkipRest, onAdjust = onAdjustRest,
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
                 pendingCount > 0 -> RestLabel(restLabel)
             }
@@ -456,87 +444,43 @@ private fun PendingSetRow(
     }
 }
 
-// ── Quick start panel (empty workout) ────────────────────────────────────────
-
-@Composable
-private fun QuickStartPanel(
-    templates: List<WorkoutTemplate>,
-    canRepeatLast: Boolean,
-    onStartFromTemplate: (WorkoutTemplate) -> Unit,
-    onRepeatLastWorkout: () -> Unit,
-    onDeleteTemplate: (Long) -> Unit
-) {
-    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("QUICK START", color = TelemetryGreen, fontSize = 11.sp,
-            fontWeight = FontWeight.Bold, letterSpacing = 2.sp, fontFamily = FontFamily.Monospace,
-            modifier = Modifier.padding(start = 4.dp, top = 4.dp))
-
-        if (canRepeatLast) {
-            Row(
-                Modifier.fillMaxWidth()
-                    .background(SaiyanGray, RoundedCornerShape(6.dp))
-                    .border(1.dp, PowerAmber.copy(alpha = 0.5f), RoundedCornerShape(6.dp))
-                    .clickable { onRepeatLastWorkout() }
-                    .padding(horizontal = 14.dp, vertical = 14.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(Icons.Default.Refresh, null, tint = PowerAmber, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(10.dp))
-                Text("REPEAT LAST WORKOUT", color = PowerAmber, fontSize = 14.sp,
-                    fontWeight = FontWeight.Black, letterSpacing = 1.sp)
-            }
-        }
-
-        templates.forEach { template ->
-            Column(
-                Modifier.fillMaxWidth()
-                    .background(SaiyanGray, RoundedCornerShape(6.dp))
-                    .border(1.dp, NeonGreen.copy(alpha = 0.3f), RoundedCornerShape(6.dp))
-                    .pointerInput(template.id) {
-                        detectTapGestures(
-                            onTap = { onStartFromTemplate(template) },
-                            onLongPress = { onDeleteTemplate(template.id) }
-                        )
-                    }
-                    .padding(horizontal = 14.dp, vertical = 12.dp)
-            ) {
-                Text(template.name, color = NeonGreen, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                Text(
-                    template.exerciseNames.joinToString("  ·  "),
-                    color = Color.White.copy(alpha = 0.5f), fontSize = 11.sp,
-                    modifier = Modifier.padding(top = 2.dp)
-                )
-            }
-        }
-
-        if (templates.isNotEmpty() || canRepeatLast) {
-            Text("hold a template to delete it", color = Color.White.copy(alpha = 0.3f),
-                fontSize = 10.sp, fontFamily = FontFamily.Monospace,
-                modifier = Modifier.padding(start = 4.dp))
-        }
-    }
-}
-
 // ── Rest timer bar ────────────────────────────────────────────────────────────
 
 @Composable
 private fun RestTimerBar(
     secondsRemaining: Int,
+    totalSeconds: Int,
     onSkipRest: () -> Unit,
     onAdjust: (Int) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    Column(modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp)).background(PowerAmber)) {
-        Text(
-            formatElapsed(secondsRemaining), color = Color.Black, fontSize = 28.sp,
-            fontWeight = FontWeight.Black, fontFamily = FontFamily.Monospace,
-            textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
-        )
-        Row(Modifier.fillMaxWidth().padding(bottom = 6.dp),
+    val fraction = secondsRemaining.toFloat() / totalSeconds.coerceAtLeast(1)
+    Column(modifier.fillMaxWidth()) {
+        // Slim draining bar with the countdown centered on top (Strong-style)
+        Box(
+            Modifier.fillMaxWidth().height(36.dp)
+                .clip(RoundedCornerShape(18.dp))
+                .background(SaiyanGray)
+                .border(1.dp, PowerAmber.copy(alpha = 0.6f), RoundedCornerShape(18.dp))
+        ) {
+            Box(
+                Modifier
+                    .fillMaxHeight()
+                    .fillMaxWidth(fraction.coerceIn(0f, 1f))
+                    .background(PowerAmber)
+            )
+            Text(
+                formatElapsed(secondsRemaining),
+                color = if (fraction > 0.45f) Color.Black else PowerAmber,
+                fontSize = 16.sp, fontWeight = FontWeight.Black, fontFamily = FontFamily.Monospace,
+                modifier = Modifier.align(Alignment.Center)
+            )
+        }
+        Row(Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = { onAdjust(-30) }) { Text("-30s", color = Color.Black, fontWeight = FontWeight.Bold) }
-            TextButton(onClick = { onAdjust(30) })  { Text("+30s", color = Color.Black, fontWeight = FontWeight.Bold) }
-            TextButton(onClick = onSkipRest)        { Text("SKIP",  color = Color.Black, fontWeight = FontWeight.Black, fontSize = 13.sp) }
+            TextButton(onClick = { onAdjust(-30) }) { Text("-30s", color = PowerAmber, fontWeight = FontWeight.Bold, fontSize = 12.sp) }
+            TextButton(onClick = { onAdjust(30) })  { Text("+30s", color = PowerAmber, fontWeight = FontWeight.Bold, fontSize = 12.sp) }
+            TextButton(onClick = onSkipRest)        { Text("SKIP",  color = PowerAmber, fontWeight = FontWeight.Black, fontSize = 12.sp) }
         }
     }
 }
@@ -605,6 +549,16 @@ private fun formatElapsed(totalSeconds: Int): String {
 private fun formatRestLabel(seconds: Int): String {
     val m = seconds / 60; val s = seconds % 60
     return if (s == 0) "$m:00" else "%d:%02d".format(m, s)
+}
+
+private fun timeOfDayWorkoutTitle(): String {
+    val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+    return when {
+        hour < 5   -> "NIGHT WORKOUT"
+        hour < 12  -> "MORNING WORKOUT"
+        hour < 17  -> "AFTERNOON WORKOUT"
+        else       -> "EVENING WORKOUT"
+    }
 }
 
 // ── Previews ─────────────────────────────────────────────────────────────────

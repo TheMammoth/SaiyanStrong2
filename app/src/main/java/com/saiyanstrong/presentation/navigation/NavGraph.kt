@@ -32,6 +32,7 @@ import com.saiyanstrong.presentation.screens.home.HomeScreen
 import com.saiyanstrong.presentation.screens.session_complete.SessionCompleteScreen
 import com.saiyanstrong.presentation.screens.settings.SettingsScreen
 import com.saiyanstrong.presentation.screens.workout.ActiveWorkoutScreen
+import com.saiyanstrong.presentation.screens.workout.WorkoutLandingScreen
 import com.saiyanstrong.presentation.theme.NeonGreen
 import com.saiyanstrong.presentation.theme.SaiyanGray
 
@@ -44,7 +45,7 @@ private data class BottomTab(
 private val TABS = listOf(
     BottomTab(Screen.Home.route,      "Home",      Icons.Default.Home),
     BottomTab(Screen.History.route,   "History",   Icons.Default.History),
-    BottomTab(Screen.ActiveWorkout.route, "Workout", Icons.Default.FitnessCenter),
+    BottomTab(Screen.WorkoutLanding.route, "Workout", Icons.Default.FitnessCenter),
     BottomTab(Screen.Exercises.route, "Exercises", Icons.Default.FormatListBulleted),
     BottomTab(Screen.Settings.route,  "Settings",  Icons.Default.Settings)
 )
@@ -102,13 +103,29 @@ fun NavGraph() {
         ) {
             composable(Screen.Home.route) {
                 HomeScreen(
-                    onStartWorkout = { navController.navigate(Screen.ActiveWorkout.route) },
+                    onStartWorkout = { navController.navigate(Screen.WorkoutLanding.route) },
                     onViewHistory = { navController.navigate(Screen.History.route) },
                     onSettings = { navController.navigate(Screen.Settings.route) }
                 )
             }
 
-            composable(Screen.ActiveWorkout.route) {
+            composable(Screen.WorkoutLanding.route) {
+                WorkoutLandingScreen(
+                    onStartEmpty = { navController.navigate(Screen.ActiveWorkout.createRoute()) },
+                    onStartTemplate = { templateId ->
+                        navController.navigate(Screen.ActiveWorkout.createRoute(templateId = templateId))
+                    },
+                    onRepeatLast = { navController.navigate(Screen.ActiveWorkout.createRoute(repeatLast = true)) }
+                )
+            }
+
+            composable(
+                route = Screen.ActiveWorkout.route,
+                arguments = listOf(
+                    navArgument("templateId") { type = NavType.LongType; defaultValue = -1L },
+                    navArgument("repeatLast") { type = NavType.BoolType; defaultValue = false }
+                )
+            ) {
                 ActiveWorkoutScreen(
                     onWorkoutFinished = { sessionId ->
                         navController.navigate(Screen.SessionComplete.createRoute(sessionId)) {

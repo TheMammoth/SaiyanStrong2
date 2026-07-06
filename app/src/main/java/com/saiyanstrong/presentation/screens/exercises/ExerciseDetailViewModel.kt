@@ -15,14 +15,21 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import javax.inject.Inject
 
-data class E1RmChartPoint(
+data class ChartPoint(
     val dateMs: Long,
-    val e1RmKg: Double
+    val value: Double
 )
 
 data class SessionHistoryGroup(
     val dateMs: Long,
     val sets: List<ExerciseSetHistory>
+)
+
+data class RepMaxRecord(
+    val reps: Int,
+    val weightKg: Double,
+    val dateMs: Long,
+    val estimatedOneRmKg: Double
 )
 
 data class ExerciseDetailUiState(
@@ -31,7 +38,11 @@ data class ExerciseDetailUiState(
     val bestE1RmKg: Double = 0.0,
     val totalSets: Int = 0,
     val totalVolumeKg: Double = 0.0,
-    val chartPoints: List<E1RmChartPoint> = emptyList(),
+    val maxSessionVolumeKg: Double = 0.0,
+    val e1RmChart: List<ChartPoint> = emptyList(),
+    val weightChart: List<ChartPoint> = emptyList(),
+    val volumeChart: List<ChartPoint> = emptyList(),
+    val repMaxRecords: List<RepMaxRecord> = emptyList(),
     val sessionHistory: List<SessionHistoryGroup> = emptyList()
 )
 
@@ -56,18 +67,36 @@ class ExerciseDetailViewModel @Inject constructor(
         if (history.isEmpty()) return ExerciseDetailUiState(exercise = exercise)
 
         val bySession = history.groupBy { it.sessionId }
-        val chartPoints = bySession.values
-            .map { sets ->
-                E1RmChartPoint(
-                    dateMs = sets.first().dateMs,
-                    e1RmKg = sets.maxOf { estimateOneRepMaxUseCase.execute(it.weightKg, it.reps) }
-                )
-            }
-            .sortedBy { it.dateMs }
+
+        val e1RmChart = bySession.values.map { sets ->
+            ChartPoint(sets.first().dateMs, sets.maxOf { estimateOneRepMaxUseCase.execute(it.weightKg, it.reps) })
+        }.sortedBy { it.dateMs }
+
+        val weightChart = bySession.values.map { sets ->
+            ChartPoint(sets.first().dateMs, sets.maxOf { it.weightKg })
+        }.sortedBy { it.dateMs }
+
+        val volumeChart = bySession.values.map { sets ->
+            ChartPoint(sets.first().dateMs, sets.sumOf { it.weightKg * it.reps })
+        }.sortedBy { it.dateMs }
 
         val sessionHistory = bySession.values
             .map { sets -> SessionHistoryGroup(dateMs = sets.first().dateMs, sets = sets) }
             .sortedByDescending { it.dateMs }
+
+        // Best performance per rep count (1..10), Strong-style records table
+        val repMaxRecords = (1..10).mapNotNull { reps ->
+            history.filter { it.reps == reps }
+                .maxByOrNull { it.weightKg }
+                ?.let { best ->
+                    RepMaxRecord(
+                        reps = reps,
+                        weightKg = best.weightKg,
+                        dateMs = best.dateMs,
+                        estimatedOneRmKg = estimateOneRepMaxUseCase.execute(best.weightKg, best.reps)
+                    )
+                }
+        }
 
         return ExerciseDetailUiState(
             exercise = exercise,
@@ -75,7 +104,11 @@ class ExerciseDetailViewModel @Inject constructor(
             bestE1RmKg = history.maxOf { estimateOneRepMaxUseCase.execute(it.weightKg, it.reps) },
             totalSets = history.size,
             totalVolumeKg = history.sumOf { it.weightKg * it.reps },
-            chartPoints = chartPoints,
+            maxSessionVolumeKg = volumeChart.maxOf { it.value },
+            e1RmChart = e1RmChart,
+            weightChart = weightChart,
+            volumeChart = volumeChart,
+            repMaxRecords = repMaxRecords,
             sessionHistory = sessionHistory
         )
     }

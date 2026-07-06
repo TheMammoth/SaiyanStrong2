@@ -1,11 +1,11 @@
 package com.saiyanstrong.presentation.screens.workout
 
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.saiyanstrong.domain.model.Exercise
 import com.saiyanstrong.domain.model.ExerciseLog
 import com.saiyanstrong.domain.model.SetLog
-import com.saiyanstrong.domain.model.WorkoutTemplate
 import com.saiyanstrong.domain.repository.ExerciseRepository
 import com.saiyanstrong.domain.repository.SessionRepository
 import com.saiyanstrong.domain.repository.TemplateRepository
@@ -21,7 +21,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.launchIn
-import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -36,14 +35,14 @@ data class ActiveWorkoutUiState(
     val pendingSetCounts: Map<Int, Int> = emptyMap(),  // exerciseId → visible pending row count
     val restTimerForExerciseId: Int? = null,
     val restTimerSecondsRemaining: Int? = null,
+    val restTimerTotalSeconds: Int = REST_DURATION_SECONDS,
     val isExercisePickerVisible: Boolean = false,
-    val completedSessionId: Long? = null,
-    val templates: List<WorkoutTemplate> = emptyList(),
-    val lastSessionExerciseIds: List<Int> = emptyList()
+    val completedSessionId: Long? = null
 )
 
 @HiltViewModel
 class ActiveWorkoutViewModel @Inject constructor(
+    savedStateHandle: SavedStateHandle,
     private val exerciseRepository: ExerciseRepository,
     private val logSetUseCase: LogSetUseCase,
     private val completeSessionUseCase: CompleteSessionUseCase,
@@ -71,17 +70,25 @@ class ActiveWorkoutViewModel @Inject constructor(
             _uiState.update { it.copy(availableExercises = exercises, exerciseUsageCounts = usageCounts) }
         }.launchIn(viewModelScope)
 
-        templateRepository.getAllTemplates()
-            .onEach { templates -> _uiState.update { it.copy(templates = templates) } }
-            .launchIn(viewModelScope)
-
-        viewModelScope.launch {
-            val lastSession = sessionRepository.getAllSessions().first().firstOrNull()
-            _uiState.update {
-                it.copy(lastSessionExerciseIds = lastSession?.exerciseLogs
-                    ?.sortedBy { log -> log.orderIndex }
-                    ?.map { log -> log.exercise.id }
-                    .orEmpty())
+        // Preload exercises when launched from the workout landing screen
+        val templateId: Long = savedStateHandle["templateId"] ?: -1L
+        val repeatLast: Boolean = savedStateHandle["repeatLast"] ?: false
+        if (templateId > 0 || repeatLast) {
+            viewModelScope.launch {
+                val exercises = exerciseRepository.getAllExercises().first()
+                val ids = if (repeatLast) {
+                    sessionRepository.getAllSessions().first().firstOrNull()
+                        ?.exerciseLogs
+                        ?.sortedBy { it.orderIndex }
+                        ?.map { it.exercise.id }
+                        .orEmpty()
+                } else {
+                    templateRepository.getAllTemplates().first()
+                        .firstOrNull { it.id == templateId }
+                        ?.exerciseIds
+                        .orEmpty()
+                }
+                ids.forEach { id -> exercises.firstOrNull { it.id == id }?.let(::addExercise) }
             }
         }
 
@@ -102,24 +109,6 @@ class ActiveWorkoutViewModel @Inject constructor(
     }
 
     fun onExerciseSelected(exercise: Exercise) = addExercise(exercise)
-
-    fun onStartFromTemplate(template: WorkoutTemplate) {
-        val available = _uiState.value.availableExercises
-        template.exerciseIds.forEach { exerciseId ->
-            available.firstOrNull { it.id == exerciseId }?.let { addExercise(it) }
-        }
-    }
-
-    fun onRepeatLastWorkout() {
-        val available = _uiState.value.availableExercises
-        _uiState.value.lastSessionExerciseIds.forEach { exerciseId ->
-            available.firstOrNull { it.id == exerciseId }?.let { addExercise(it) }
-        }
-    }
-
-    fun onDeleteTemplate(templateId: Long) {
-        viewModelScope.launch { templateRepository.deleteTemplate(templateId) }
-    }
 
     private fun addExercise(exercise: Exercise) {
         _uiState.update { state ->
@@ -224,6 +213,7 @@ class ActiveWorkoutViewModel @Inject constructor(
 
     private fun startRestTimerFrom(seconds: Int) {
         restTimerJob?.cancel()
+        _uiState.update { it.copy(restTimerTotalSeconds = seconds) }
         restTimerJob = viewModelScope.launch {
             for (secondsLeft in seconds downTo 1) {
                 _uiState.update { it.copy(restTimerSecondsRemaining = secondsLeft) }
