@@ -1,5 +1,6 @@
 package com.saiyanstrong.domain.repository
 
+import com.saiyanstrong.domain.model.ExerciseSetHistory
 import com.saiyanstrong.domain.model.SetLog
 import com.saiyanstrong.domain.model.WorkoutSession
 import kotlinx.coroutines.flow.Flow
@@ -11,4 +12,5 @@ interface SessionRepository {
     suspend fun deleteSession(sessionId: Long)
     suspend fun updateTitle(sessionId: Long, title: String)
     suspend fun getLastSetsForExercise(exerciseId: Int): List<SetLog>
+    fun getExerciseHistory(exerciseId: Int): Flow<List<ExerciseSetHistory>>
 }

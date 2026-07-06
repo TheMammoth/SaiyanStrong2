@@ -48,6 +48,7 @@ import com.saiyanstrong.presentation.theme.TelemetryGreen
 
 @Composable
 fun ExerciseBrowserScreen(
+    onExerciseClick: (Int) -> Unit = {},
     viewModel: ExerciseBrowserViewModel = hiltViewModel()
 ) {
     val exercises by viewModel.exercises.collectAsStateWithLifecycle()
@@ -146,7 +147,11 @@ fun ExerciseBrowserScreen(
                 contentPadding = PaddingValues(bottom = 24.dp)
             ) {
                 items(filtered, key = { it.id }) { exercise ->
-                    BrowserExerciseRow(exercise, usageCounts[exercise.id] ?: 0)
+                    BrowserExerciseRow(
+                        exercise = exercise,
+                        usageCount = usageCounts[exercise.id] ?: 0,
+                        onClick = { onExerciseClick(exercise.id) }
+                    )
                     HorizontalDivider(color = Color.White.copy(alpha = 0.06f))
                 }
             }
@@ -155,10 +160,11 @@ fun ExerciseBrowserScreen(
 }
 
 @Composable
-private fun BrowserExerciseRow(exercise: Exercise, usageCount: Int) {
+private fun BrowserExerciseRow(exercise: Exercise, usageCount: Int, onClick: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .clickable { onClick() }
             .padding(horizontal = 16.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {

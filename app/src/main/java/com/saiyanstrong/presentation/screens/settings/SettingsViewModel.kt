@@ -7,6 +7,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.saiyanstrong.BuildConfig
 import com.saiyanstrong.domain.model.AppUpdate
+import com.saiyanstrong.domain.repository.UserRepository
 import com.saiyanstrong.domain.usecase.CheckForUpdateUseCase
 import com.saiyanstrong.util.UpdateInstaller
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -14,8 +15,10 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
@@ -39,11 +42,19 @@ sealed class DownloadState {
 class SettingsViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val checkForUpdateUseCase: CheckForUpdateUseCase,
-    private val updateInstaller: UpdateInstaller
+    private val updateInstaller: UpdateInstaller,
+    private val userRepository: UserRepository
 ) : ViewModel() {
 
     val currentVersion: String = BuildConfig.VERSION_NAME
     val currentVersionCode: Int = BuildConfig.VERSION_CODE
+
+    val useFemaleDotsFormula: StateFlow<Boolean> = userRepository.getUseFemaleDotsFormula()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    fun onToggleDotsFormula(useFemale: Boolean) {
+        viewModelScope.launch { userRepository.setUseFemaleDotsFormula(useFemale) }
+    }
 
     private val _checkState = MutableStateFlow<UpdateCheckState>(UpdateCheckState.Idle)
     val checkState: StateFlow<UpdateCheckState> = _checkState.asStateFlow()

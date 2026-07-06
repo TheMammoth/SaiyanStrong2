@@ -10,6 +10,7 @@ import com.saiyanstrong.data.local.entity.SessionEntity
 import com.saiyanstrong.data.mapper.toDomain
 import com.saiyanstrong.data.mapper.toEntity
 import com.saiyanstrong.domain.model.ExerciseLog
+import com.saiyanstrong.domain.model.ExerciseSetHistory
 import com.saiyanstrong.domain.model.SetLog
 import com.saiyanstrong.domain.model.WorkoutSession
 import com.saiyanstrong.domain.repository.SessionRepository
@@ -60,6 +61,19 @@ class SessionRepositoryImpl @Inject constructor(
         val logId = exerciseLogDao.getMostRecentExerciseLogId(exerciseId) ?: return emptyList()
         return setLogDao.getForExerciseLog(logId).first().map { it.toDomain() }
     }
+
+    override fun getExerciseHistory(exerciseId: Int): Flow<List<ExerciseSetHistory>> =
+        setLogDao.getHistoryForExercise(exerciseId).map { sets ->
+            sets.map {
+                ExerciseSetHistory(
+                    dateMs = it.dateMs,
+                    sessionId = it.sessionId,
+                    weightKg = it.weightKg,
+                    reps = it.reps,
+                    isFailure = it.isFailure
+                )
+            }
+        }
 
     private suspend fun SessionEntity.toDomainWithDetails(): WorkoutSession {
         val exerciseLogEntities = exerciseLogDao.getForSession(id).first()

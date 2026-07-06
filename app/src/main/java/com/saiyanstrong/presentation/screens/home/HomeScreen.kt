@@ -8,6 +8,7 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -18,6 +19,11 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material3.CircularProgressIndicator
@@ -29,13 +35,21 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.tooling.preview.PreviewLightDark
@@ -44,6 +58,7 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.saiyanstrong.domain.model.AppUpdate
+import com.saiyanstrong.domain.model.BodyWeightLog
 import com.saiyanstrong.domain.model.PowerLevel
 import com.saiyanstrong.domain.model.SaiyanStage
 import com.saiyanstrong.presentation.components.PowerLevelBar
@@ -68,6 +83,8 @@ fun HomeScreen(
     val powerLevel by viewModel.powerLevel.collectAsStateWithLifecycle()
     val weeklyBars by viewModel.weeklyBars.collectAsStateWithLifecycle()
     val thisWeekStats by viewModel.thisWeekStats.collectAsStateWithLifecycle()
+    val bodyWeightLogs by viewModel.bodyWeightLogs.collectAsStateWithLifecycle()
+    val dotsScore by viewModel.dotsScore.collectAsStateWithLifecycle()
     val updateAvailable by viewModel.updateAvailable.collectAsStateWithLifecycle()
     val downloadState by viewModel.downloadState.collectAsStateWithLifecycle()
     val updateStatus by viewModel.updateStatus.collectAsStateWithLifecycle()
@@ -107,7 +124,10 @@ fun HomeScreen(
         onDismissUpdate = viewModel::onDismissUpdate,
         updateStatus = updateStatus,
         onRetryUpdateCheck = viewModel::retryUpdateCheck,
-        onSettings = onSettings
+        onSettings = onSettings,
+        bodyWeightLogs = bodyWeightLogs,
+        dotsScore = dotsScore,
+        onLogBodyWeight = viewModel::onLogBodyWeight
     )
 }
 
@@ -124,7 +144,10 @@ internal fun HomeContent(
     onDismissUpdate: () -> Unit,
     updateStatus: String = "",
     onRetryUpdateCheck: () -> Unit = {},
-    onSettings: () -> Unit = {}
+    onSettings: () -> Unit = {},
+    bodyWeightLogs: List<BodyWeightLog> = emptyList(),
+    dotsScore: Double? = null,
+    onLogBodyWeight: (Double) -> Unit = {}
 ) {
     Scaffold { padding ->
         Column(
@@ -186,6 +209,15 @@ internal fun HomeContent(
                         .padding(horizontal = 16.dp)
                 )
             }
+
+            BodyWeightCard(
+                logs = bodyWeightLogs,
+                dotsScore = dotsScore,
+                onLogBodyWeight = onLogBodyWeight,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp)
+            )
 
             if (weeklyBars.isNotEmpty()) {
                 Text(
@@ -300,6 +332,116 @@ private fun MiniStatChip(
         )
         if (sub.isNotEmpty()) {
             Text(sub, color = Color.White.copy(alpha = 0.5f), style = MaterialTheme.typography.labelSmall, fontSize = 8.sp)
+        }
+    }
+}
+
+@Composable
+private fun BodyWeightCard(
+    logs: List<BodyWeightLog>,
+    dotsScore: Double?,
+    onLogBodyWeight: (Double) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var showInput by remember { mutableStateOf(false) }
+    var input by remember { mutableStateOf("") }
+
+    val latest = logs.firstOrNull()
+    val previous = logs.getOrNull(1)
+
+    fun save() {
+        input.replace(',', '.').toDoubleOrNull()?.let { weightKg ->
+            onLogBodyWeight(weightKg)
+            input = ""
+            showInput = false
+        }
+    }
+
+    Column(
+        modifier = modifier
+            .background(SaiyanGray, RoundedCornerShape(6.dp))
+            .padding(horizontal = 12.dp, vertical = 10.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("BODYWEIGHT", color = TelemetryGreen, style = MaterialTheme.typography.labelSmall,
+                    fontSize = 9.sp, letterSpacing = 2.sp)
+                Row(verticalAlignment = Alignment.Bottom) {
+                    Text(
+                        latest?.let { WeightFormatter.format(it.weightKg) } ?: "—",
+                        color = NeonGreen, fontSize = 18.sp, fontWeight = FontWeight.Black,
+                        fontFamily = FontFamily.Monospace
+                    )
+                    if (latest != null && previous != null) {
+                        val delta = latest.weightKg - previous.weightKg
+                        Text(
+                            "  ${if (delta >= 0) "+" else ""}${"%.1f".format(delta)}",
+                            color = Color.White.copy(alpha = 0.5f), fontSize = 11.sp,
+                            fontFamily = FontFamily.Monospace,
+                            modifier = Modifier.padding(bottom = 2.dp)
+                        )
+                    }
+                }
+            }
+            if (dotsScore != null) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier.padding(end = 12.dp)) {
+                    Text("DOTS", color = TelemetryGreen, fontSize = 9.sp, letterSpacing = 1.sp)
+                    Text("%.1f".format(dotsScore), color = PowerAmber, fontSize = 16.sp,
+                        fontWeight = FontWeight.Black, fontFamily = FontFamily.Monospace)
+                }
+            }
+            BodyWeightSparkline(
+                logs = logs,
+                modifier = Modifier.width(64.dp).height(28.dp).padding(end = 8.dp)
+            )
+            TextButton(onClick = { showInput = !showInput }) {
+                Text(if (showInput) "✕" else "LOG", color = NeonGreen,
+                    fontWeight = FontWeight.Black, fontSize = 12.sp)
+            }
+        }
+
+        if (showInput) {
+            Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                BasicTextField(
+                    value = input,
+                    onValueChange = { input = it },
+                    singleLine = true,
+                    textStyle = TextStyle(color = Color.White, fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(onDone = { save() }),
+                    cursorBrush = SolidColor(NeonGreen),
+                    modifier = Modifier
+                        .weight(1f)
+                        .border(1.dp, NeonGreen.copy(alpha = 0.5f), RoundedCornerShape(4.dp))
+                        .padding(horizontal = 10.dp, vertical = 8.dp)
+                )
+                Text("kg", color = Color.White.copy(alpha = 0.5f), fontSize = 12.sp,
+                    modifier = Modifier.padding(horizontal = 8.dp))
+                TextButton(onClick = { save() }) {
+                    Text("SAVE", color = NeonGreen, fontWeight = FontWeight.Black, fontSize = 12.sp)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun BodyWeightSparkline(logs: List<BodyWeightLog>, modifier: Modifier = Modifier) {
+    // logs come newest-first; sparkline reads oldest → newest
+    val points = remember(logs) { logs.take(15).reversed() }
+    Canvas(modifier = modifier) {
+        if (points.size < 2) return@Canvas
+        val minVal = points.minOf { it.weightKg }
+        val maxVal = points.maxOf { it.weightKg }
+        val range = (maxVal - minVal).takeIf { it > 0.0 } ?: 1.0
+        val stepX = size.width / (points.size - 1).toFloat()
+        val offsets = points.mapIndexed { i, log ->
+            Offset(i * stepX, size.height * (1f - ((log.weightKg - minVal) / range).toFloat() * 0.8f - 0.1f))
+        }
+        for (i in 0 until offsets.size - 1) {
+            drawLine(NeonGreen.copy(alpha = 0.8f), offsets[i], offsets[i + 1], strokeWidth = 1.5.dp.toPx())
         }
     }
 }

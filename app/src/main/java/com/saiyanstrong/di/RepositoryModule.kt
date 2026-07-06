@@ -2,9 +2,11 @@ package com.saiyanstrong.di
 
 import com.saiyanstrong.data.repository.ExerciseRepositoryImpl
 import com.saiyanstrong.data.repository.SessionRepositoryImpl
+import com.saiyanstrong.data.repository.TemplateRepositoryImpl
 import com.saiyanstrong.data.repository.UserRepositoryImpl
 import com.saiyanstrong.domain.repository.ExerciseRepository
 import com.saiyanstrong.domain.repository.SessionRepository
+import com.saiyanstrong.domain.repository.TemplateRepository
 import com.saiyanstrong.domain.repository.UserRepository
 import dagger.Binds
 import dagger.Module
@@ -23,4 +25,7 @@ abstract class RepositoryModule {
 
     @Binds
     abstract fun bindUserRepository(impl: UserRepositoryImpl): UserRepository
+
+    @Binds
+    abstract fun bindTemplateRepository(impl: TemplateRepositoryImpl): TemplateRepository
 }

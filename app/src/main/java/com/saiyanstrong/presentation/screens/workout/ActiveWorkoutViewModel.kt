@@ -5,7 +5,10 @@ import androidx.lifecycle.viewModelScope
 import com.saiyanstrong.domain.model.Exercise
 import com.saiyanstrong.domain.model.ExerciseLog
 import com.saiyanstrong.domain.model.SetLog
+import com.saiyanstrong.domain.model.WorkoutTemplate
 import com.saiyanstrong.domain.repository.ExerciseRepository
+import com.saiyanstrong.domain.repository.SessionRepository
+import com.saiyanstrong.domain.repository.TemplateRepository
 import com.saiyanstrong.domain.usecase.CompleteSessionUseCase
 import com.saiyanstrong.domain.usecase.GetLastSessionSetsUseCase
 import com.saiyanstrong.domain.usecase.LogSetUseCase
@@ -16,7 +19,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -32,7 +37,9 @@ data class ActiveWorkoutUiState(
     val restTimerForExerciseId: Int? = null,
     val restTimerSecondsRemaining: Int? = null,
     val isExercisePickerVisible: Boolean = false,
-    val completedSessionId: Long? = null
+    val completedSessionId: Long? = null,
+    val templates: List<WorkoutTemplate> = emptyList(),
+    val lastSessionExerciseIds: List<Int> = emptyList()
 )
 
 @HiltViewModel
@@ -40,7 +47,9 @@ class ActiveWorkoutViewModel @Inject constructor(
     private val exerciseRepository: ExerciseRepository,
     private val logSetUseCase: LogSetUseCase,
     private val completeSessionUseCase: CompleteSessionUseCase,
-    private val getLastSessionSetsUseCase: GetLastSessionSetsUseCase
+    private val getLastSessionSetsUseCase: GetLastSessionSetsUseCase,
+    private val templateRepository: TemplateRepository,
+    private val sessionRepository: SessionRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ActiveWorkoutUiState())
@@ -62,6 +71,20 @@ class ActiveWorkoutViewModel @Inject constructor(
             _uiState.update { it.copy(availableExercises = exercises, exerciseUsageCounts = usageCounts) }
         }.launchIn(viewModelScope)
 
+        templateRepository.getAllTemplates()
+            .onEach { templates -> _uiState.update { it.copy(templates = templates) } }
+            .launchIn(viewModelScope)
+
+        viewModelScope.launch {
+            val lastSession = sessionRepository.getAllSessions().first().firstOrNull()
+            _uiState.update {
+                it.copy(lastSessionExerciseIds = lastSession?.exerciseLogs
+                    ?.sortedBy { log -> log.orderIndex }
+                    ?.map { log -> log.exercise.id }
+                    .orEmpty())
+            }
+        }
+
         viewModelScope.launch {
             while (true) {
                 delay(1000)
@@ -78,7 +101,27 @@ class ActiveWorkoutViewModel @Inject constructor(
         _uiState.update { it.copy(isExercisePickerVisible = false) }
     }
 
-    fun onExerciseSelected(exercise: Exercise) {
+    fun onExerciseSelected(exercise: Exercise) = addExercise(exercise)
+
+    fun onStartFromTemplate(template: WorkoutTemplate) {
+        val available = _uiState.value.availableExercises
+        template.exerciseIds.forEach { exerciseId ->
+            available.firstOrNull { it.id == exerciseId }?.let { addExercise(it) }
+        }
+    }
+
+    fun onRepeatLastWorkout() {
+        val available = _uiState.value.availableExercises
+        _uiState.value.lastSessionExerciseIds.forEach { exerciseId ->
+            available.firstOrNull { it.id == exerciseId }?.let { addExercise(it) }
+        }
+    }
+
+    fun onDeleteTemplate(templateId: Long) {
+        viewModelScope.launch { templateRepository.deleteTemplate(templateId) }
+    }
+
+    private fun addExercise(exercise: Exercise) {
         _uiState.update { state ->
             val alreadyAdded = state.exerciseLogs.any { it.exercise.id == exercise.id }
             val exerciseLogs = if (alreadyAdded) state.exerciseLogs else {

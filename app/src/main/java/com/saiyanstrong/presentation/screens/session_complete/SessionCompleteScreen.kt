@@ -83,9 +83,11 @@ fun SessionCompleteScreen(
         strengthProgressPct = strengthPct,
         exerciseRows = exerciseRows,
         titleInput = uiState.titleInput,
+        isTemplateSaved = uiState.isTemplateSaved,
         onTitleChange = viewModel::onTitleChange,
         onDone = viewModel::onDone,
-        onDeleteSession = viewModel::onDeleteSession
+        onDeleteSession = viewModel::onDeleteSession,
+        onSaveAsTemplate = viewModel::onSaveAsTemplate
     )
 }
 
@@ -97,9 +99,11 @@ internal fun SessionCompleteContent(
     strengthProgressPct: Float,
     exerciseRows: List<ExerciseRow>,
     titleInput: String,
+    isTemplateSaved: Boolean = false,
     onTitleChange: (String) -> Unit,
     onDone: () -> Unit,
-    onDeleteSession: () -> Unit
+    onDeleteSession: () -> Unit,
+    onSaveAsTemplate: () -> Unit = {}
 ) {
     BoxWithConstraints(modifier = Modifier.fillMaxSize().background(BG).scanlineTexture()) {
         val panelH = maxHeight * 0.58f
@@ -223,6 +227,25 @@ internal fun SessionCompleteContent(
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp)
             )
+
+            Spacer(Modifier.height(8.dp))
+
+            // ── Save as template ────────────────────────────────
+            OutlinedButton(
+                onClick = onSaveAsTemplate,
+                enabled = !isTemplateSaved,
+                colors = ButtonDefaults.outlinedButtonColors(
+                    contentColor = PowerAmber,
+                    disabledContentColor = NeonGreen
+                ),
+                border = BorderStroke(1.dp, if (isTemplateSaved) NeonGreen.copy(alpha = 0.4f) else PowerAmber),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp)
+            ) {
+                Text(
+                    if (isTemplateSaved) "TEMPLATE SAVED ✓" else "SAVE AS TEMPLATE",
+                    fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp
+                )
+            }
 
             Spacer(Modifier.height(8.dp))
 

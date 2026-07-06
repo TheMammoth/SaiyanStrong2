@@ -24,6 +24,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.saiyanstrong.presentation.screens.exercises.ExerciseBrowserScreen
+import com.saiyanstrong.presentation.screens.exercises.ExerciseDetailScreen
 import com.saiyanstrong.presentation.screens.history.HistoryScreen
 import com.saiyanstrong.presentation.screens.home.HomeScreen
 import com.saiyanstrong.presentation.screens.session_complete.SessionCompleteScreen
@@ -139,7 +140,18 @@ fun NavGraph() {
             }
 
             composable(Screen.Exercises.route) {
-                ExerciseBrowserScreen()
+                ExerciseBrowserScreen(
+                    onExerciseClick = { exerciseId ->
+                        navController.navigate(Screen.ExerciseDetail.createRoute(exerciseId))
+                    }
+                )
+            }
+
+            composable(
+                route = Screen.ExerciseDetail.route,
+                arguments = listOf(navArgument("exerciseId") { type = NavType.IntType })
+            ) {
+                ExerciseDetailScreen(onBack = { navController.popBackStack() })
             }
 
             composable(Screen.Settings.route) {

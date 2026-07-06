@@ -7,11 +7,13 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.saiyanstrong.BuildConfig
 import com.saiyanstrong.domain.model.AppUpdate
+import com.saiyanstrong.domain.model.BodyWeightLog
 import com.saiyanstrong.domain.model.PowerLevel
 import com.saiyanstrong.domain.model.WorkoutSession
 import com.saiyanstrong.domain.repository.SessionRepository
 import com.saiyanstrong.domain.repository.UserRepository
 import com.saiyanstrong.domain.usecase.CheckForUpdateUseCase
+import com.saiyanstrong.domain.usecase.EstimateOneRepMaxUseCase
 import com.saiyanstrong.domain.usecase.GetEvolutionStageUseCase
 import com.saiyanstrong.util.UpdateInstaller
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -22,6 +24,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -31,6 +34,10 @@ import java.util.Calendar
 import javax.inject.Inject
 
 data class WeekBar(val label: String, val count: Int)
+
+// DOTS polynomial coefficients (denominator = a + b·x + c·x² + d·x³ + e·x⁴, x = bodyweight kg)
+private val DOTS_MALE   = doubleArrayOf(-307.75076, 24.0900756, -0.1918759221, 0.0007391293, -0.000001093)
+private val DOTS_FEMALE = doubleArrayOf(-57.96288, 13.6175032, -0.1126655495, 0.0005158568, -0.0000010706)
 
 data class WeekStats(
     val sessions: Int = 0,
@@ -52,7 +59,8 @@ class HomeViewModel @Inject constructor(
     sessionRepository: SessionRepository,
     private val userRepository: UserRepository,
     private val checkForUpdateUseCase: CheckForUpdateUseCase,
-    private val updateInstaller: UpdateInstaller
+    private val updateInstaller: UpdateInstaller,
+    private val estimateOneRepMaxUseCase: EstimateOneRepMaxUseCase
 ) : ViewModel() {
 
     val powerLevel: StateFlow<PowerLevel?> = getEvolutionStageUseCase.execute()
@@ -68,6 +76,60 @@ class HomeViewModel @Inject constructor(
     val thisWeekStats: StateFlow<WeekStats> = allSessions
         .map { sessions -> computeWeekStats(sessions) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), WeekStats())
+
+    // Newest first, as stored
+    val bodyWeightLogs: StateFlow<List<BodyWeightLog>> = userRepository.getBodyWeightLogs()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val dotsScore: StateFlow<Double?> = combine(
+        allSessions,
+        bodyWeightLogs,
+        userRepository.getUseFemaleDotsFormula()
+    ) { sessions, weights, useFemale ->
+        computeDots(sessions, weights.firstOrNull()?.weightKg, useFemale)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    fun onLogBodyWeight(weightKg: Double) {
+        if (weightKg <= 0.0) return
+        viewModelScope.launch { userRepository.logBodyWeight(weightKg) }
+    }
+
+    private fun computeDots(
+        sessions: List<WorkoutSession>,
+        bodyWeightKg: Double?,
+        useFemale: Boolean
+    ): Double? {
+        if (bodyWeightKg == null || bodyWeightKg < 20.0) return null
+
+        var bestSquat = 0.0
+        var bestBench = 0.0
+        var bestDeadlift = 0.0
+        sessions.forEach { session ->
+            session.exerciseLogs.forEach { log ->
+                val name = log.exercise.name
+                val bestE1Rm = log.sets.maxOfOrNull {
+                    estimateOneRepMaxUseCase.execute(it.weightKg, it.reps)
+                } ?: 0.0
+                when {
+                    name.contains("Squat", ignoreCase = true) && name.contains("Barbell", ignoreCase = true) ->
+                        if (bestE1Rm > bestSquat) bestSquat = bestE1Rm
+                    name.contains("Bench Press", ignoreCase = true) && name.contains("Barbell", ignoreCase = true) ->
+                        if (bestE1Rm > bestBench) bestBench = bestE1Rm
+                    name.contains("Deadlift", ignoreCase = true) && !name.contains("Romanian", ignoreCase = true) &&
+                        !name.contains("Stiff", ignoreCase = true) ->
+                        if (bestE1Rm > bestDeadlift) bestDeadlift = bestE1Rm
+                }
+            }
+        }
+        val total = bestSquat + bestBench + bestDeadlift
+        if (total <= 0.0) return null
+
+        val c = if (useFemale) DOTS_FEMALE else DOTS_MALE
+        val x = bodyWeightKg
+        val denominator = c[0] + c[1] * x + c[2] * x * x + c[3] * x * x * x + c[4] * x * x * x * x
+        if (denominator <= 0.0) return null
+        return total * 500.0 / denominator
+    }
 
     private val _updateAvailable = MutableStateFlow<AppUpdate?>(null)
     val updateAvailable: StateFlow<AppUpdate?> = _updateAvailable.asStateFlow()

@@ -52,6 +52,7 @@ fun SettingsScreen(
 ) {
     val checkState by viewModel.checkState.collectAsStateWithLifecycle()
     val downloadState by viewModel.downloadState.collectAsStateWithLifecycle()
+    val useFemaleDots by viewModel.useFemaleDotsFormula.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
     LaunchedEffect(downloadState) {
@@ -106,6 +107,30 @@ fun SettingsScreen(
                     .padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
+                // ── Training section ──────────────────────────────────
+                SectionHeader("TRAINING")
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(SaiyanGray, androidx.compose.foundation.shape.RoundedCornerShape(6.dp))
+                        .clickable { viewModel.onToggleDotsFormula(!useFemaleDots) }
+                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("DOTS formula", color = Color.White.copy(alpha = 0.55f), fontSize = 13.sp)
+                    Text(
+                        if (useFemaleDots) "FEMALE" else "MALE",
+                        color = NeonGreen, fontSize = 13.sp, fontWeight = FontWeight.Bold
+                    )
+                }
+                Text(
+                    "Tap to switch. DOTS scores your squat + bench + deadlift total relative to bodyweight.",
+                    color = Color.White.copy(alpha = 0.35f), fontSize = 11.sp
+                )
+
+                HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
+
                 // ── About section ─────────────────────────────────────
                 SectionHeader("ABOUT")
                 SettingsRow("App", "SaiyanStrong")

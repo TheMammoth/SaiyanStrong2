@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.saiyanstrong.domain.model.PowerLevel
 import com.saiyanstrong.domain.model.WorkoutSession
 import com.saiyanstrong.domain.repository.SessionRepository
+import com.saiyanstrong.domain.repository.TemplateRepository
 import com.saiyanstrong.domain.usecase.GetEvolutionStageUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -28,7 +29,8 @@ data class SessionCompleteUiState(
     val isLoading: Boolean = true,
     val titleInput: String = "",
     val isDone: Boolean = false,
-    val isDeleted: Boolean = false
+    val isDeleted: Boolean = false,
+    val isTemplateSaved: Boolean = false
 )
 
 data class ExerciseRow(
@@ -43,6 +45,7 @@ data class ExerciseRow(
 class SessionCompleteViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val sessionRepository: SessionRepository,
+    private val templateRepository: TemplateRepository,
     getEvolutionStageUseCase: GetEvolutionStageUseCase
 ) : ViewModel() {
 
@@ -108,6 +111,24 @@ class SessionCompleteViewModel @Inject constructor(
         viewModelScope.launch {
             sessionRepository.updateTitle(sessionId, _uiState.value.titleInput.trim())
             _uiState.update { it.copy(isDone = true) }
+        }
+    }
+
+    fun onSaveAsTemplate() {
+        val session = _uiState.value.session ?: return
+        if (_uiState.value.isTemplateSaved) return
+        viewModelScope.launch {
+            val name = _uiState.value.titleInput.trim().ifBlank {
+                val cal = Calendar.getInstance().apply { timeInMillis = session.dateMs }
+                "Workout ${cal.get(Calendar.MONTH) + 1}/${cal.get(Calendar.DAY_OF_MONTH)}"
+            }
+            templateRepository.saveTemplate(
+                name = name,
+                exerciseIds = session.exerciseLogs
+                    .sortedBy { it.orderIndex }
+                    .map { it.exercise.id }
+            )
+            _uiState.update { it.copy(isTemplateSaved = true) }
         }
     }
 

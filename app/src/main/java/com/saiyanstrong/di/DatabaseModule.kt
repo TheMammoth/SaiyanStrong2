@@ -3,11 +3,14 @@ package com.saiyanstrong.di
 import android.content.Context
 import androidx.room.Room
 import com.saiyanstrong.data.local.MIGRATION_3_4
+import com.saiyanstrong.data.local.MIGRATION_4_5
 import com.saiyanstrong.data.local.AppDatabase
+import com.saiyanstrong.data.local.dao.BodyWeightDao
 import com.saiyanstrong.data.local.dao.ExerciseDao
 import com.saiyanstrong.data.local.dao.ExerciseLogDao
 import com.saiyanstrong.data.local.dao.SessionDao
 import com.saiyanstrong.data.local.dao.SetLogDao
+import com.saiyanstrong.data.local.dao.TemplateDao
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -34,7 +37,8 @@ object DatabaseModule {
                         database.execSQL("ALTER TABLE set_logs ADD COLUMN is_failure INTEGER NOT NULL DEFAULT 0")
                     }
                 },
-                MIGRATION_3_4
+                MIGRATION_3_4,
+                MIGRATION_4_5
             )
             .build()
 
@@ -53,4 +57,12 @@ object DatabaseModule {
     @Provides
     @Singleton
     fun provideSetLogDao(database: AppDatabase): SetLogDao = database.setLogDao()
+
+    @Provides
+    @Singleton
+    fun provideTemplateDao(database: AppDatabase): TemplateDao = database.templateDao()
+
+    @Provides
+    @Singleton
+    fun provideBodyWeightDao(database: AppDatabase): BodyWeightDao = database.bodyWeightDao()
 }

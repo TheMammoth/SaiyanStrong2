@@ -662,6 +662,28 @@ _(Claude Code appends here after each completed task)_
   (2) KG/REPS select-all on focus: SetCell switched from String to TextFieldValue state;
   LaunchedEffect(isFocused) with rememberUpdatedState selects TextRange(0, length) when
   field gains focus — first keystroke replaces the old number instead of appending.
+- [x] Sprint 13 — templates + exercise progress + bodyweight/DOTS (v0.10.0):
+  DB v4→5 (MIGRATION_4_5 creates templates, template_exercises, body_weight_logs).
+  (1) Workout templates: TemplateEntity/TemplateExerciseEntity + TemplateDao (join query
+  for exercise names), WorkoutTemplate domain model, TemplateRepository+Impl (transactional
+  save), bound in RepositoryModule. ActiveWorkoutScreen shows QuickStartPanel when workout
+  is empty: REPEAT LAST WORKOUT (amber) + saved template cards (tap=load exercises,
+  long-press=delete). SessionCompleteScreen gains SAVE AS TEMPLATE button (uses session
+  title or "Workout M/D" fallback; disabled after save showing TEMPLATE SAVED ✓).
+  (2) Exercise progress page: SetLogDao.getHistoryForExercise (3-table join → SetWithDate),
+  SessionRepository.getExerciseHistory, ExerciseSetHistory model. ExerciseDetailScreen +
+  ExerciseDetailViewModel: stat chips (best set / est 1RM / total sets / volume), Canvas
+  e1RM-over-time line chart (date-proportional X axis), per-session set history list.
+  ExerciseBrowserScreen rows now clickable → Screen.ExerciseDetail route wired in NavGraph.
+  (3) Bodyweight + DOTS: BodyWeightEntity/BodyWeightDao, BodyWeightLog model, UserRepository
+  bodyweight CRUD + useFemaleDotsFormula pref (DataStore booleanPreferencesKey).
+  HomeScreen BodyWeightCard: latest kg + delta vs previous, 15-point sparkline, inline
+  BasicTextField LOG input (comma tolerated as decimal), DOTS score chip. DOTS computed in
+  HomeViewModel from best e1RM of Squat(Barbell)/Bench Press(Barbell)/Deadlift (excl.
+  Romanian/Stiff) + latest bodyweight, male/female polynomial coefficients; toggle row in
+  Settings under new TRAINING section. versionCode 18, versionName 0.10.0.
+  NOTE: rtk hook rewrites `./gradlew` → `rtk gradlew` in Bash tool and hangs — build via
+  PowerShell `.\gradlew assembleDebug` instead. Build verified SUCCESSFUL.
 
 ## Release rules
 

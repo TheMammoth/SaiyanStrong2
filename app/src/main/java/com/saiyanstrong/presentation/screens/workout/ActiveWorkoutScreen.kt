@@ -68,6 +68,7 @@ import com.saiyanstrong.domain.model.ExerciseCategory
 import com.saiyanstrong.domain.model.ExerciseLog
 import com.saiyanstrong.domain.model.MuscleGroup
 import com.saiyanstrong.domain.model.SetLog
+import com.saiyanstrong.domain.model.WorkoutTemplate
 import com.saiyanstrong.presentation.components.scanlineTexture
 import com.saiyanstrong.presentation.theme.DangerRed
 import com.saiyanstrong.presentation.theme.NeonGreen
@@ -108,7 +109,10 @@ fun ActiveWorkoutScreen(
         onDeleteSet = workoutViewModel::onDeleteSet,
         onSkipRest = workoutViewModel::onSkipRest,
         onAdjustRest = workoutViewModel::onAdjustRestTimer,
-        onFinishWorkout = workoutViewModel::onFinishWorkout
+        onFinishWorkout = workoutViewModel::onFinishWorkout,
+        onStartFromTemplate = workoutViewModel::onStartFromTemplate,
+        onRepeatLastWorkout = workoutViewModel::onRepeatLastWorkout,
+        onDeleteTemplate = workoutViewModel::onDeleteTemplate
     )
 }
 
@@ -129,7 +133,10 @@ internal fun ActiveWorkoutContent(
     onDeleteSet: (Int, Int) -> Unit,
     onSkipRest: () -> Unit,
     onAdjustRest: (Int) -> Unit,
-    onFinishWorkout: () -> Unit
+    onFinishWorkout: () -> Unit,
+    onStartFromTemplate: (WorkoutTemplate) -> Unit = {},
+    onRepeatLastWorkout: () -> Unit = {},
+    onDeleteTemplate: (Long) -> Unit = {}
 ) {
     val totalSets = uiState.exerciseLogs.sumOf { it.sets.size }
     val totalVolumeKg = uiState.exerciseLogs.sumOf { log -> log.sets.sumOf { it.volumeKg } }
@@ -172,6 +179,17 @@ internal fun ActiveWorkoutContent(
                 contentPadding = PaddingValues(12.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
+                if (uiState.exerciseLogs.isEmpty()) {
+                    item {
+                        QuickStartPanel(
+                            templates = uiState.templates,
+                            canRepeatLast = uiState.lastSessionExerciseIds.isNotEmpty(),
+                            onStartFromTemplate = onStartFromTemplate,
+                            onRepeatLastWorkout = onRepeatLastWorkout,
+                            onDeleteTemplate = onDeleteTemplate
+                        )
+                    }
+                }
                 items(uiState.exerciseLogs, key = { it.exercise.id }) { log ->
                     ExerciseLogCard(
                         exerciseLog = log,
@@ -435,6 +453,67 @@ private fun PendingSetRow(
                 .clickable { logSet() },
             horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center
         ) { Text("✓", color = NeonGreen, fontSize = 16.sp, fontWeight = FontWeight.Black) }
+    }
+}
+
+// ── Quick start panel (empty workout) ────────────────────────────────────────
+
+@Composable
+private fun QuickStartPanel(
+    templates: List<WorkoutTemplate>,
+    canRepeatLast: Boolean,
+    onStartFromTemplate: (WorkoutTemplate) -> Unit,
+    onRepeatLastWorkout: () -> Unit,
+    onDeleteTemplate: (Long) -> Unit
+) {
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("QUICK START", color = TelemetryGreen, fontSize = 11.sp,
+            fontWeight = FontWeight.Bold, letterSpacing = 2.sp, fontFamily = FontFamily.Monospace,
+            modifier = Modifier.padding(start = 4.dp, top = 4.dp))
+
+        if (canRepeatLast) {
+            Row(
+                Modifier.fillMaxWidth()
+                    .background(SaiyanGray, RoundedCornerShape(6.dp))
+                    .border(1.dp, PowerAmber.copy(alpha = 0.5f), RoundedCornerShape(6.dp))
+                    .clickable { onRepeatLastWorkout() }
+                    .padding(horizontal = 14.dp, vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(Icons.Default.Refresh, null, tint = PowerAmber, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(10.dp))
+                Text("REPEAT LAST WORKOUT", color = PowerAmber, fontSize = 14.sp,
+                    fontWeight = FontWeight.Black, letterSpacing = 1.sp)
+            }
+        }
+
+        templates.forEach { template ->
+            Column(
+                Modifier.fillMaxWidth()
+                    .background(SaiyanGray, RoundedCornerShape(6.dp))
+                    .border(1.dp, NeonGreen.copy(alpha = 0.3f), RoundedCornerShape(6.dp))
+                    .pointerInput(template.id) {
+                        detectTapGestures(
+                            onTap = { onStartFromTemplate(template) },
+                            onLongPress = { onDeleteTemplate(template.id) }
+                        )
+                    }
+                    .padding(horizontal = 14.dp, vertical = 12.dp)
+            ) {
+                Text(template.name, color = NeonGreen, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                Text(
+                    template.exerciseNames.joinToString("  ·  "),
+                    color = Color.White.copy(alpha = 0.5f), fontSize = 11.sp,
+                    modifier = Modifier.padding(top = 2.dp)
+                )
+            }
+        }
+
+        if (templates.isNotEmpty() || canRepeatLast) {
+            Text("hold a template to delete it", color = Color.White.copy(alpha = 0.3f),
+                fontSize = 10.sp, fontFamily = FontFamily.Monospace,
+                modifier = Modifier.padding(start = 4.dp))
+        }
     }
 }
 

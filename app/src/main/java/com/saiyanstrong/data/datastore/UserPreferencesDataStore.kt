@@ -1,6 +1,7 @@
 package com.saiyanstrong.data.datastore
 
 import android.content.Context
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
@@ -15,6 +16,7 @@ private val Context.userPreferencesDataStore by preferencesDataStore(name = "use
 
 private val LIFETIME_POWER_EARNED           = intPreferencesKey("lifetime_power_earned")
 private val LAST_DISMISSED_UPDATE_VERSION   = stringPreferencesKey("last_dismissed_update_version")
+private val USE_FEMALE_DOTS_FORMULA         = booleanPreferencesKey("use_female_dots_formula")
 
 @Singleton
 class UserPreferencesDataStore @Inject constructor(
@@ -36,6 +38,15 @@ class UserPreferencesDataStore @Inject constructor(
     suspend fun saveDismissedUpdateVersion(version: String) {
         context.userPreferencesDataStore.edit { preferences ->
             preferences[LAST_DISMISSED_UPDATE_VERSION] = version
+        }
+    }
+
+    val useFemaleDotsFormula: Flow<Boolean> = context.userPreferencesDataStore.data
+        .map { preferences -> preferences[USE_FEMALE_DOTS_FORMULA] ?: false }
+
+    suspend fun setUseFemaleDotsFormula(useFemale: Boolean) {
+        context.userPreferencesDataStore.edit { preferences ->
+            preferences[USE_FEMALE_DOTS_FORMULA] = useFemale
         }
     }
 }
