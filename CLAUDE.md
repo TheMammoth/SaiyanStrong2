@@ -57,10 +57,12 @@ Navigation Compose       2.8.4
 Lifecycle / ViewModel    2.8.7
 Room                     2.6.1
 DataStore Preferences    1.1.1
-Hilt                     2.51.1
+Hilt                     2.55
 KSP                      2.1.0-1.0.29
 Lottie Compose           6.6.0
 Kotlin Coroutines        1.8.1
+Coil Compose             2.7.0
+Material Icons Extended  (BOM)
 ```
 
 All versions live in `gradle/libs.versions.toml`. Never hardcode a version string
@@ -78,19 +80,24 @@ app/src/main/
 │   │
 │   ├── data/
 │   │   ├── local/
-│   │   │   ├── AppDatabase.kt
+│   │   │   ├── AppDatabase.kt       ← v5 + all migrations
 │   │   │   ├── dao/
 │   │   │   │   ├── ExerciseDao.kt
 │   │   │   │   ├── SessionDao.kt
 │   │   │   │   ├── ExerciseLogDao.kt
-│   │   │   │   └── SetLogDao.kt
+│   │   │   │   ├── SetLogDao.kt     ← incl. getHistoryForExercise join
+│   │   │   │   ├── TemplateDao.kt
+│   │   │   │   └── BodyWeightDao.kt
 │   │   │   ├── entity/
 │   │   │   │   ├── ExerciseEntity.kt
 │   │   │   │   ├── SessionEntity.kt
 │   │   │   │   ├── ExerciseLogEntity.kt
-│   │   │   │   └── SetLogEntity.kt
+│   │   │   │   ├── SetLogEntity.kt
+│   │   │   │   ├── TemplateEntity.kt
+│   │   │   │   ├── TemplateExerciseEntity.kt
+│   │   │   │   └── BodyWeightEntity.kt
 │   │   │   └── seed/
-│   │   │       └── ExerciseSeeder.kt
+│   │   │       └── ExerciseSeeder.kt      ← 150 exercises
 │   │   ├── datastore/
 │   │   │   └── UserPreferencesDataStore.kt
 │   │   ├── mapper/
@@ -100,7 +107,9 @@ app/src/main/
 │   │   └── repository/
 │   │       ├── ExerciseRepositoryImpl.kt
 │   │       ├── SessionRepositoryImpl.kt
-│   │       └── UserRepositoryImpl.kt
+│   │       ├── UserRepositoryImpl.kt
+│   │       ├── TemplateRepositoryImpl.kt
+│   │       └── ExerciseMediaRepositoryImpl.kt  ← free-exercise-db fetch/cache/match
 │   │
 │   ├── di/
 │   │   ├── DatabaseModule.kt
@@ -113,17 +122,26 @@ app/src/main/
 │   │   │   ├── SetLog.kt
 │   │   │   ├── ExerciseLog.kt
 │   │   │   ├── WorkoutSession.kt
-│   │   │   └── PowerLevel.kt        ← includes SaiyanStage enum
+│   │   │   ├── PowerLevel.kt        ← includes SaiyanStage enum
+│   │   │   ├── WorkoutTemplate.kt
+│   │   │   ├── BodyWeightLog.kt
+│   │   │   ├── ExerciseSetHistory.kt
+│   │   │   ├── ExerciseMedia.kt
+│   │   │   └── AppUpdate.kt
 │   │   ├── repository/
 │   │   │   ├── ExerciseRepository.kt
 │   │   │   ├── SessionRepository.kt
-│   │   │   └── UserRepository.kt
+│   │   │   ├── UserRepository.kt
+│   │   │   ├── TemplateRepository.kt
+│   │   │   └── ExerciseMediaRepository.kt
 │   │   └── usecase/
 │   │       ├── LogSetUseCase.kt
 │   │       ├── CompleteSessionUseCase.kt
 │   │       ├── CalculatePowerLevelUseCase.kt
 │   │       ├── EstimateOneRepMaxUseCase.kt
-│   │       └── GetEvolutionStageUseCase.kt
+│   │       ├── GetEvolutionStageUseCase.kt
+│   │       ├── GetLastSessionSetsUseCase.kt
+│   │       └── CheckForUpdateUseCase.kt
 │   │
 │   ├── presentation/
 │   │   ├── navigation/
@@ -135,34 +153,47 @@ app/src/main/
 │   │   │   └── Type.kt
 │   │   ├── components/
 │   │   │   ├── TelemetryLog.kt      ← typewriter-effect log line
-│   │   │   ├── PowerLevelBar.kt
-│   │   │   └── SaiyanButton.kt
+│   │   │   ├── PowerLevelBar.kt     ← Canvas segmented bar (SegmentedBar)
+│   │   │   ├── ScouterGauge.kt      ← Home hero: 240° arc gauge + ticks
+│   │   │   └── SaiyanButton.kt      ← + scanlineTexture / glow Modifiers
 │   │   └── screens/
-│   │       ├── home/
+│   │       ├── home/                ← scouter dashboard
 │   │       │   ├── HomeScreen.kt
-│   │       │   └── HomeViewModel.kt
+│   │       │   └── HomeViewModel.kt ← DashboardStats, DOTS, bodyweight, updater
 │   │       ├── workout/
-│   │       │   ├── ActiveWorkoutScreen.kt
-│   │       │   ├── ActiveWorkoutViewModel.kt
+│   │       │   ├── WorkoutLandingScreen.kt   ← start empty / templates / repeat last
+│   │       │   ├── WorkoutLandingViewModel.kt
+│   │       │   ├── ActiveWorkoutScreen.kt    ← set table, rest pill bar
+│   │       │   ├── ActiveWorkoutViewModel.kt ← templateId/repeatLast nav args
 │   │       │   └── ExercisePickerSheet.kt
-│   │       ├── visualizer/
+│   │       ├── exercises/
+│   │       │   ├── ExerciseBrowserScreen.kt  ← search/filter/sort list
+│   │       │   ├── ExerciseBrowserViewModel.kt
+│   │       │   ├── ExerciseDetailScreen.kt   ← ABOUT/CHARTS/RECORDS/HISTORY tabs
+│   │       │   └── ExerciseDetailViewModel.kt
+│   │       ├── visualizer/          ← dormant since Sprint 5 (kept, not routed)
 │   │       │   ├── VisualizerScreen.kt
 │   │       │   ├── VisualizerViewModel.kt
 │   │       │   ├── VisualizerState.kt
+│   │       │   ├── AnatomyOverlayCanvas.kt
 │   │       │   └── ParticleTendrilCanvas.kt
 │   │       ├── session_complete/
-│   │       │   ├── SessionCompleteScreen.kt
+│   │       │   ├── SessionCompleteScreen.kt  ← volume hero, results, save-as-template
 │   │       │   └── SessionCompleteViewModel.kt
-│   │       └── history/
-│   │           ├── HistoryScreen.kt
-│   │           └── HistoryViewModel.kt
+│   │       ├── history/
+│   │       │   ├── HistoryScreen.kt ← month groups, Sets|Best set cards, swipe delete
+│   │       │   └── HistoryViewModel.kt
+│   │       └── settings/
+│   │           ├── SettingsScreen.kt         ← updates, DOTS formula toggle
+│   │           └── SettingsViewModel.kt
 │   │
 │   └── util/
-│       └── WeightFormatter.kt
+│       ├── WeightFormatter.kt
+│       └── UpdateInstaller.kt       ← direct HTTP APK download + FileProvider
 │
 └── res/
-    ├── assets/
-    │   └── lottie/                  ← squat_transition.json, deadlift_transition.json, etc.
+    ├── assets/anatomy/              ← legacy big-4 PNGs (unused, candidates for removal)
+    ├── xml/file_paths.xml           ← FileProvider cache path
     └── values/
         └── strings.xml              ← no weight strings here, all formatted in code
 ```
@@ -247,21 +278,30 @@ data class PowerLevel(
 All column names use snake_case. All weight/volume columns end in `_kg`.
 
 ```
-exercises         : id(PK), name, category, primary_muscles(CSV), secondary_muscles(CSV),
-                    lottie_asset, svg_asset_name
+exercises          : id(PK), name, category, primary_muscles(CSV), secondary_muscles(CSV),
+                     lottie_asset, svg_asset_name
 
-sessions          : id(PK autoGen), date_ms, duration_ms, total_volume_kg,
-                    power_earned, notes
+sessions           : id(PK autoGen), date_ms, duration_ms, total_volume_kg,
+                     power_earned, notes, title
 
-exercise_logs     : id(PK autoGen), session_id(FK→sessions CASCADE),
-                    exercise_id(FK→exercises), order_index
+exercise_logs      : id(PK autoGen), session_id(FK→sessions CASCADE),
+                     exercise_id(FK→exercises), order_index
 
-set_logs          : id(PK autoGen), exercise_log_id(FK→exercise_logs CASCADE),
-                    set_number, weight_kg, reps, rpe(nullable), volume_kg,
-                    timestamp_ms
+set_logs           : id(PK autoGen), exercise_log_id(FK→exercise_logs CASCADE),
+                     set_number, weight_kg, reps, rpe(nullable), is_failure,
+                     volume_kg, timestamp_ms
+
+templates          : id(PK autoGen), name, created_ms
+
+template_exercises : id(PK autoGen), template_id(FK→templates CASCADE),
+                     exercise_id(FK→exercises), order_index
+
+body_weight_logs   : id(PK autoGen), date_ms, weight_kg
 ```
 
-Room DB version: **1**. Any future schema change requires a Migration, never
+Room DB version: **5**. Migrations: 1→2 sessions.title, 2→3 set_logs.is_failure,
+3→4 exercise re-seed (DELETE FROM exercises), 4→5 templates/template_exercises/
+body_weight_logs. Any future schema change requires a Migration, never
 `fallbackToDestructiveMigration()` in production.
 
 ---
@@ -432,29 +472,26 @@ sealed class Screen(val route: String) {
 
 ---
 
-## Build phases — current task
+## Build phases — status
 
-**PHASE 1 (current):** Data foundation. Build in this order:
+**All 5 original phases are complete** (data foundation, domain layer, active workout,
+visualizer, session complete + history). Ongoing work is sprint-based and tracked in
+`## Progress log` below. Current app version: see `versionName` in `app/build.gradle.kts`
+(kept in sync with GitHub release tags — see `## Release rules`).
 
-1. `gradle/libs.versions.toml` + `app/build.gradle.kts` — add all deps
-2. All 4 Room entities in `data/local/entity/`
-3. All 4 DAOs in `data/local/dao/`
-4. `AppDatabase.kt` referencing all entities and DAOs
-5. `di/DatabaseModule.kt` — provides DB + all DAOs as singletons
-6. `ExerciseSeeder.kt` with Big 4 data
-7. `SaiyanStrongApp.kt` — @HiltAndroidApp, seeds on first run
-8. `MainActivity.kt` — minimal, just `setContent { SaiyanTheme { } }`
-9. `util/WeightFormatter.kt`
-10. `di/RepositoryModule.kt` stub (can be empty binds for now)
+**Verify any change:** `.\gradlew assembleDebug` must pass (use PowerShell — the rtk
+Bash hook rewrites `./gradlew` and hangs). `grep -r " lb" app/src` must return zero
+results.
 
-**Verify Phase 1:** `./gradlew assembleDebug` must pass clean.
-Open Database Inspector on device/emulator — `exercises` table must have 4 rows.
-`grep -r " lb" app/src` must return zero results.
-
-**PHASE 2 (next):** Domain layer — all models, repository interfaces, use cases.
-**PHASE 3:** Active Workout screen + ViewModel (set logging, rest timer).
-**PHASE 4:** Visualizer state machine + screen.
-**PHASE 5:** Session Complete + History screens.
+**Current app map (beyond the original spec):**
+- 5-tab bottom nav: Home (scouter gauge dashboard) | History | Workout (landing →
+  active session) | Exercises (browser → detail tabs ABOUT/CHARTS/RECORDS/HISTORY) |
+  Settings
+- Workout templates + repeat-last (workout landing / SAVE AS TEMPLATE on session complete)
+- Bodyweight log + DOTS score (Home card, formula toggle in Settings)
+- Exercise media: free-exercise-db flip-book photos + instructions (ABOUT tab, Coil)
+- In-app updater: GitHub releases/latest → direct HTTP download to cache → FileProvider
+  install (`util/UpdateInstaller.kt`)
 
 ---
 
