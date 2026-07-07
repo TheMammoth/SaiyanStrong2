@@ -51,4 +51,11 @@ class UserRepositoryImpl @Inject constructor(
     override suspend fun setUseFemaleDotsFormula(useFemale: Boolean) {
         userPreferencesDataStore.setUseFemaleDotsFormula(useFemale)
     }
+
+    override fun getDefaultRestSeconds(): Flow<Int> =
+        userPreferencesDataStore.defaultRestSeconds
+
+    override suspend fun setDefaultRestSeconds(seconds: Int) {
+        userPreferencesDataStore.setDefaultRestSeconds(seconds)
+    }
 }

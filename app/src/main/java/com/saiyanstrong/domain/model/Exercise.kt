@@ -9,5 +9,6 @@ data class Exercise(
     val primaryMuscles: List<MuscleGroup>,
     val secondaryMuscles: List<MuscleGroup>,
     val lottieAsset: String,
-    val svgAssetName: String
+    val svgAssetName: String,
+    val restTimerSec: Int? = null
 )

@@ -9,6 +9,7 @@ import com.saiyanstrong.domain.model.SetLog
 import com.saiyanstrong.domain.repository.ExerciseRepository
 import com.saiyanstrong.domain.repository.SessionRepository
 import com.saiyanstrong.domain.repository.TemplateRepository
+import com.saiyanstrong.domain.repository.UserRepository
 import com.saiyanstrong.domain.usecase.CompleteSessionUseCase
 import com.saiyanstrong.domain.usecase.GetLastSessionSetsUseCase
 import com.saiyanstrong.domain.usecase.LogSetUseCase
@@ -21,6 +22,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -48,7 +50,8 @@ class ActiveWorkoutViewModel @Inject constructor(
     private val completeSessionUseCase: CompleteSessionUseCase,
     private val getLastSessionSetsUseCase: GetLastSessionSetsUseCase,
     private val templateRepository: TemplateRepository,
-    private val sessionRepository: SessionRepository
+    private val sessionRepository: SessionRepository,
+    userRepository: UserRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ActiveWorkoutUiState())
@@ -60,7 +63,8 @@ class ActiveWorkoutViewModel @Inject constructor(
     private val _elapsedSeconds = MutableStateFlow(0)
     val elapsedSeconds: StateFlow<Int> = _elapsedSeconds.asStateFlow()
 
-    val restDurationSeconds: Int = REST_DURATION_SECONDS
+    private val _defaultRestSeconds = MutableStateFlow(REST_DURATION_SECONDS)
+    val defaultRestSeconds: StateFlow<Int> = _defaultRestSeconds.asStateFlow()
 
     init {
         combine(
@@ -69,6 +73,10 @@ class ActiveWorkoutViewModel @Inject constructor(
         ) { exercises, usageCounts ->
             _uiState.update { it.copy(availableExercises = exercises, exerciseUsageCounts = usageCounts) }
         }.launchIn(viewModelScope)
+
+        userRepository.getDefaultRestSeconds()
+            .onEach { _defaultRestSeconds.value = it }
+            .launchIn(viewModelScope)
 
         // Preload exercises when launched from the workout landing screen
         val templateId: Long = savedStateHandle["templateId"] ?: -1L
@@ -142,6 +150,7 @@ class ActiveWorkoutViewModel @Inject constructor(
     }
 
     fun onLogSet(exerciseId: Int, weightKg: Double, reps: Int, rpe: Float?, isFailure: Boolean = false) {
+        val restSeconds = restSecondsFor(exerciseId)
         _uiState.update { state ->
             val exerciseLogs = state.exerciseLogs.map { log ->
                 if (log.exercise.id != exerciseId) log
@@ -162,10 +171,45 @@ class ActiveWorkoutViewModel @Inject constructor(
                 exerciseLogs = exerciseLogs,
                 pendingSetCounts = state.pendingSetCounts + (exerciseId to newCount),
                 restTimerForExerciseId = exerciseId,
-                restTimerSecondsRemaining = REST_DURATION_SECONDS
+                restTimerSecondsRemaining = restSeconds
             )
         }
-        startRestTimer()
+        startRestTimerFrom(restSeconds)
+    }
+
+    /** Per-exercise rest override, else the user's global default. */
+    fun restSecondsFor(exerciseId: Int): Int =
+        _uiState.value.exerciseLogs.firstOrNull { it.exercise.id == exerciseId }
+            ?.exercise?.restTimerSec
+            ?: _defaultRestSeconds.value
+
+    fun onRemoveExercise(exerciseId: Int) {
+        if (_uiState.value.restTimerForExerciseId == exerciseId) restTimerJob?.cancel()
+        _uiState.update { state ->
+            val timerWasHere = state.restTimerForExerciseId == exerciseId
+            state.copy(
+                exerciseLogs = state.exerciseLogs
+                    .filter { it.exercise.id != exerciseId }
+                    .mapIndexed { index, log -> log.copy(orderIndex = index) },
+                pendingSetCounts = state.pendingSetCounts - exerciseId,
+                previousPerformance = state.previousPerformance - exerciseId,
+                restTimerForExerciseId = if (timerWasHere) null else state.restTimerForExerciseId,
+                restTimerSecondsRemaining = if (timerWasHere) null else state.restTimerSecondsRemaining
+            )
+        }
+    }
+
+    fun onSetExerciseRestTimer(exerciseId: Int, seconds: Int?) {
+        viewModelScope.launch {
+            exerciseRepository.setRestTimerSec(exerciseId, seconds?.coerceIn(10, 600))
+        }
+        _uiState.update { state ->
+            state.copy(exerciseLogs = state.exerciseLogs.map { log ->
+                if (log.exercise.id == exerciseId)
+                    log.copy(exercise = log.exercise.copy(restTimerSec = seconds?.coerceIn(10, 600)))
+                else log
+            })
+        }
     }
 
     fun onEditSet(exerciseId: Int, setIndex: Int, weightKg: Double, reps: Int, isFailure: Boolean) {
@@ -208,8 +252,6 @@ class ActiveWorkoutViewModel @Inject constructor(
         val current = _uiState.value.restTimerSecondsRemaining ?: return
         startRestTimerFrom((current + deltaSec).coerceIn(10, 600))
     }
-
-    private fun startRestTimer() = startRestTimerFrom(REST_DURATION_SECONDS)
 
     private fun startRestTimerFrom(seconds: Int) {
         restTimerJob?.cancel()

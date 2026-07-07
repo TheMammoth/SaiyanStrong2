@@ -17,6 +17,7 @@ private val Context.userPreferencesDataStore by preferencesDataStore(name = "use
 private val LIFETIME_POWER_EARNED           = intPreferencesKey("lifetime_power_earned")
 private val LAST_DISMISSED_UPDATE_VERSION   = stringPreferencesKey("last_dismissed_update_version")
 private val USE_FEMALE_DOTS_FORMULA         = booleanPreferencesKey("use_female_dots_formula")
+private val DEFAULT_REST_SECONDS            = intPreferencesKey("default_rest_seconds")
 
 @Singleton
 class UserPreferencesDataStore @Inject constructor(
@@ -47,6 +48,15 @@ class UserPreferencesDataStore @Inject constructor(
     suspend fun setUseFemaleDotsFormula(useFemale: Boolean) {
         context.userPreferencesDataStore.edit { preferences ->
             preferences[USE_FEMALE_DOTS_FORMULA] = useFemale
+        }
+    }
+
+    val defaultRestSeconds: Flow<Int> = context.userPreferencesDataStore.data
+        .map { preferences -> preferences[DEFAULT_REST_SECONDS] ?: 90 }
+
+    suspend fun setDefaultRestSeconds(seconds: Int) {
+        context.userPreferencesDataStore.edit { preferences ->
+            preferences[DEFAULT_REST_SECONDS] = seconds.coerceIn(10, 600)
         }
     }
 }

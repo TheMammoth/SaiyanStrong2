@@ -23,6 +23,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
@@ -41,6 +44,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.saiyanstrong.domain.model.PowerLevel
 import com.saiyanstrong.domain.model.SaiyanStage
 import com.saiyanstrong.domain.model.WorkoutSession
+import com.saiyanstrong.presentation.components.ConfirmDialog
 import com.saiyanstrong.presentation.components.SaiyanButton
 import com.saiyanstrong.presentation.components.scanlineTexture
 import com.saiyanstrong.presentation.theme.DangerRed
@@ -274,6 +278,15 @@ internal fun SessionCompleteContent(
         }
 
         // ── Pinned actions ──────────────────────────────────────────
+        var showDeleteConfirm by remember { mutableStateOf(false) }
+        if (showDeleteConfirm) {
+            ConfirmDialog(
+                title = "DELETE SESSION?",
+                message = "This workout and all its sets will be permanently deleted.",
+                onConfirm = onDeleteSession,
+                onDismiss = { showDeleteConfirm = false }
+            )
+        }
         Row(
             Modifier
                 .fillMaxWidth()
@@ -281,7 +294,7 @@ internal fun SessionCompleteContent(
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             OutlinedButton(
-                onClick = onDeleteSession,
+                onClick = { showDeleteConfirm = true },
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = DangerRed),
                 border = BorderStroke(1.dp, DangerRed),
                 modifier = Modifier.weight(0.35f)

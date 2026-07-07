@@ -28,6 +28,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -39,6 +42,7 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.saiyanstrong.domain.model.WorkoutSession
+import com.saiyanstrong.presentation.components.ConfirmDialog
 import com.saiyanstrong.presentation.theme.DangerRed
 import com.saiyanstrong.presentation.theme.NeonGreen
 import com.saiyanstrong.presentation.theme.PowerAmber
@@ -160,12 +164,23 @@ internal fun SwipeableSessionRow(
     onClick: () -> Unit,
     onDelete: () -> Unit
 ) {
+    var showConfirm by remember { mutableStateOf(false) }
     val dismissState = rememberSwipeToDismissBoxState(
         confirmValueChange = { value ->
-            if (value == SwipeToDismissBoxValue.EndToStart) { onDelete(); true } else false
+            if (value == SwipeToDismissBoxValue.EndToStart) showConfirm = true
+            false  // never auto-dismiss — the dialog decides
         },
         positionalThreshold = { it * 0.4f }
     )
+
+    if (showConfirm) {
+        ConfirmDialog(
+            title = "DELETE SESSION?",
+            message = "\"${session.title.ifBlank { "Workout" }}\" with ${session.exerciseLogs.sumOf { it.sets.size }} sets will be permanently deleted.",
+            onConfirm = onDelete,
+            onDismiss = { showConfirm = false }
+        )
+    }
     SwipeToDismissBox(
         state = dismissState,
         backgroundContent = {

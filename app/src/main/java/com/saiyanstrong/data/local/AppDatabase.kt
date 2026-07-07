@@ -53,6 +53,12 @@ val MIGRATION_4_5 = object : Migration(4, 5) {
     }
 }
 
+val MIGRATION_5_6 = object : Migration(5, 6) {
+    override fun migrate(database: SupportSQLiteDatabase) {
+        database.execSQL("ALTER TABLE exercises ADD COLUMN rest_timer_sec INTEGER")
+    }
+}
+
 @Database(
     entities = [
         ExerciseEntity::class,
@@ -63,7 +69,7 @@ val MIGRATION_4_5 = object : Migration(4, 5) {
         TemplateExerciseEntity::class,
         BodyWeightEntity::class
     ],
-    version = 5,
+    version = 6,
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {

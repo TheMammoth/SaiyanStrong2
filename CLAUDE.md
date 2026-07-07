@@ -799,6 +799,25 @@ _(Claude Code appends here after each completed task)_
   59ae14f6… and release asset is byte-identical to local build — install path was fine,
   only download was broken. NOTE: devices on ≤0.12.0 must sideload once (old downloader);
   updater self-heals from 0.12.1 onward. versionCode 23, versionName 0.12.1.
+- [x] Sprint 17 — deletes with confirm, steppers, adjustable rest timers (v0.13.0):
+  (1) components/ConfirmDialog.kt (dark AlertDialog, DELETE red / CANCEL green) used
+  everywhere destructive: set delete (long-press completed row), REMOVE EXERCISE (new —
+  ⋮ DropdownMenu on exercise card, was a dead placeholder icon; Link icon dropped),
+  History swipe (confirmValueChange now returns false and opens dialog — row snaps back
+  on cancel), SessionComplete DELETE button, template long-press on workout landing.
+  ActiveWorkoutViewModel.onRemoveExercise reindexes orderIndex + clears pending/prev-perf
+  + cancels rest timer if it was that exercise's.
+  (2) KG/REPS steppers: SetCell gained onFocusChanged; focused cell shows a StepperRow
+  (−step/+step chips) under the row — kg step 2.0 dumbbell/kettlebell else 2.5, reps ±1;
+  completed rows commit the edit immediately, pending rows stay local until ✓.
+  (3) Rest timers: DataStore default_rest_seconds (90 default, clamp 10–600) —
+  UserRepository get/setDefaultRestSeconds; Settings TRAINING gains "Default rest timer"
+  −15s/+15s row. Per-exercise override: DB v6 (MIGRATION_5_6 adds exercises.rest_timer_sec
+  INTEGER nullable), Exercise.restTimerSec, ExerciseDao.updateRestTimer,
+  ExerciseRepository.setRestTimerSec; ⋮ → REST TIMER opens RestTimerDialog (−15s/+15s,
+  SAVE / USE DEFAULT=null). onLogSet + ADD SET label use restSecondsFor(exerciseId) =
+  override ?: default; VM defaultRestSeconds StateFlow feeds the screen.
+  versionCode 24, versionName 0.13.0.
 
 ## Release rules
 

@@ -12,5 +12,6 @@ data class ExerciseEntity(
     @ColumnInfo(name = "primary_muscles") val primaryMuscles: String,
     @ColumnInfo(name = "secondary_muscles") val secondaryMuscles: String,
     @ColumnInfo(name = "lottie_asset") val lottieAsset: String,
-    @ColumnInfo(name = "svg_asset_name") val svgAssetName: String
+    @ColumnInfo(name = "svg_asset_name") val svgAssetName: String,
+    @ColumnInfo(name = "rest_timer_sec") val restTimerSec: Int? = null
 )

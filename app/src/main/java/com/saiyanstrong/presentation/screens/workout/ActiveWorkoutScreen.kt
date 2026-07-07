@@ -26,10 +26,14 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.ExpandMore
-import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Timer
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -70,6 +74,7 @@ import com.saiyanstrong.domain.model.ExerciseCategory
 import com.saiyanstrong.domain.model.ExerciseLog
 import com.saiyanstrong.domain.model.MuscleGroup
 import com.saiyanstrong.domain.model.SetLog
+import com.saiyanstrong.presentation.components.ConfirmDialog
 import com.saiyanstrong.presentation.components.scanlineTexture
 import com.saiyanstrong.presentation.theme.DangerRed
 import com.saiyanstrong.presentation.theme.NeonGreen
@@ -96,10 +101,11 @@ fun ActiveWorkoutScreen(
 ) {
     val uiState by workoutViewModel.uiState.collectAsStateWithLifecycle()
     val elapsedSeconds by workoutViewModel.elapsedSeconds.collectAsStateWithLifecycle()
+    val defaultRestSeconds by workoutViewModel.defaultRestSeconds.collectAsStateWithLifecycle()
     LaunchedEffect(uiState.completedSessionId) { uiState.completedSessionId?.let(onWorkoutFinished) }
     ActiveWorkoutContent(
         uiState = uiState, elapsedSeconds = elapsedSeconds,
-        restDurationSeconds = workoutViewModel.restDurationSeconds,
+        restDurationSeconds = defaultRestSeconds,
         onViewHistory = onViewHistory,
         onAddExerciseClicked = workoutViewModel::onAddExerciseClicked,
         onExerciseSelected = workoutViewModel::onExerciseSelected,
@@ -110,7 +116,9 @@ fun ActiveWorkoutScreen(
         onDeleteSet = workoutViewModel::onDeleteSet,
         onSkipRest = workoutViewModel::onSkipRest,
         onAdjustRest = workoutViewModel::onAdjustRestTimer,
-        onFinishWorkout = workoutViewModel::onFinishWorkout
+        onFinishWorkout = workoutViewModel::onFinishWorkout,
+        onRemoveExercise = workoutViewModel::onRemoveExercise,
+        onSetExerciseRestTimer = workoutViewModel::onSetExerciseRestTimer
     )
 }
 
@@ -131,12 +139,13 @@ internal fun ActiveWorkoutContent(
     onDeleteSet: (Int, Int) -> Unit,
     onSkipRest: () -> Unit,
     onAdjustRest: (Int) -> Unit,
-    onFinishWorkout: () -> Unit
+    onFinishWorkout: () -> Unit,
+    onRemoveExercise: (Int) -> Unit = {},
+    onSetExerciseRestTimer: (Int, Int?) -> Unit = { _, _ -> }
 ) {
     val totalSets = uiState.exerciseLogs.sumOf { it.sets.size }
     val totalVolumeKg = uiState.exerciseLogs.sumOf { log -> log.sets.sumOf { it.volumeKg } }
     val elapsed   = formatElapsed(elapsedSeconds)
-    val restLabel = formatRestLabel(restDurationSeconds)
 
     Scaffold { padding ->
         Column(Modifier.fillMaxSize().scanlineTexture().padding(padding)) {
@@ -183,13 +192,16 @@ internal fun ActiveWorkoutContent(
                         restTimerSecondsRemaining = if (log.exercise.id == uiState.restTimerForExerciseId)
                             uiState.restTimerSecondsRemaining else null,
                         restTimerTotalSeconds = uiState.restTimerTotalSeconds,
-                        restLabel = restLabel,
+                        restLabel = formatRestLabel(log.exercise.restTimerSec ?: restDurationSeconds),
+                        defaultRestSeconds = restDurationSeconds,
                         onAddSetClicked = { onAddSetClicked(log.exercise.id) },
                         onLogSet = { kg, reps, rpe, fail -> onLogSet(log.exercise.id, kg, reps, rpe, fail) },
                         onEditSet = { idx, kg, reps, fail -> onEditSet(log.exercise.id, idx, kg, reps, fail) },
                         onDeleteSet = { idx -> onDeleteSet(log.exercise.id, idx) },
                         onSkipRest = onSkipRest,
-                        onAdjustRest = onAdjustRest
+                        onAdjustRest = onAdjustRest,
+                        onRemoveExercise = { onRemoveExercise(log.exercise.id) },
+                        onSetRestTimer = { seconds -> onSetExerciseRestTimer(log.exercise.id, seconds) }
                     )
                 }
                 item {
@@ -230,15 +242,24 @@ internal fun ExerciseLogCard(
     restTimerSecondsRemaining: Int? = null,
     restTimerTotalSeconds: Int = 90,
     restLabel: String = "1:30",
+    defaultRestSeconds: Int = 90,
     onAddSetClicked: () -> Unit = {},
     onLogSet: (Double, Int, Float?, Boolean) -> Unit = { _, _, _, _ -> },
     onEditSet: (Int, Double, Int, Boolean) -> Unit = { _, _, _, _ -> },
     onDeleteSet: (Int) -> Unit = {},
     onSkipRest: () -> Unit = {},
-    onAdjustRest: (Int) -> Unit = {}
+    onAdjustRest: (Int) -> Unit = {},
+    onRemoveExercise: () -> Unit = {},
+    onSetRestTimer: (Int?) -> Unit = {}
 ) {
     val lastWeight = exerciseLog.sets.lastOrNull()?.weightKg ?: 60.0
     val lastReps   = exerciseLog.sets.lastOrNull()?.reps ?: 5
+    val stepKg = if (exerciseLog.exercise.name.contains("Dumbbell", true) ||
+        exerciseLog.exercise.name.contains("Kettlebell", true)) 2.0 else 2.5
+
+    var showMenu by remember { mutableStateOf(false) }
+    var showRemoveConfirm by remember { mutableStateOf(false) }
+    var showRestDialog by remember { mutableStateOf(false) }
 
     Column(
         Modifier.fillMaxWidth()
@@ -250,12 +271,43 @@ internal fun ExerciseLogCard(
             verticalAlignment = Alignment.CenterVertically) {
             Text(exerciseLog.exercise.name, color = NeonGreen, fontSize = 15.sp,
                 fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-            IconButton(onClick = {}, modifier = Modifier.size(36.dp)) {
-                Icon(Icons.Default.Link, null, tint = Color.White.copy(alpha = 0.45f), modifier = Modifier.size(18.dp))
+            Box {
+                IconButton(onClick = { showMenu = true }, modifier = Modifier.size(36.dp)) {
+                    Icon(Icons.Default.MoreVert, null, tint = Color.White.copy(alpha = 0.45f), modifier = Modifier.size(18.dp))
+                }
+                DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+                    DropdownMenuItem(
+                        text = { Text("REST TIMER ($restLabel)", fontSize = 13.sp, fontWeight = FontWeight.Bold) },
+                        leadingIcon = { Icon(Icons.Default.Timer, null, tint = PowerAmber, modifier = Modifier.size(18.dp)) },
+                        onClick = { showMenu = false; showRestDialog = true }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("REMOVE EXERCISE", color = DangerRed, fontSize = 13.sp, fontWeight = FontWeight.Bold) },
+                        leadingIcon = { Icon(Icons.Default.Delete, null, tint = DangerRed, modifier = Modifier.size(18.dp)) },
+                        onClick = { showMenu = false; showRemoveConfirm = true }
+                    )
+                }
             }
-            IconButton(onClick = {}, modifier = Modifier.size(36.dp)) {
-                Icon(Icons.Default.MoreVert, null, tint = Color.White.copy(alpha = 0.45f), modifier = Modifier.size(18.dp))
-            }
+        }
+
+        if (showRemoveConfirm) {
+            ConfirmDialog(
+                title = "REMOVE EXERCISE?",
+                message = "${exerciseLog.exercise.name} and its ${exerciseLog.sets.size} logged set${if (exerciseLog.sets.size != 1) "s" else ""} will be removed from this workout.",
+                confirmLabel = "REMOVE",
+                onConfirm = onRemoveExercise,
+                onDismiss = { showRemoveConfirm = false }
+            )
+        }
+
+        if (showRestDialog) {
+            RestTimerDialog(
+                exerciseName = exerciseLog.exercise.name,
+                currentSeconds = exerciseLog.exercise.restTimerSec,
+                defaultSeconds = defaultRestSeconds,
+                onSave = { seconds -> onSetRestTimer(seconds) },
+                onDismiss = { showRestDialog = false }
+            )
         }
 
         // Column headers
@@ -274,6 +326,7 @@ internal fun ExerciseLogCard(
             CompletedSetRow(
                 set = set, setIndex = idx,
                 previousSet = previousSets.getOrNull(idx),
+                stepKg = stepKg,
                 onEdit = { kg, reps, fail -> onEditSet(idx, kg, reps, fail) },
                 onDelete = { onDeleteSet(idx) },
                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 1.dp)
@@ -296,6 +349,7 @@ internal fun ExerciseLogCard(
                 previousSet = previousSets.getOrNull(exerciseLog.sets.size + pendingIdx),
                 initialWeightKg = lastWeight,
                 initialReps = lastReps,
+                stepKg = stepKg,
                 onLogSet = onLogSet,
                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 1.dp)
             )
@@ -318,6 +372,7 @@ private fun CompletedSetRow(
     set: SetLog,
     setIndex: Int,
     previousSet: SetLog?,
+    stepKg: Double = 2.5,
     onEdit: (Double, Int, Boolean) -> Unit,
     onDelete: () -> Unit,
     modifier: Modifier = Modifier
@@ -325,6 +380,8 @@ private fun CompletedSetRow(
     var kgTfv    by remember(set.id, setIndex) { mutableStateOf(TextFieldValue(set.weightKg.fmtKg())) }
     var repsTfv  by remember(set.id, setIndex) { mutableStateOf(TextFieldValue("${set.reps}")) }
     var editFail by remember(set.id, setIndex) { mutableStateOf(set.isFailure) }
+    var focusedCell by remember { mutableStateOf<String?>(null) }
+    var showDeleteConfirm by remember { mutableStateOf(false) }
     val kgFocus   = remember { FocusRequester() }
     val repsFocus = remember { FocusRequester() }
     val focusMgr  = LocalFocusManager.current
@@ -340,41 +397,69 @@ private fun CompletedSetRow(
         focusMgr.clearFocus()
     }
 
-    Row(
-        modifier = modifier.fillMaxWidth()
-            .background(CompletedSetBg, RoundedCornerShape(4.dp))
-            .pointerInput(onDelete) { detectTapGestures(onLongPress = { onDelete() }) }
-            .padding(vertical = 6.dp, horizontal = 8.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        // SET — tap to toggle failure
-        Text(
-            if (editFail) "F" else "${set.setNumber}",
-            color = if (editFail) DangerRed else Color.White,
-            fontSize = 13.sp, fontWeight = FontWeight.Bold,
-            modifier = Modifier.width(28.dp).clickable {
-                val f = !editFail; editFail = f
-                onEdit(kgTfv.text.toDoubleOrNull() ?: set.weightKg, repsTfv.text.toIntOrNull() ?: set.reps, f)
-            }
+    if (showDeleteConfirm) {
+        ConfirmDialog(
+            title = "DELETE SET ${set.setNumber}?",
+            message = "${set.weightKg.fmtKg()} kg × ${set.reps} will be removed.",
+            onConfirm = onDelete,
+            onDismiss = { showDeleteConfirm = false }
         )
-        Text(prevText, color = Color.White.copy(alpha = 0.45f), fontSize = 11.sp, modifier = Modifier.weight(1.2f))
-        SetCell(
-            value = kgTfv, onValueChange = { kgTfv = it },
-            keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Next,
-            onImeAction = { repsFocus.requestFocus() },
-            focusRequester = kgFocus, modifier = Modifier.weight(1f)
-        )
-        SetCell(
-            value = repsTfv, onValueChange = { repsTfv = it },
-            keyboardType = KeyboardType.Number, imeAction = ImeAction.Done,
-            onImeAction = { confirm() },
-            focusRequester = repsFocus, modifier = Modifier.weight(0.8f)
-        )
-        // ✓ visual only
-        Column(
-            Modifier.width(44.dp).height(32.dp).clip(RoundedCornerShape(4.dp)).background(CompletedCheckBg),
-            horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center
-        ) { Text("✓", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Black) }
+    }
+
+    Column(modifier = modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth()
+                .background(CompletedSetBg, RoundedCornerShape(4.dp))
+                .pointerInput(Unit) { detectTapGestures(onLongPress = { showDeleteConfirm = true }) }
+                .padding(vertical = 6.dp, horizontal = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // SET — tap to toggle failure
+            Text(
+                if (editFail) "F" else "${set.setNumber}",
+                color = if (editFail) DangerRed else Color.White,
+                fontSize = 13.sp, fontWeight = FontWeight.Bold,
+                modifier = Modifier.width(28.dp).clickable {
+                    val f = !editFail; editFail = f
+                    onEdit(kgTfv.text.toDoubleOrNull() ?: set.weightKg, repsTfv.text.toIntOrNull() ?: set.reps, f)
+                }
+            )
+            Text(prevText, color = Color.White.copy(alpha = 0.45f), fontSize = 11.sp, modifier = Modifier.weight(1.2f))
+            SetCell(
+                value = kgTfv, onValueChange = { kgTfv = it },
+                keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Next,
+                onImeAction = { repsFocus.requestFocus() },
+                focusRequester = kgFocus,
+                onFocusChanged = { if (it) focusedCell = "kg" else if (focusedCell == "kg") focusedCell = null },
+                modifier = Modifier.weight(1f)
+            )
+            SetCell(
+                value = repsTfv, onValueChange = { repsTfv = it },
+                keyboardType = KeyboardType.Number, imeAction = ImeAction.Done,
+                onImeAction = { confirm() },
+                focusRequester = repsFocus,
+                onFocusChanged = { if (it) focusedCell = "reps" else if (focusedCell == "reps") focusedCell = null },
+                modifier = Modifier.weight(0.8f)
+            )
+            // ✓ visual only
+            Column(
+                Modifier.width(44.dp).height(32.dp).clip(RoundedCornerShape(4.dp)).background(CompletedCheckBg),
+                horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center
+            ) { Text("✓", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Black) }
+        }
+
+        when (focusedCell) {
+            "kg" -> StepperRow(stepLabel = stepKg.fmtKg(), onStep = { direction ->
+                val kg = ((kgTfv.text.toDoubleOrNull() ?: set.weightKg) + direction * stepKg).coerceAtLeast(0.0)
+                kgTfv = TextFieldValue(kg.fmtKg())
+                onEdit(kg, repsTfv.text.toIntOrNull() ?: set.reps, editFail)
+            })
+            "reps" -> StepperRow(stepLabel = "1", onStep = { direction ->
+                val reps = ((repsTfv.text.toIntOrNull() ?: set.reps) + direction).coerceAtLeast(1)
+                repsTfv = TextFieldValue("$reps")
+                onEdit(kgTfv.text.toDoubleOrNull() ?: set.weightKg, reps, editFail)
+            })
+        }
     }
 }
 
@@ -386,12 +471,14 @@ private fun PendingSetRow(
     previousSet: SetLog?,
     initialWeightKg: Double,
     initialReps: Int,
+    stepKg: Double = 2.5,
     onLogSet: (Double, Int, Float?, Boolean) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var kgTfv     by remember { mutableStateOf(TextFieldValue(initialWeightKg.fmtKg())) }
     var repsTfv   by remember { mutableStateOf(TextFieldValue("$initialReps")) }
     var isFailure by remember { mutableStateOf(false) }
+    var focusedCell by remember { mutableStateOf<String?>(null) }
     val kgFocus   = remember { FocusRequester() }
     val repsFocus = remember { FocusRequester() }
     val focusMgr  = LocalFocusManager.current
@@ -405,42 +492,84 @@ private fun PendingSetRow(
         focusMgr.clearFocus()
     }
 
+    Column(modifier = modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth()
+                .background(PendingSetBg, RoundedCornerShape(4.dp))
+                .border(1.dp, NeonGreen.copy(alpha = 0.3f), RoundedCornerShape(4.dp))
+                .padding(vertical = 6.dp, horizontal = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // SET — tap to toggle failure
+            Text(
+                if (isFailure) "F" else "$setNumber",
+                color = if (isFailure) DangerRed else Color.White.copy(alpha = 0.55f),
+                fontSize = 13.sp, fontWeight = FontWeight.Bold,
+                modifier = Modifier.width(28.dp).clickable { isFailure = !isFailure }
+            )
+            Text(prevText, color = Color.White.copy(alpha = 0.38f), fontSize = 11.sp, modifier = Modifier.weight(1.2f))
+            SetCell(
+                value = kgTfv, onValueChange = { kgTfv = it },
+                keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Next,
+                onImeAction = { repsFocus.requestFocus() },
+                focusRequester = kgFocus,
+                onFocusChanged = { if (it) focusedCell = "kg" else if (focusedCell == "kg") focusedCell = null },
+                modifier = Modifier.weight(1f)
+            )
+            SetCell(
+                value = repsTfv, onValueChange = { repsTfv = it },
+                keyboardType = KeyboardType.Number, imeAction = ImeAction.Done,
+                onImeAction = { logSet() },
+                focusRequester = repsFocus,
+                onFocusChanged = { if (it) focusedCell = "reps" else if (focusedCell == "reps") focusedCell = null },
+                modifier = Modifier.weight(0.8f)
+            )
+            // ✓ — logs the set
+            Column(
+                Modifier.width(44.dp).height(36.dp)
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(NeonGreen.copy(alpha = 0.2f))
+                    .border(1.dp, NeonGreen.copy(alpha = 0.55f), RoundedCornerShape(4.dp))
+                    .clickable { logSet() },
+                horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center
+            ) { Text("✓", color = NeonGreen, fontSize = 16.sp, fontWeight = FontWeight.Black) }
+        }
+
+        when (focusedCell) {
+            "kg" -> StepperRow(stepLabel = stepKg.fmtKg(), onStep = { direction ->
+                val kg = ((kgTfv.text.toDoubleOrNull() ?: initialWeightKg) + direction * stepKg).coerceAtLeast(0.0)
+                kgTfv = TextFieldValue(kg.fmtKg())
+            })
+            "reps" -> StepperRow(stepLabel = "1", onStep = { direction ->
+                val reps = ((repsTfv.text.toIntOrNull() ?: initialReps) + direction).coerceAtLeast(1)
+                repsTfv = TextFieldValue("$reps")
+            })
+        }
+    }
+}
+
+// ── Focused-cell stepper ──────────────────────────────────────────────────────
+
+@Composable
+private fun StepperRow(stepLabel: String, onStep: (Int) -> Unit) {
     Row(
-        modifier = modifier.fillMaxWidth()
-            .background(PendingSetBg, RoundedCornerShape(4.dp))
-            .border(1.dp, NeonGreen.copy(alpha = 0.3f), RoundedCornerShape(4.dp))
-            .padding(vertical = 6.dp, horizontal = 8.dp),
+        Modifier.fillMaxWidth().padding(vertical = 2.dp),
+        horizontalArrangement = Arrangement.End,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // SET — tap to toggle failure
-        Text(
-            if (isFailure) "F" else "$setNumber",
-            color = if (isFailure) DangerRed else Color.White.copy(alpha = 0.55f),
-            fontSize = 13.sp, fontWeight = FontWeight.Bold,
-            modifier = Modifier.width(28.dp).clickable { isFailure = !isFailure }
-        )
-        Text(prevText, color = Color.White.copy(alpha = 0.38f), fontSize = 11.sp, modifier = Modifier.weight(1.2f))
-        SetCell(
-            value = kgTfv, onValueChange = { kgTfv = it },
-            keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Next,
-            onImeAction = { repsFocus.requestFocus() },
-            focusRequester = kgFocus, modifier = Modifier.weight(1f)
-        )
-        SetCell(
-            value = repsTfv, onValueChange = { repsTfv = it },
-            keyboardType = KeyboardType.Number, imeAction = ImeAction.Done,
-            onImeAction = { logSet() },
-            focusRequester = repsFocus, modifier = Modifier.weight(0.8f)
-        )
-        // ✓ — logs the set
-        Column(
-            Modifier.width(44.dp).height(36.dp)
-                .clip(RoundedCornerShape(4.dp))
-                .background(NeonGreen.copy(alpha = 0.2f))
-                .border(1.dp, NeonGreen.copy(alpha = 0.55f), RoundedCornerShape(4.dp))
-                .clickable { logSet() },
-            horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center
-        ) { Text("✓", color = NeonGreen, fontSize = 16.sp, fontWeight = FontWeight.Black) }
+        listOf(-1 to "−$stepLabel", 1 to "+$stepLabel").forEach { (direction, label) ->
+            Text(
+                label,
+                color = NeonGreen, fontSize = 13.sp, fontWeight = FontWeight.Black,
+                fontFamily = FontFamily.Monospace,
+                modifier = Modifier
+                    .padding(start = 8.dp)
+                    .background(NeonGreen.copy(alpha = 0.12f), RoundedCornerShape(4.dp))
+                    .border(1.dp, NeonGreen.copy(alpha = 0.4f), RoundedCornerShape(4.dp))
+                    .clickable { onStep(direction) }
+                    .padding(horizontal = 18.dp, vertical = 6.dp)
+            )
+        }
     }
 }
 
@@ -495,15 +624,18 @@ private fun SetCell(
     imeAction: ImeAction,
     onImeAction: () -> Unit,
     focusRequester: FocusRequester,
+    onFocusChanged: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val source  = remember { MutableInteractionSource() }
     val focused by source.collectIsFocusedAsState()
     val latestValue by rememberUpdatedState(value)
     val latestOnChange by rememberUpdatedState(onValueChange)
+    val latestOnFocusChanged by rememberUpdatedState(onFocusChanged)
 
     // Select all text the moment the field gains focus so first keystroke replaces it
     LaunchedEffect(focused) {
+        latestOnFocusChanged(focused)
         if (focused) {
             val v = latestValue
             latestOnChange(v.copy(selection = TextRange(0, v.text.length)))
@@ -531,6 +663,65 @@ private fun SetCell(
         ),
         interactionSource = source,
         cursorBrush = SolidColor(NeonGreen)
+    )
+}
+
+// ── Per-exercise rest timer dialog ───────────────────────────────────────────
+
+@Composable
+private fun RestTimerDialog(
+    exerciseName: String,
+    currentSeconds: Int?,
+    defaultSeconds: Int,
+    onSave: (Int?) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var seconds by remember { mutableStateOf(currentSeconds ?: defaultSeconds) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = SaiyanGray,
+        titleContentColor = Color.White,
+        title = { Text("REST TIMER", fontWeight = FontWeight.Black, fontSize = 16.sp, letterSpacing = 1.sp) },
+        text = {
+            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+                Text(exerciseName, color = NeonGreen, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                Row(
+                    Modifier.padding(top = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    TextButton(onClick = { seconds = (seconds - 15).coerceAtLeast(10) }) {
+                        Text("−15s", color = PowerAmber, fontWeight = FontWeight.Black, fontSize = 15.sp)
+                    }
+                    Text(
+                        formatRestLabel(seconds),
+                        color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Black,
+                        fontFamily = FontFamily.Monospace,
+                        modifier = Modifier.padding(horizontal = 16.dp)
+                    )
+                    TextButton(onClick = { seconds = (seconds + 15).coerceAtMost(600) }) {
+                        Text("+15s", color = PowerAmber, fontWeight = FontWeight.Black, fontSize = 15.sp)
+                    }
+                }
+                Text(
+                    "default: ${formatRestLabel(defaultSeconds)} (Settings)",
+                    color = Color.White.copy(alpha = 0.4f), fontSize = 11.sp,
+                    fontFamily = FontFamily.Monospace,
+                    modifier = Modifier.padding(top = 6.dp)
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onSave(seconds); onDismiss() }) {
+                Text("SAVE", color = NeonGreen, fontWeight = FontWeight.Black, fontSize = 13.sp)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = { onSave(null); onDismiss() }) {
+                Text("USE DEFAULT", color = Color.White.copy(alpha = 0.6f), fontWeight = FontWeight.Bold, fontSize = 12.sp)
+            }
+        }
     )
 }
 

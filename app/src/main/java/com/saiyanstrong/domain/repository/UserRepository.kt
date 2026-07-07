@@ -15,4 +15,7 @@ interface UserRepository {
 
     fun getUseFemaleDotsFormula(): Flow<Boolean>
     suspend fun setUseFemaleDotsFormula(useFemale: Boolean)
+
+    fun getDefaultRestSeconds(): Flow<Int>
+    suspend fun setDefaultRestSeconds(seconds: Int)
 }

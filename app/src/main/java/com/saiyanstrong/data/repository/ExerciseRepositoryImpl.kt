@@ -24,4 +24,7 @@ class ExerciseRepositoryImpl @Inject constructor(
 
     override fun getExerciseUsageCounts(): Flow<Map<Int, Int>> =
         exerciseLogDao.getUsageCounts().map { list -> list.associate { it.exerciseId to it.count } }
+
+    override suspend fun setRestTimerSec(exerciseId: Int, seconds: Int?) =
+        exerciseDao.updateRestTimer(exerciseId, seconds)
 }

@@ -17,4 +17,7 @@ interface ExerciseDao {
 
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertAll(exercises: List<ExerciseEntity>)
+
+    @Query("UPDATE exercises SET rest_timer_sec = :seconds WHERE id = :exerciseId")
+    suspend fun updateRestTimer(exerciseId: Int, seconds: Int?)
 }

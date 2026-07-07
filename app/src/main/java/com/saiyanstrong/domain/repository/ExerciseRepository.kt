@@ -7,4 +7,5 @@ interface ExerciseRepository {
     fun getAllExercises(): Flow<List<Exercise>>
     fun getExerciseById(exerciseId: Int): Flow<Exercise?>
     fun getExerciseUsageCounts(): Flow<Map<Int, Int>>
+    suspend fun setRestTimerSec(exerciseId: Int, seconds: Int?)
 }

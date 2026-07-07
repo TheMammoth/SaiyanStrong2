@@ -52,6 +52,15 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch { userRepository.setUseFemaleDotsFormula(useFemale) }
     }
 
+    val defaultRestSeconds: StateFlow<Int> = userRepository.getDefaultRestSeconds()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 90)
+
+    fun onAdjustDefaultRest(deltaSeconds: Int) {
+        viewModelScope.launch {
+            userRepository.setDefaultRestSeconds(defaultRestSeconds.value + deltaSeconds)
+        }
+    }
+
     private val _checkState = MutableStateFlow<UpdateCheckState>(UpdateCheckState.Idle)
     val checkState: StateFlow<UpdateCheckState> = _checkState.asStateFlow()
 

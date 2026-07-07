@@ -27,6 +27,9 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -40,6 +43,7 @@ import androidx.compose.foundation.layout.size
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.saiyanstrong.domain.model.WorkoutTemplate
+import com.saiyanstrong.presentation.components.ConfirmDialog
 import com.saiyanstrong.presentation.components.SaiyanButton
 import com.saiyanstrong.presentation.components.scanlineTexture
 import com.saiyanstrong.presentation.theme.MatteBlack
@@ -175,6 +179,15 @@ private fun TemplateCard(
     onStart: () -> Unit,
     onDelete: () -> Unit
 ) {
+    var showConfirm by remember { mutableStateOf(false) }
+    if (showConfirm) {
+        ConfirmDialog(
+            title = "DELETE TEMPLATE?",
+            message = "\"${template.name}\" (${template.exerciseIds.size} exercises) will be permanently deleted.",
+            onConfirm = onDelete,
+            onDismiss = { showConfirm = false }
+        )
+    }
     Column(
         Modifier
             .fillMaxWidth()
@@ -184,7 +197,7 @@ private fun TemplateCard(
             .pointerInput(template.id) {
                 detectTapGestures(
                     onTap = { onStart() },
-                    onLongPress = { onDelete() }
+                    onLongPress = { showConfirm = true }
                 )
             }
             .padding(horizontal = 12.dp, vertical = 10.dp)

@@ -53,6 +53,7 @@ fun SettingsScreen(
     val checkState by viewModel.checkState.collectAsStateWithLifecycle()
     val downloadState by viewModel.downloadState.collectAsStateWithLifecycle()
     val useFemaleDots by viewModel.useFemaleDotsFormula.collectAsStateWithLifecycle()
+    val defaultRestSeconds by viewModel.defaultRestSeconds.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
     LaunchedEffect(downloadState) {
@@ -109,6 +110,38 @@ fun SettingsScreen(
             ) {
                 // ── Training section ──────────────────────────────────
                 SectionHeader("TRAINING")
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(SaiyanGray, androidx.compose.foundation.shape.RoundedCornerShape(6.dp))
+                        .padding(horizontal = 14.dp, vertical = 6.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Default rest timer", color = Color.White.copy(alpha = 0.55f), fontSize = 13.sp)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            "−15s",
+                            color = PowerAmber, fontSize = 13.sp, fontWeight = FontWeight.Black,
+                            modifier = Modifier.clickable { viewModel.onAdjustDefaultRest(-15) }.padding(8.dp)
+                        )
+                        Text(
+                            "%d:%02d".format(defaultRestSeconds / 60, defaultRestSeconds % 60),
+                            color = NeonGreen, fontSize = 15.sp, fontWeight = FontWeight.Black,
+                            fontFamily = FontFamily.Monospace,
+                            modifier = Modifier.padding(horizontal = 6.dp)
+                        )
+                        Text(
+                            "+15s",
+                            color = PowerAmber, fontSize = 13.sp, fontWeight = FontWeight.Black,
+                            modifier = Modifier.clickable { viewModel.onAdjustDefaultRest(15) }.padding(8.dp)
+                        )
+                    }
+                }
+                Text(
+                    "Used for every exercise unless you set a per-exercise rest timer from the ⋮ menu in a workout.",
+                    color = Color.White.copy(alpha = 0.35f), fontSize = 11.sp
+                )
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()

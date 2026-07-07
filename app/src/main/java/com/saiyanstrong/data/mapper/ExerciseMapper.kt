@@ -12,7 +12,8 @@ fun ExerciseEntity.toDomain(): Exercise = Exercise(
     primaryMuscles = primaryMuscles.toMuscleGroupList(),
     secondaryMuscles = secondaryMuscles.toMuscleGroupList(),
     lottieAsset = lottieAsset,
-    svgAssetName = svgAssetName
+    svgAssetName = svgAssetName,
+    restTimerSec = restTimerSec
 )
 
 private fun String.toMuscleGroupList(): List<MuscleGroup> =
