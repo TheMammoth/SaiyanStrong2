@@ -31,8 +31,26 @@ interface TemplateDao {
     suspend fun insert(template: TemplateEntity): Long
 
     @Insert
+    suspend fun insertAll(templates: List<TemplateEntity>)
+
+    @Insert
     suspend fun insertExercise(templateExercise: TemplateExerciseEntity): Long
+
+    @Insert
+    suspend fun insertExercises(templateExercises: List<TemplateExerciseEntity>)
 
     @Query("DELETE FROM templates WHERE id = :templateId")
     suspend fun deleteById(templateId: Long)
+
+    @Query("DELETE FROM templates")
+    suspend fun deleteAll()
+
+    @Query("DELETE FROM template_exercises")
+    suspend fun deleteAllExercises()
+
+    @Query("SELECT * FROM templates")
+    fun getAllTemplates(): Flow<List<TemplateEntity>>
+
+    @Query("SELECT * FROM template_exercises")
+    fun getAllTemplateExercises(): Flow<List<TemplateExerciseEntity>>
 }

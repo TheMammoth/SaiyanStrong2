@@ -20,8 +20,17 @@ interface ExerciseLogDao {
     @Insert
     suspend fun insert(exerciseLog: ExerciseLogEntity): Long
 
+    @Insert
+    suspend fun insertAll(exerciseLogs: List<ExerciseLogEntity>)
+
     @Query("DELETE FROM exercise_logs WHERE session_id = :sessionId")
     suspend fun deleteForSession(sessionId: Long)
+
+    @Query("DELETE FROM exercise_logs")
+    suspend fun deleteAll()
+
+    @Query("SELECT * FROM exercise_logs")
+    fun getAll(): Flow<List<ExerciseLogEntity>>
 
     @Query("""
         SELECT el.id FROM exercise_logs el

@@ -6,15 +6,27 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.saiyanstrong.BuildConfig
 import com.saiyanstrong.domain.model.AppUpdate
+import com.saiyanstrong.domain.model.AuthUser
+import com.saiyanstrong.domain.model.BackupInfo
+import com.saiyanstrong.domain.repository.AuthRepository
+import com.saiyanstrong.domain.repository.BackupRepository
 import com.saiyanstrong.domain.repository.UserRepository
+import com.saiyanstrong.domain.usecase.BackupNowUseCase
 import com.saiyanstrong.domain.usecase.CheckForUpdateUseCase
+import com.saiyanstrong.domain.usecase.RestoreBackupUseCase
+import com.saiyanstrong.domain.usecase.SignInWithGoogleUseCase
+import com.saiyanstrong.domain.usecase.SignOutUseCase
+import com.saiyanstrong.util.GoogleSignInHelper
 import com.saiyanstrong.util.UpdateInstaller
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -39,8 +51,70 @@ class SettingsViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val checkForUpdateUseCase: CheckForUpdateUseCase,
     private val updateInstaller: UpdateInstaller,
-    private val userRepository: UserRepository
+    private val userRepository: UserRepository,
+    private val authRepository: AuthRepository,
+    private val backupRepository: BackupRepository,
+    private val googleSignInHelper: GoogleSignInHelper,
+    private val signInWithGoogleUseCase: SignInWithGoogleUseCase,
+    private val signOutUseCase: SignOutUseCase,
+    private val backupNowUseCase: BackupNowUseCase,
+    private val restoreBackupUseCase: RestoreBackupUseCase
 ) : ViewModel() {
+
+    val authUser: StateFlow<AuthUser?> = authRepository.authState
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    val backupInfo: StateFlow<BackupInfo?> = backupRepository.lastBackupInfo
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    private val _isSigningIn = MutableStateFlow(false)
+    val isSigningIn: StateFlow<Boolean> = _isSigningIn.asStateFlow()
+
+    private val _isBackingUp = MutableStateFlow(false)
+    val isBackingUp: StateFlow<Boolean> = _isBackingUp.asStateFlow()
+
+    private val _isRestoring = MutableStateFlow(false)
+    val isRestoring: StateFlow<Boolean> = _isRestoring.asStateFlow()
+
+    private val _snackbarEvents = MutableSharedFlow<String>(extraBufferCapacity = 1)
+    val snackbarEvents: SharedFlow<String> = _snackbarEvents.asSharedFlow()
+
+    fun onSignInClick(activityContext: Context) {
+        if (_isSigningIn.value) return
+        viewModelScope.launch {
+            _isSigningIn.value = true
+            val result = googleSignInHelper.signIn(activityContext)
+                .mapCatching { tokens -> signInWithGoogleUseCase.execute(tokens.idToken, tokens.rawNonce).getOrThrow() }
+            result.onFailure { e -> _snackbarEvents.emit(e.message ?: "Sign-in failed") }
+            _isSigningIn.value = false
+        }
+    }
+
+    fun onSignOut() {
+        viewModelScope.launch { signOutUseCase.execute() }
+    }
+
+    fun onBackupNow() {
+        if (_isBackingUp.value) return
+        viewModelScope.launch {
+            _isBackingUp.value = true
+            backupNowUseCase.execute()
+                .onFailure { e -> _snackbarEvents.emit(e.message ?: "Backup failed") }
+                .onSuccess { _snackbarEvents.emit("Backup complete") }
+            _isBackingUp.value = false
+        }
+    }
+
+    fun onRestoreBackup() {
+        if (_isRestoring.value) return
+        viewModelScope.launch {
+            _isRestoring.value = true
+            restoreBackupUseCase.execute()
+                .onFailure { e -> _snackbarEvents.emit(e.message ?: "Restore failed") }
+                .onSuccess { _snackbarEvents.emit("Restore complete") }
+            _isRestoring.value = false
+        }
+    }
 
     val currentVersion: String = BuildConfig.VERSION_NAME
     val currentVersionCode: Int = BuildConfig.VERSION_CODE

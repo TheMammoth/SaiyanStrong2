@@ -818,6 +818,51 @@ _(Claude Code appends here after each completed task)_
   SAVE / USE DEFAULT=null). onLogSet + ADD SET label use restSecondsFor(exerciseId) =
   override ?: default; VM defaultRestSeconds StateFlow feeds the screen.
   versionCode 24, versionName 0.13.0.
+- [x] Sprint 18 — Supabase auth + cloud backup (v0.14.0): highest-priority feature per
+  SPEC.md — users no longer lose training history on phone loss. Auth is optional,
+  local-first stays the default; app fully usable signed-out.
+  (1) Google Sign-In via Credential Manager (androidx.credentials + googleid, not the
+  legacy GoogleSignInClient). util/GoogleSignInHelper.kt builds a GetGoogleIdOption with
+  a SHA-256-hashed nonce, returns (idToken, rawNonce) from CredentialManager.getCredential.
+  (2) domain/model/AuthUser+BackupInfo, domain/repository/AuthRepository+BackupRepository,
+  4 use cases (SignInWithGoogle, SignOut, BackupNow, RestoreBackup) — Clean Architecture
+  layers held throughout, ViewModels never touch data/ directly.
+  (3) data/remote/SupabaseClientProvider.kt builds a SupabaseClient (Auth + Storage
+  plugins) from BuildConfig fields (SUPABASE_URL/ANON_KEY/GOOGLE_WEB_CLIENT_ID), sourced
+  from local.properties — never hardcoded, never committed. AuthRepositoryImpl wraps
+  supabase-kt Auth (signInWith(IDToken), sessionStatus → Flow<AuthUser?>, currentUserOrNull).
+  (4) data/backup/BackupPayload.kt (@Serializable DTOs, all 6 user-data tables + DOTS/rest
+  prefs + exercise rest-timer overrides — exercises themselves aren't backed up since
+  ExerciseSeeder re-seeds them every launch) + BackupSerializer.kt (DAOs+DataStore ↔ JSON,
+  restore does one AppDatabase.withTransaction wiping + reinserting all tables with
+  original PKs preserved so FKs stay intact, no remapping needed).
+  BackupRepositoryImpl uploads/downloads a single {userId}/latest.json in a private
+  Supabase Storage bucket (`backups`, RLS-restricted to auth.uid() folder — SQL in
+  scripts/supabase_backups_rls.sql); restore rejects backups with a higher
+  appVersionCode than the installed app.
+  (5) Auto-backup: BackupWorker (HiltWorker, WorkManager, NetworkType.UNMETERED) enqueued
+  via BackupRepository.scheduleAutoBackup() (no-op signed-out) from the end of
+  CompleteSessionUseCase.execute — every finished workout backs up on Wi-Fi without user
+  action. SaiyanStrongApp now implements Configuration.Provider for HiltWorkerFactory;
+  manifest disables WorkManager's default (non-Hilt) initializer.
+  (6) Settings gains an ACCOUNT section (top of the scroll, above TRAINING): signed-out
+  shows one SIGN IN WITH GOOGLE button; signed-in shows email, last-backup timestamp,
+  BACKUP NOW / RESTORE FROM BACKUP / SIGN OUT. Restore reuses the existing ConfirmDialog
+  ("local data will be replaced ... cannot be undone"). All errors surface via a themed
+  Snackbar (new to this screen) instead of failing silently.
+  (7) New deps (version catalog only, no hardcoded versions): supabase-kt 3.1.4
+  (auth-kt, storage-kt) + ktor-client-android 3.0.3, androidx.credentials 1.3.0 +
+  googleid 1.1.1, work-runtime-ktx 2.10.0 + hilt-work 1.2.0, kotlinx-serialization-json
+  1.7.3 (+ kotlin-serialization plugin). No Room schema change — backup is fully external
+  to the local DB shape.
+  Infra set up outside the repo: new dedicated Google Cloud project "saiyanstrong" (OAuth
+  consent screen published to production, Web + Android OAuth clients), Supabase project
+  barbell-io has Google auth provider enabled and the `backups` bucket + RLS policies.
+  KNOWN GAP: build verified (assembleDebug SUCCESSFUL, zero " lb" hits) but the actual
+  sign-in/backup/restore flow has not been runtime-tested on a device — no
+  emulator/device was available this session. Test per SPEC.md `## 6. Testing strategy`
+  checklist before fully trusting it in production use.
+  versionCode 25, versionName 0.14.0.
 
 ## Release rules
 

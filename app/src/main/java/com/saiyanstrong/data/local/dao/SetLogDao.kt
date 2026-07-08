@@ -23,8 +23,17 @@ interface SetLogDao {
     @Insert
     suspend fun insert(setLog: SetLogEntity): Long
 
+    @Insert
+    suspend fun insertAll(setLogs: List<SetLogEntity>)
+
     @Query("DELETE FROM set_logs WHERE exercise_log_id IN (SELECT id FROM exercise_logs WHERE session_id = :sessionId)")
     suspend fun deleteForSession(sessionId: Long)
+
+    @Query("DELETE FROM set_logs")
+    suspend fun deleteAll()
+
+    @Query("SELECT * FROM set_logs")
+    fun getAll(): Flow<List<SetLogEntity>>
 
     @Query("""
         SELECT s.date_ms, s.id AS session_id, sl.weight_kg, sl.reps, sl.is_failure

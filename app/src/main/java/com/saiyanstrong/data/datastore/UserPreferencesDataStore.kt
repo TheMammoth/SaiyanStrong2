@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -18,6 +19,8 @@ private val LIFETIME_POWER_EARNED           = intPreferencesKey("lifetime_power_
 private val LAST_DISMISSED_UPDATE_VERSION   = stringPreferencesKey("last_dismissed_update_version")
 private val USE_FEMALE_DOTS_FORMULA         = booleanPreferencesKey("use_female_dots_formula")
 private val DEFAULT_REST_SECONDS            = intPreferencesKey("default_rest_seconds")
+private val LAST_BACKUP_AT_MS               = longPreferencesKey("last_backup_at_ms")
+private val LAST_BACKUP_VERSION_CODE        = intPreferencesKey("last_backup_version_code")
 
 @Singleton
 class UserPreferencesDataStore @Inject constructor(
@@ -33,6 +36,12 @@ class UserPreferencesDataStore @Inject constructor(
         context.userPreferencesDataStore.edit { preferences ->
             val current = preferences[LIFETIME_POWER_EARNED] ?: 0
             preferences[LIFETIME_POWER_EARNED] = current + amount
+        }
+    }
+
+    suspend fun setLifetimePowerEarned(total: Int) {
+        context.userPreferencesDataStore.edit { preferences ->
+            preferences[LIFETIME_POWER_EARNED] = total
         }
     }
 
@@ -57,6 +66,19 @@ class UserPreferencesDataStore @Inject constructor(
     suspend fun setDefaultRestSeconds(seconds: Int) {
         context.userPreferencesDataStore.edit { preferences ->
             preferences[DEFAULT_REST_SECONDS] = seconds.coerceIn(10, 600)
+        }
+    }
+
+    val lastBackupAtMs: Flow<Long> = context.userPreferencesDataStore.data
+        .map { preferences -> preferences[LAST_BACKUP_AT_MS] ?: 0L }
+
+    val lastBackupVersionCode: Flow<Int> = context.userPreferencesDataStore.data
+        .map { preferences -> preferences[LAST_BACKUP_VERSION_CODE] ?: 0 }
+
+    suspend fun setLastBackupInfo(atMs: Long, versionCode: Int) {
+        context.userPreferencesDataStore.edit { preferences ->
+            preferences[LAST_BACKUP_AT_MS] = atMs
+            preferences[LAST_BACKUP_VERSION_CODE] = versionCode
         }
     }
 }

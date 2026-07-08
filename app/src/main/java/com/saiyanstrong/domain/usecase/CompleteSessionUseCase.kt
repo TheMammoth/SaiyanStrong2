@@ -2,6 +2,7 @@ package com.saiyanstrong.domain.usecase
 
 import com.saiyanstrong.domain.model.ExerciseLog
 import com.saiyanstrong.domain.model.WorkoutSession
+import com.saiyanstrong.domain.repository.BackupRepository
 import com.saiyanstrong.domain.repository.SessionRepository
 import com.saiyanstrong.domain.repository.UserRepository
 import javax.inject.Inject
@@ -9,7 +10,8 @@ import javax.inject.Inject
 class CompleteSessionUseCase @Inject constructor(
     private val sessionRepository: SessionRepository,
     private val userRepository: UserRepository,
-    private val calculatePowerLevelUseCase: CalculatePowerLevelUseCase
+    private val calculatePowerLevelUseCase: CalculatePowerLevelUseCase,
+    private val backupRepository: BackupRepository
 ) {
     suspend fun execute(
         dateMs: Long,
@@ -31,6 +33,7 @@ class CompleteSessionUseCase @Inject constructor(
         )
         val sessionId = sessionRepository.saveSession(session)
         userRepository.addPowerEarned(powerEarned)
+        backupRepository.scheduleAutoBackup()
         return session.copy(id = sessionId)
     }
 }

@@ -14,6 +14,12 @@ interface BodyWeightDao {
     @Insert
     suspend fun insert(log: BodyWeightEntity): Long
 
+    @Insert
+    suspend fun insertAll(logs: List<BodyWeightEntity>)
+
     @Query("DELETE FROM body_weight_logs WHERE id = :id")
     suspend fun deleteById(id: Long)
+
+    @Query("DELETE FROM body_weight_logs")
+    suspend fun deleteAll()
 }

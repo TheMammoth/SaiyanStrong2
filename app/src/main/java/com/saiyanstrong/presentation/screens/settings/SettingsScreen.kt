@@ -6,6 +6,7 @@ import android.provider.Settings
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -22,10 +23,16 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Snackbar
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -37,6 +44,7 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.saiyanstrong.BuildConfig
+import com.saiyanstrong.presentation.components.ConfirmDialog
 import com.saiyanstrong.presentation.components.scanlineTexture
 import com.saiyanstrong.presentation.theme.DangerRed
 import com.saiyanstrong.presentation.theme.MatteBlack
@@ -44,6 +52,8 @@ import com.saiyanstrong.presentation.theme.NeonGreen
 import com.saiyanstrong.presentation.theme.PowerAmber
 import com.saiyanstrong.presentation.theme.SaiyanGray
 import com.saiyanstrong.presentation.theme.TelemetryGreen
+import java.text.DateFormat
+import java.util.Date
 
 @Composable
 fun SettingsScreen(
@@ -54,7 +64,14 @@ fun SettingsScreen(
     val downloadState by viewModel.downloadState.collectAsStateWithLifecycle()
     val useFemaleDots by viewModel.useFemaleDotsFormula.collectAsStateWithLifecycle()
     val defaultRestSeconds by viewModel.defaultRestSeconds.collectAsStateWithLifecycle()
+    val authUser by viewModel.authUser.collectAsStateWithLifecycle()
+    val backupInfo by viewModel.backupInfo.collectAsStateWithLifecycle()
+    val isSigningIn by viewModel.isSigningIn.collectAsStateWithLifecycle()
+    val isBackingUp by viewModel.isBackingUp.collectAsStateWithLifecycle()
+    val isRestoring by viewModel.isRestoring.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val snackbarHostState = remember { SnackbarHostState() }
+    var showRestoreConfirm by remember { mutableStateOf(false) }
 
     LaunchedEffect(downloadState) {
         if (downloadState is DownloadState.Ready) {
@@ -68,7 +85,37 @@ fun SettingsScreen(
         }
     }
 
-    Scaffold { padding ->
+    LaunchedEffect(Unit) {
+        viewModel.snackbarEvents.collect { message ->
+            snackbarHostState.showSnackbar(message)
+        }
+    }
+
+    if (showRestoreConfirm) {
+        val lastBackupLabel = backupInfo?.let {
+            DateFormat.getDateTimeInstance().format(Date(it.lastBackupAtMs))
+        } ?: "an earlier backup"
+        ConfirmDialog(
+            title = "RESTORE FROM BACKUP?",
+            message = "Local data will be replaced with your backup from $lastBackupLabel. This cannot be undone.",
+            confirmLabel = "RESTORE",
+            onConfirm = { viewModel.onRestoreBackup() },
+            onDismiss = { showRestoreConfirm = false }
+        )
+    }
+
+    Scaffold(
+        snackbarHost = {
+            SnackbarHost(snackbarHostState) { data ->
+                Snackbar(
+                    snackbarData = data,
+                    containerColor = SaiyanGray,
+                    contentColor = Color.White,
+                    actionColor = NeonGreen
+                )
+            }
+        }
+    ) { padding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -108,6 +155,51 @@ fun SettingsScreen(
                     .padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
+                // ── Account section ────────────────────────────────────
+                SectionHeader("ACCOUNT")
+                val user = authUser
+                if (user == null) {
+                    Text(
+                        "Sign in to back up your training history to the cloud. The app works fully offline either way.",
+                        color = Color.White.copy(alpha = 0.5f), fontSize = 11.sp
+                    )
+                    ActionButton(
+                        text = if (isSigningIn) "SIGNING IN…" else "SIGN IN WITH GOOGLE",
+                        color = NeonGreen,
+                        enabled = !isSigningIn
+                    ) {
+                        viewModel.onSignInClick(context)
+                    }
+                } else {
+                    SettingsRow("Signed in as", user.email ?: user.displayName ?: "Google account")
+                    val lastBackupText = backupInfo?.let {
+                        DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(it.lastBackupAtMs))
+                    } ?: "Never"
+                    SettingsRow("Last backup", lastBackupText)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Box(modifier = Modifier.weight(1f)) {
+                            ActionButton(
+                                text = if (isBackingUp) "BACKING UP…" else "BACKUP NOW",
+                                color = NeonGreen,
+                                enabled = !isBackingUp
+                            ) { viewModel.onBackupNow() }
+                        }
+                        Box(modifier = Modifier.weight(1f)) {
+                            ActionButton(
+                                text = if (isRestoring) "RESTORING…" else "RESTORE FROM BACKUP",
+                                color = PowerAmber,
+                                enabled = !isRestoring && backupInfo != null
+                            ) { showRestoreConfirm = true }
+                        }
+                    }
+                    ActionButton(text = "SIGN OUT", color = DangerRed) { viewModel.onSignOut() }
+                }
+
+                HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
+
                 // ── Training section ──────────────────────────────────
                 SectionHeader("TRAINING")
                 Row(
