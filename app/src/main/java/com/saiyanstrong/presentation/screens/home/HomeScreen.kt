@@ -328,14 +328,18 @@ internal fun HomeContent(
                 )
             }
 
+            val isGithubDistribution = BuildConfig.DISTRIBUTION == "github"
             Text(
-                "// PWR: ${powerLevel?.current ?: "---"}  |  v${BuildConfig.VERSION_NAME}  |  $updateStatus  [tap to retry] //",
+                if (isGithubDistribution)
+                    "// PWR: ${powerLevel?.current ?: "---"}  |  v${BuildConfig.VERSION_NAME}  |  $updateStatus  [tap to retry] //"
+                else
+                    "// PWR: ${powerLevel?.current ?: "---"}  |  v${BuildConfig.VERSION_NAME} //",
                 color = TelemetryGreen,
                 style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier
                     .fillMaxWidth()
                     .background(Color.Black)
-                    .clickable(onClick = onRetryUpdateCheck)
+                    .then(if (isGithubDistribution) Modifier.clickable(onClick = onRetryUpdateCheck) else Modifier)
                     .padding(horizontal = 16.dp, vertical = 6.dp)
             )
         }

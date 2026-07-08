@@ -275,9 +275,11 @@ fun SettingsScreen(
                     Text("▶", color = NeonGreen, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                 }
 
+                // ── Updates section — sideload channel only; Play Store policy ──────
+                // forbids self-updating apps, so this whole surface is dark on that flavor.
+                if (BuildConfig.DISTRIBUTION == "github") {
                 HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
 
-                // ── Updates section ───────────────────────────────────
                 SectionHeader("UPDATES")
 
                 when (val state = checkState) {
@@ -349,6 +351,7 @@ fun SettingsScreen(
                 ) {
                     viewModel.checkForUpdate()
                 }
+                } // DISTRIBUTION == "github"
 
                 HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
 
@@ -356,7 +359,9 @@ fun SettingsScreen(
                 SectionHeader("DEBUG INFO")
                 SettingsRow("Package", "com.saiyanstrong")
                 SettingsRow("Version name used for comparison", "v${BuildConfig.VERSION_NAME}")
-                SettingsRow("Update API", "api.github.com/repos/TheMammoth/SaiyanStrong2")
+                if (BuildConfig.DISTRIBUTION == "github") {
+                    SettingsRow("Update API", "api.github.com/repos/TheMammoth/SaiyanStrong2")
+                }
             }
 
             // ── Telemetry bar ─────────────────────────────────────────

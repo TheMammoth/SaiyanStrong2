@@ -923,11 +923,131 @@ _(Claude Code appends here after each completed task)_
   No new dependencies — GraphicsLayer/LocalGraphicsContext ship in the ui-graphics/ui
   artifacts already on the classpath.
   versionCode 27, versionName 0.16.0.
+- [x] Sprint 21 — Play Store submission prep (v0.17.0): no new features — this sprint is
+  entirely build/config/docs hardening ahead of a Play Console submission.
+  (1) **DISTRIBUTION build flavors**: new `distribution` flavor dimension, two flavors —
+  `github` (BuildConfig.DISTRIBUTION="github", keeps the self-updater) and `play`
+  (BuildConfig.DISTRIBUTION="play", self-updater fully dark — Play policy forbids
+  self-updating apps). Both flavors share the same applicationId and the same
+  versionCode/versionName stream (no flavor-specific version overrides) — this is one
+  app on two channels, not two separate installs. `HomeViewModel.checkForUpdate()`
+  no-ops immediately when DISTRIBUTION != "github" (covers both its init-time call and
+  the Settings retry button); HomeScreen's telemetry line and SettingsScreen's whole
+  UPDATES section (plus the "Update API" debug row) are conditionally rendered on the
+  same flag. The update banner on Home already self-gated for free since
+  `updateAvailable` simply never gets set when the check never runs.
+  (2) **Permission audit**: `WRITE_EXTERNAL_STORAGE` removed entirely — it was vestigial
+  from the pre-v0.12.1 DownloadManager-based updater; the rewrite moved to
+  cacheDir+FileProvider, which needs no storage permission, and grep confirmed zero
+  remaining usages anywhere in app/src. `REQUEST_INSTALL_PACKAGES` moved out of the main
+  manifest into `app/src/github/AndroidManifest.xml`, a flavor-specific manifest that
+  only merges into github builds — verified via the actual merged manifests
+  (`app/build/intermediates/merged_manifest/{flavor}Release/AndroidManifest.xml`) that
+  play builds declare neither permission while github builds still declare
+  REQUEST_INSTALL_PACKAGES. The remaining permissions in both flavors (WAKE_LOCK,
+  ACCESS_NETWORK_STATE, RECEIVE_BOOT_COMPLETED, FOREGROUND_SERVICE,
+  DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION) are auto-merged in by WorkManager itself
+  (needed for the auto-backup job) and aren't something the app declares directly.
+  (3) **R8/ProGuard hardening**: `app/proguard-rules.pro` created and wired into the
+  release buildType (previously `isMinifyEnabled = true` had zero custom rules —
+  release builds were relying entirely on whatever consumer-rules.txt each AAR happened
+  to bundle). Verified library-by-library by decompiling the actual AARs in the Gradle
+  cache rather than assuming: Room/Hilt/Coil ship their own consumer rules and needed
+  nothing extra; `androidx.hilt:hilt-work` ships a `-keepnames @HiltWorker` rule
+  covering BackupWorker already; `googleid`'s Bundle-based credential parsing is
+  reflection-free so needs no rule (kept it anyway as cheap insurance). The real gap:
+  **supabase-kt (auth-kt, storage-kt) and the whole kotlinx.serialization/Ktor chain
+  ship literally zero consumer ProGuard rules** — confirmed by unzipping the AARs and
+  finding no proguard.txt/consumer-rules.txt at all. Added the official
+  kotlinx.serialization rule set for our own `data/backup/BackupPayload.kt` DTOs, plus
+  a broad `-keep class io.github.jan.supabase.** { *; }` since the library's
+  JSON-parsed models (UserInfo, UserSession, etc.) live entirely in library bytecode we
+  don't control — verified in the R8 mapping.txt after a real `assembleGithubRelease`
+  build that both `BackupPayload` and `UserSession`/`UserInfo` came through unrenamed
+  and unremoved. **Not verified**: an actual signed release APK installed and exercised
+  on a device — see the KNOWN GAP note below.
+  (4) **Signing**: added a second signing config, `playRelease`, reading from a new
+  `play-keystore.properties` (gitignored, same pattern as `keystore.properties`) so the
+  eventual Play upload key stays fully separate from the GitHub-distribution keystore —
+  a compromise of one never touches the other. Falls back to the GitHub keystore when
+  `play-keystore.properties` doesn't exist yet (it doesn't, as of this sprint) purely so
+  `assemblePlayRelease` still builds locally for verification; **the user must create
+  play-keystore.properties pointing at a real, dedicated Play upload keystore before
+  ever uploading a playRelease build to Play Console** — a shared debug/GitHub key
+  reaching Play Console would be a real security mistake, not just a style nit.
+  (5) **Docs**: `PRIVACY_POLICY.md` (local-first storage, what the optional Supabase
+  backup uploads and why, no ads/tracking, permission-by-permission rationale, contact
+  via GitHub Issues) — flagged as a real compliance gap: Play's Account Deletion
+  requirement (apps with sign-in need an in-app *and* web-reachable deletion path) isn't
+  fully met yet, since there's no self-service "delete my cloud backup" flow, only a
+  support-request path. `store/LISTING.md` (short description, 77/80 chars; full
+  description, ~3.6k/4000 chars) built around "Log sets. Earn Power. Evolve."
+  `store/play_store_icon_512.png` — flat 512×512 Play hi-res icon, composited from the
+  existing adaptive icon's gradient background + barbell/scouter foreground layers via
+  a PowerShell System.Drawing script (no image-gen tooling used or needed — the
+  in-app/launcher adaptive icon from Sprint 8 was already final, this is just the
+  separate flat export Play's listing page requires).
+  KNOWN GAP: both `assembleGithubRelease` and `assemblePlayRelease` build clean with R8
+  and the manifest/BuildConfig differences were verified directly, but nothing here was
+  installed and run on a real device or emulator this session — "release build runs
+  identically to debug" is unverified beyond compiling and the R8 mapping-file spot
+  checks described above. Do a real install-and-test pass (sign-in, backup/restore,
+  session share, exercise photos, updater on the github flavor) before trusting a
+  release build in production.
+  versionCode 28, versionName 0.17.0.
 
 ## Release rules
 
-- Always build APK locally (`.\gradlew assembleDebug`) and upload with
+- The project now has two build flavors (`github`, `play`) — see "Play Store
+  distribution" below for the full scheme. Everyday GitHub releases use the `github`
+  flavor exclusively; nothing below changes for that channel except the task names.
+- Always build the APK locally (`.\gradlew assembleGithubDebug`) and upload with
   `gh release upload <tag> SaiyanStrong-<tag>-debug.apk --clobber` immediately
-  after `gh release create` — do not wait for CI.
+  after `gh release create` — do not wait for CI. The flavored debug APK lands at
+  `app/build/outputs/apk/github/debug/app-github-debug.apk`.
 - Bump `versionCode` (+1) and `versionName` (= release tag without "v") in
   `app/build.gradle.kts` on every release so the in-app updater compares correctly.
+  This single version stream is shared by both flavors — never give `play` its own
+  versionCode sequence, or Play's own update mechanism and any future github/play
+  parity checks will drift.
+
+## Play Store distribution
+
+SaiyanStrong ships on two channels from one codebase: sideloaded APKs via GitHub
+Releases (`github` flavor) and the Play Store (`play` flavor). They share the same
+`applicationId` (`com.saiyanstrong`) and the same versionCode/versionName stream —
+this is the same app, not two separate products.
+
+**What differs between flavors:**
+- `BuildConfig.DISTRIBUTION` — `"github"` or `"play"`, gates all self-update UI/logic
+  (HomeViewModel, HomeScreen, SettingsScreen, SettingsViewModel).
+- `REQUEST_INSTALL_PACKAGES` permission — declared only via
+  `app/src/github/AndroidManifest.xml`, never present in a `play` build. Play policy
+  forbids apps from self-updating; a Play-distributed APK requesting this permission is
+  itself a policy red flag independent of whether the code path is reachable.
+- Signing — `github` (and `debug`) use `signingConfigs["release"]` from
+  `keystore.properties`. `play` uses `signingConfigs["playRelease"]` from
+  `play-keystore.properties` (gitignored, not yet created — falls back to the GitHub
+  keystore locally until it exists). **Never let a real Play Console upload happen
+  signed with the GitHub keystore** — create the dedicated `play-keystore.properties`
+  first.
+
+**Before actually submitting to Play Console** (none of this has been done — this
+sprint only prepared the local build/config/docs side):
+1. Generate a dedicated upload keystore, create `play-keystore.properties` from it
+   (same 4 keys as `keystore.properties`: storeFile/storePassword/keyAlias/keyPassword).
+2. Build the App Bundle Play actually wants: `.\gradlew bundlePlayRelease` →
+   `app/build/outputs/bundle/playRelease/app-play-release.aab`.
+3. Host `PRIVACY_POLICY.md` somewhere with a real URL (GitHub Pages works; Play Console
+   wants an actual webpage, not a raw-file link) and paste that URL into Play Console's
+   privacy policy field.
+4. Fill in the Data Safety form using `PRIVACY_POLICY.md` as the source of truth for
+   what's collected/shared.
+5. Add an in-app + web-reachable account/data deletion flow before submitting if the
+   app will support Google Sign-In in the listed build — Play's Account Deletion
+   policy requires this for any app offering sign-in, and SaiyanStrong doesn't have a
+   self-service delete-my-backup flow yet (see Sprint 21 KNOWN GAP above).
+6. Upload store assets: `store/play_store_icon_512.png` (hi-res icon) + screenshots
+   (not yet captured — need a device/emulator) + `store/LISTING.md` copy.
+7. Do a real install-and-test pass of a `playRelease` build on a device before
+   submitting — this has not been done from Claude Code this session.

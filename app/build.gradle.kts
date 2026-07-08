@@ -14,6 +14,18 @@ val keystoreProps = Properties().also { props ->
         ?.inputStream()?.use { props.load(it) }
 }
 
+// Dedicated Play upload-key keystore, kept separate from the GitHub-distribution one
+// above so a compromise of one channel's signing key never affects the other. This
+// file does not exist until the Play upload keystore is created — see CLAUDE.md
+// "Play release rules". Falls back to the GitHub keystore so local builds
+// (assemblePlayDebug/assemblePlayRelease) still work before that key exists; swap in
+// the real play-keystore.properties before ever uploading a playRelease build to Play
+// Console — never ship a play release actually signed with the GitHub key.
+val playKeystoreProps = Properties().also { props ->
+    rootProject.file("play-keystore.properties").takeIf { it.exists() }
+        ?.inputStream()?.use { props.load(it) }
+}
+
 val localProps = Properties().also { props ->
     rootProject.file("local.properties").takeIf { it.exists() }
         ?.inputStream()?.use { props.load(it) }
@@ -27,12 +39,29 @@ android {
         applicationId = "com.saiyanstrong"
         minSdk = 26
         targetSdk = 35
-        versionCode = 27
-        versionName = "0.16.0"
+        versionCode = 28
+        versionName = "0.17.0"
 
         buildConfigField("String", "SUPABASE_URL", "\"${localProps["supabase.url"] ?: ""}\"")
         buildConfigField("String", "SUPABASE_ANON_KEY", "\"${localProps["supabase.anonKey"] ?: ""}\"")
         buildConfigField("String", "SUPABASE_GOOGLE_WEB_CLIENT_ID", "\"${localProps["supabase.googleWebClientId"] ?: ""}\"")
+    }
+
+    flavorDimensions += "distribution"
+    productFlavors {
+        // Sideloaded builds: in-app GitHub-releases updater is active.
+        create("github") {
+            dimension = "distribution"
+            buildConfigField("String", "DISTRIBUTION", "\"github\"")
+        }
+        // Play Store builds: self-update UI is fully hidden (Play policy forbids
+        // self-updating apps) — Play's own update mechanism takes over instead.
+        // Same applicationId and versionCode/versionName stream as github — this is
+        // the same app on two channels, not two separate installs.
+        create("play") {
+            dimension = "distribution"
+            buildConfigField("String", "DISTRIBUTION", "\"play\"")
+        }
     }
 
     signingConfigs {
@@ -42,7 +71,22 @@ android {
             keyAlias      = keystoreProps["keyAlias"]      as? String ?: ""
             keyPassword   = keystoreProps["keyPassword"]   as? String ?: ""
         }
+        create("playRelease") {
+            val hasPlayKeystore = playKeystoreProps["storeFile"] != null
+            storeFile = file(
+                playKeystoreProps["storeFile"] as? String
+                    ?: (keystoreProps["storeFile"] as? String ?: "saiyanstrong.keystore")
+            )
+            storePassword = (if (hasPlayKeystore) playKeystoreProps["storePassword"] as? String else null)
+                ?: keystoreProps["storePassword"] as? String ?: ""
+            keyAlias = (if (hasPlayKeystore) playKeystoreProps["keyAlias"] as? String else null)
+                ?: keystoreProps["keyAlias"] as? String ?: ""
+            keyPassword = (if (hasPlayKeystore) playKeystoreProps["keyPassword"] as? String else null)
+                ?: keystoreProps["keyPassword"] as? String ?: ""
+        }
     }
+
+    productFlavors.getByName("play").signingConfig = signingConfigs.getByName("playRelease")
 
     buildTypes {
         debug {
@@ -51,7 +95,10 @@ android {
         release {
             signingConfig  = signingConfigs.getByName("release")
             isMinifyEnabled = true
-            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
         }
     }
 

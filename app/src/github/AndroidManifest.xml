@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    github-flavor-only manifest fragment, merged in only for that distribution channel.
+    REQUEST_INSTALL_PACKAGES is needed by util/UpdateInstaller.kt to install APKs
+    downloaded from GitHub Releases. Play Store policy forbids self-updating apps, so
+    the play flavor must never declare this permission — see CLAUDE.md "Play release
+    rules" for the full rationale.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+</manifest>

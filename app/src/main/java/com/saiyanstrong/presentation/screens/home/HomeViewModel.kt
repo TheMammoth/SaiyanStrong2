@@ -162,6 +162,9 @@ class HomeViewModel @Inject constructor(
     fun onInstallConsumed() { _downloadState.value = UpdateDownloadState.Idle }
 
     private fun checkForUpdate() {
+        // Play Store policy forbids self-updating apps — this whole surface stays dark
+        // on that flavor and Play's own update mechanism takes over instead.
+        if (BuildConfig.DISTRIBUTION != "github") return
         viewModelScope.launch {
             _updateStatus.value = "checking…"
             val dismissed = userRepository.getLastDismissedUpdateVersion().first()
