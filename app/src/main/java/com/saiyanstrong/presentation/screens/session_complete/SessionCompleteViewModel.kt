@@ -1,5 +1,6 @@
 package com.saiyanstrong.presentation.screens.session_complete
 
+import android.graphics.Bitmap
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -8,6 +9,7 @@ import com.saiyanstrong.domain.model.WorkoutSession
 import com.saiyanstrong.domain.repository.SessionRepository
 import com.saiyanstrong.domain.repository.TemplateRepository
 import com.saiyanstrong.domain.usecase.GetEvolutionStageUseCase
+import com.saiyanstrong.util.SessionShareImageSaver
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -46,6 +48,7 @@ class SessionCompleteViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val sessionRepository: SessionRepository,
     private val templateRepository: TemplateRepository,
+    private val sessionShareImageSaver: SessionShareImageSaver,
     getEvolutionStageUseCase: GetEvolutionStageUseCase
 ) : ViewModel() {
 
@@ -111,6 +114,13 @@ class SessionCompleteViewModel @Inject constructor(
                     .map { it.exercise.id }
             )
             _uiState.update { it.copy(isTemplateSaved = true) }
+        }
+    }
+
+    fun onShare(bitmap: Bitmap) {
+        val session = _uiState.value.session ?: return
+        viewModelScope.launch {
+            sessionShareImageSaver.share(bitmap, fileName = "saiyanstrong-session-${session.id}.png")
         }
     }
 

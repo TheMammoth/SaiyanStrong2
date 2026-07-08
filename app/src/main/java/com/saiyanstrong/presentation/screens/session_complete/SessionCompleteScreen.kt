@@ -5,6 +5,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -12,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -21,22 +23,32 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.graphics.layer.drawLayer
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -46,6 +58,7 @@ import com.saiyanstrong.domain.model.SaiyanStage
 import com.saiyanstrong.domain.model.WorkoutSession
 import com.saiyanstrong.presentation.components.ConfirmDialog
 import com.saiyanstrong.presentation.components.SaiyanButton
+import com.saiyanstrong.presentation.components.rememberComposeGraphicsLayer
 import com.saiyanstrong.presentation.components.scanlineTexture
 import com.saiyanstrong.presentation.theme.DangerRed
 import com.saiyanstrong.presentation.theme.MatteBlack
@@ -55,6 +68,7 @@ import com.saiyanstrong.presentation.theme.SaiyanGray
 import com.saiyanstrong.presentation.theme.SaiyanTheme
 import com.saiyanstrong.presentation.theme.TelemetryGreen
 import com.saiyanstrong.util.WeightFormatter
+import kotlinx.coroutines.launch
 import java.text.DateFormat
 import java.util.Date
 
@@ -66,8 +80,39 @@ fun SessionCompleteScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val exerciseRows by viewModel.exerciseRows.collectAsStateWithLifecycle()
+    val scope = rememberCoroutineScope()
+    val graphicsLayer = rememberComposeGraphicsLayer()
+
     LaunchedEffect(uiState.isDone) { if (uiState.isDone) onDone() }
     LaunchedEffect(uiState.isDeleted) { if (uiState.isDeleted) onDeleted() }
+
+    // Offscreen share card, captured into graphicsLayer on every draw pass so a bitmap is
+    // always ready the instant SHARE is tapped. Density(1f) makes 1.dp == 1px so the
+    // captured bitmap is pixel-exact regardless of the device's real screen density.
+    // clipToBounds() on the zero-size wrapper keeps this invisible on the real screen.
+    uiState.session?.let { session ->
+        Box(Modifier.size(0.dp).clipToBounds()) {
+            CompositionLocalProvider(LocalDensity provides Density(1f)) {
+                Box(
+                    modifier = Modifier
+                        .size(SHARE_CARD_WIDTH_PX.dp, SHARE_CARD_HEIGHT_PX.dp)
+                        .drawWithContent {
+                            graphicsLayer.record(
+                                density = this,
+                                layoutDirection = layoutDirection,
+                                size = IntSize(size.width.toInt(), size.height.toInt())
+                            ) {
+                                this@drawWithContent.drawContent()
+                            }
+                            drawLayer(graphicsLayer)
+                        }
+                ) {
+                    ShareCardContent(session = session, powerLevel = uiState.powerLevel)
+                }
+            }
+        }
+    }
+
     SessionCompleteContent(
         session = uiState.session,
         powerLevel = uiState.powerLevel,
@@ -77,7 +122,15 @@ fun SessionCompleteScreen(
         onTitleChange = viewModel::onTitleChange,
         onDone = viewModel::onDone,
         onDeleteSession = viewModel::onDeleteSession,
-        onSaveAsTemplate = viewModel::onSaveAsTemplate
+        onSaveAsTemplate = viewModel::onSaveAsTemplate,
+        onShare = {
+            scope.launch {
+                withFrameNanos {}
+                withFrameNanos {}
+                val bitmap = graphicsLayer.toImageBitmap().asAndroidBitmap()
+                viewModel.onShare(bitmap)
+            }
+        }
     )
 }
 
@@ -91,7 +144,8 @@ internal fun SessionCompleteContent(
     onTitleChange: (String) -> Unit,
     onDone: () -> Unit,
     onDeleteSession: () -> Unit,
-    onSaveAsTemplate: () -> Unit = {}
+    onSaveAsTemplate: () -> Unit = {},
+    onShare: () -> Unit = {}
 ) {
     Column(
         modifier = Modifier
@@ -287,6 +341,15 @@ internal fun SessionCompleteContent(
                 onDismiss = { showDeleteConfirm = false }
             )
         }
+        OutlinedButton(
+            onClick = onShare,
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = PowerAmber),
+            border = BorderStroke(1.dp, PowerAmber),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
+        ) {
+            Text("SHARE  ⚡  SESSION CARD", fontSize = 13.sp, fontWeight = FontWeight.Black, letterSpacing = 1.sp)
+        }
+
         Row(
             Modifier
                 .fillMaxWidth()

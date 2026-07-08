@@ -889,6 +889,40 @@ _(Claude Code appends here after each completed task)_
   No new dependencies (HorizontalPager + ModalBottomSheet are both already part of the
   existing Compose BOM/foundation).
   versionCode 26, versionName 0.15.0.
+- [x] Sprint 20 — DBZ-styled session share card (v0.16.0): SessionCompleteScreen gains a
+  SHARE button that renders a 1080×1350 portrait card and opens the Android share sheet
+  (WhatsApp-first — plain ACTION_SEND image/png via FileProvider, no platform-specific SDK).
+  (1) presentation/screens/session_complete/ShareCard.kt: pure offscreen Compose content —
+  amber "⚡ SAIYAN STRONG" logo header, session title + long-form date, hero total volume
+  (WeightFormatter.format, 92sp mono) + "POWER EARNED +X" in amber, a bordered Power Level
+  card whose border/label color comes from a new private SaiyanStage.glowColor() mapping
+  (BASE→white, SSJ1-3→amber, SSJ_GOD→red, ULTRA→neon-green — all existing SaiyanTheme
+  tokens, nothing hardcoded), top-3 exercises by summed set volume with each one's best
+  set, a real ScouterGauge at 10% alpha bleeding off the top-right corner as the "subtle
+  scouter graphic," and a pinned "TRACKED WITH SAIYANSTRONG" footer (the growth-loop line
+  — every share is free marketing).
+  (2) presentation/components/ComposeCapture.kt: rememberComposeGraphicsLayer() — the
+  project's Compose UI is pinned to 1.7.6 (via compose-bom 2024.12.01), which predates the
+  official rememberGraphicsLayer() convenience function, so this hand-rolls it from
+  LocalGraphicsContext.createGraphicsLayer()/releaseGraphicsLayer() (verified against the
+  actual 1.7.6 AAR bytecode before writing, since this API surface isn't in training data
+  for this exact version). SessionCompleteScreen renders ShareCardContent offscreen inside
+  a CompositionLocalProvider(LocalDensity provides Density(1f)) (so 1.dp==1px → pixel-exact
+  1080×1350 regardless of device density) wrapped in a zero-size clipToBounds() Box so nothing
+  overflows onto the visible screen; a drawWithContent modifier records every draw pass into
+  the GraphicsLayer. Tapping SHARE awaits two frames (withFrameNanos) for safety, then calls
+  the suspend graphicsLayer.toImageBitmap().asAndroidBitmap().
+  (3) util/SessionShareImageSaver.kt (new, mirrors UpdateInstaller.kt's FileProvider
+  pattern): writes the PNG to cacheDir/shares/, wraps it via the existing
+  com.saiyanstrong.fileprovider authority, fires ACTION_SEND with EXTRA_STREAM +
+  FLAG_GRANT_READ_URI_PERMISSION through Intent.createChooser. res/xml/file_paths.xml
+  gained a second cache-path entry (name="shares", path="shares/") alongside the updater's.
+  SessionCompleteViewModel.onShare(bitmap) is the only new ViewModel surface — capture stays
+  in the UI layer, file IO/Intent launch stays in the util layer, matching how
+  UpdateInstaller is already used from ViewModels elsewhere.
+  No new dependencies — GraphicsLayer/LocalGraphicsContext ship in the ui-graphics/ui
+  artifacts already on the classpath.
+  versionCode 27, versionName 0.16.0.
 
 ## Release rules
 
