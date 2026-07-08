@@ -18,4 +18,7 @@ interface UserRepository {
 
     fun getDefaultRestSeconds(): Flow<Int>
     suspend fun setDefaultRestSeconds(seconds: Int)
+
+    fun getOnboardingComplete(): Flow<Boolean>
+    suspend fun setOnboardingComplete(complete: Boolean)
 }

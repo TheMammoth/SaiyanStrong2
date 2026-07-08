@@ -1,6 +1,9 @@
 package com.saiyanstrong.presentation.navigation
 
 sealed class Screen(val route: String) {
+    data object Onboarding : Screen("onboarding?replay={replay}") {
+        fun createRoute(replay: Boolean = false) = "onboarding?replay=$replay"
+    }
     data object Home           : Screen("home")
     data object WorkoutLanding : Screen("workout_landing")
     data object ActiveWorkout  : Screen("workout?templateId={templateId}&repeatLast={repeatLast}") {

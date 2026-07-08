@@ -58,4 +58,11 @@ class UserRepositoryImpl @Inject constructor(
     override suspend fun setDefaultRestSeconds(seconds: Int) {
         userPreferencesDataStore.setDefaultRestSeconds(seconds)
     }
+
+    override fun getOnboardingComplete(): Flow<Boolean> =
+        userPreferencesDataStore.onboardingComplete
+
+    override suspend fun setOnboardingComplete(complete: Boolean) {
+        userPreferencesDataStore.setOnboardingComplete(complete)
+    }
 }

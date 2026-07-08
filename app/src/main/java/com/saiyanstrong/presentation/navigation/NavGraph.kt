@@ -29,6 +29,7 @@ import com.saiyanstrong.presentation.screens.exercises.ExerciseBrowserScreen
 import com.saiyanstrong.presentation.screens.exercises.ExerciseDetailScreen
 import com.saiyanstrong.presentation.screens.history.HistoryScreen
 import com.saiyanstrong.presentation.screens.home.HomeScreen
+import com.saiyanstrong.presentation.screens.onboarding.OnboardingScreen
 import com.saiyanstrong.presentation.screens.session_complete.SessionCompleteScreen
 import com.saiyanstrong.presentation.screens.settings.SettingsScreen
 import com.saiyanstrong.presentation.screens.workout.ActiveWorkoutScreen
@@ -62,6 +63,7 @@ fun NavGraph() {
     val currentRoute = backStackEntry?.destination?.route ?: Screen.Home.route
 
     val showBottomBar = currentRoute != Screen.ActiveWorkout.route &&
+            currentRoute != Screen.Onboarding.route &&
             !currentRoute.startsWith("session_complete")
 
     Scaffold(
@@ -98,9 +100,27 @@ fun NavGraph() {
     ) { innerPadding ->
         NavHost(
             navController = navController,
-            startDestination = Screen.Home.route,
+            startDestination = Screen.Onboarding.route,
             modifier = Modifier.padding(innerPadding)
         ) {
+            composable(
+                route = Screen.Onboarding.route,
+                arguments = listOf(navArgument("replay") { type = NavType.BoolType; defaultValue = false })
+            ) { backStackEntry ->
+                val replay = backStackEntry.arguments?.getBoolean("replay") ?: false
+                OnboardingScreen(
+                    onFinished = {
+                        if (replay) {
+                            navController.popBackStack()
+                        } else {
+                            navController.navigate(Screen.Home.route) {
+                                popUpTo(Screen.Onboarding.route) { inclusive = true }
+                            }
+                        }
+                    }
+                )
+            }
+
             composable(Screen.Home.route) {
                 HomeScreen(
                     onStartWorkout = { navController.navigate(Screen.WorkoutLanding.route) },
@@ -175,7 +195,10 @@ fun NavGraph() {
             }
 
             composable(Screen.Settings.route) {
-                SettingsScreen(onBack = { navController.popBackStack() })
+                SettingsScreen(
+                    onBack = { navController.popBackStack() },
+                    onReplayIntro = { navController.navigate(Screen.Onboarding.createRoute(replay = true)) }
+                )
             }
         }
     }

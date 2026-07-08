@@ -58,6 +58,7 @@ import java.util.Date
 @Composable
 fun SettingsScreen(
     onBack: () -> Unit,
+    onReplayIntro: () -> Unit = {},
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
     val checkState by viewModel.checkState.collectAsStateWithLifecycle()
@@ -261,6 +262,18 @@ fun SettingsScreen(
                 SettingsRow("App", "SaiyanStrong")
                 SettingsRow("Version", "v${BuildConfig.VERSION_NAME}")
                 SettingsRow("Build", "${BuildConfig.VERSION_CODE}")
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(SaiyanGray, androidx.compose.foundation.shape.RoundedCornerShape(6.dp))
+                        .clickable { onReplayIntro() }
+                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Replay intro", color = Color.White.copy(alpha = 0.55f), fontSize = 13.sp)
+                    Text("▶", color = NeonGreen, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                }
 
                 HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
 

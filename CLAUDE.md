@@ -863,6 +863,32 @@ _(Claude Code appends here after each completed task)_
   emulator/device was available this session. Test per SPEC.md `## 6. Testing strategy`
   checklist before fully trusting it in production use.
   versionCode 25, versionName 0.14.0.
+- [x] Sprint 19 — first-launch onboarding + Power Level info sheet (v0.15.0):
+  (1) presentation/screens/onboarding/OnboardingScreen.kt + OnboardingViewModel.kt: 4-page
+  Compose HorizontalPager (LOG YOUR SETS static set-table mock → EARN POWER with the real
+  ScouterGauge animating 0→68% progress each time the page becomes current → EVOLVE listing
+  every SaiyanStage with its threshold → final TIME TO TRAIN page with BEGIN TRAINING CTA
+  + optional "Back up your power" Google sign-in reusing GoogleSignInHelper/
+  SignInWithGoogleUseCase from the auth sprint). SKIP button top-right (hidden on the last
+  page), dot PageIndicator, NEXT button advances the pager (final page has no NEXT — its
+  own CTA finishes instead).
+  (2) Shown-once gating: UserPreferencesDataStore.onboardingComplete (new boolean key) +
+  UserRepository get/setOnboardingComplete. Screen.Onboarding is now the NavGraph
+  startDestination (route `onboarding?replay={replay}`); OnboardingViewModel exposes a
+  3-state gate (Loading/ShowOnboarding/SkipToHome) so a completed user never sees a pager
+  flash — SkipToHome fires onFinished() before any page renders. Finishing for real (not
+  replay) writes onboarding_complete=true and navigates to Home with
+  popUpTo(Onboarding){inclusive=true}; replay mode (from Settings) ignores the flag,
+  always shows the pager, and just pops back to Settings on finish.
+  (3) Settings → ABOUT gains a "Replay intro" row → Screen.Onboarding.createRoute(replay
+  = true).
+  (4) Home scouter gauge gains a small "?" (HelpOutline) IconButton, top-right of the
+  gauge area → PowerLevelInfoSheet, a ModalBottomSheet explaining how Power Level is
+  earned and listing all 6 SaiyanStage thresholds with the current one highlighted
+  (▶ amber row) — answers "is 34,200 good?" for first-time users without leaving Home.
+  No new dependencies (HorizontalPager + ModalBottomSheet are both already part of the
+  existing Compose BOM/foundation).
+  versionCode 26, versionName 0.15.0.
 
 ## Release rules
 

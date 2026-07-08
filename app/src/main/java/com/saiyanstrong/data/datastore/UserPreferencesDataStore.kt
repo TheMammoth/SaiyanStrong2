@@ -21,6 +21,7 @@ private val USE_FEMALE_DOTS_FORMULA         = booleanPreferencesKey("use_female_
 private val DEFAULT_REST_SECONDS            = intPreferencesKey("default_rest_seconds")
 private val LAST_BACKUP_AT_MS               = longPreferencesKey("last_backup_at_ms")
 private val LAST_BACKUP_VERSION_CODE        = intPreferencesKey("last_backup_version_code")
+private val ONBOARDING_COMPLETE             = booleanPreferencesKey("onboarding_complete")
 
 @Singleton
 class UserPreferencesDataStore @Inject constructor(
@@ -79,6 +80,15 @@ class UserPreferencesDataStore @Inject constructor(
         context.userPreferencesDataStore.edit { preferences ->
             preferences[LAST_BACKUP_AT_MS] = atMs
             preferences[LAST_BACKUP_VERSION_CODE] = versionCode
+        }
+    }
+
+    val onboardingComplete: Flow<Boolean> = context.userPreferencesDataStore.data
+        .map { preferences -> preferences[ONBOARDING_COMPLETE] ?: false }
+
+    suspend fun setOnboardingComplete(complete: Boolean) {
+        context.userPreferencesDataStore.edit { preferences ->
+            preferences[ONBOARDING_COMPLETE] = complete
         }
     }
 }

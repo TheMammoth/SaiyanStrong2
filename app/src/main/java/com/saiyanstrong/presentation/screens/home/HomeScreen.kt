@@ -28,10 +28,13 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.HelpOutline
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -147,6 +150,16 @@ internal fun HomeContent(
     dotsScore: Double? = null,
     onLogBodyWeight: (Double) -> Unit = {}
 ) {
+    var showPowerInfoSheet by remember { mutableStateOf(false) }
+
+    if (showPowerInfoSheet) {
+        PowerLevelInfoSheet(
+            currentPower = powerLevel?.current ?: 0,
+            currentStage = powerLevel?.stage,
+            onDismiss = { showPowerInfoSheet = false }
+        )
+    }
+
     Scaffold { padding ->
         Column(
             modifier = Modifier
@@ -204,6 +217,17 @@ internal fun HomeContent(
                         stageLabel = powerLevel?.stage?.label ?: "SCANNING…",
                         progressToNext = powerLevel?.progressToNext ?: 0f
                     )
+                    IconButton(
+                        onClick = { showPowerInfoSheet = true },
+                        modifier = Modifier.align(Alignment.TopEnd).padding(top = 4.dp, end = 8.dp)
+                    ) {
+                        Icon(
+                            Icons.Filled.HelpOutline,
+                            contentDescription = "What is Power Level?",
+                            tint = TelemetryGreen.copy(alpha = 0.7f),
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
                 }
                 powerLevel?.let { level ->
                     val next = SaiyanStage.entries.firstOrNull { it.threshold > level.current }
@@ -530,6 +554,84 @@ private fun BodyWeightSparkline(logs: List<BodyWeightLog>, modifier: Modifier = 
         }
         for (i in 0 until offsets.size - 1) {
             drawLine(NeonGreen.copy(alpha = 0.8f), offsets[i], offsets[i + 1], strokeWidth = 1.5.dp.toPx())
+        }
+    }
+}
+
+// ── Power Level info sheet ──────────────────────────────────────────────────
+
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+private fun PowerLevelInfoSheet(
+    currentPower: Int,
+    currentStage: SaiyanStage?,
+    onDismiss: () -> Unit
+) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = SaiyanGray
+    ) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 24.dp)
+        ) {
+            Text(
+                "WHAT IS POWER LEVEL?",
+                color = NeonGreen, fontSize = 15.sp, fontWeight = FontWeight.Black, letterSpacing = 1.sp
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "Every set you log adds to your Power Level. Heavier weight and more reps earn more — " +
+                    "low-rep heavy sets score a bigger multiplier than light high-rep ones. Cross a " +
+                    "threshold below and your Saiyan stage evolves.",
+                color = Color.White.copy(alpha = 0.7f), fontSize = 13.sp
+            )
+            Spacer(Modifier.height(18.dp))
+            Text(
+                "YOUR STAGE LADDER",
+                color = TelemetryGreen, fontSize = 10.sp, letterSpacing = 2.sp,
+                fontFamily = FontFamily.Monospace
+            )
+            Spacer(Modifier.height(8.dp))
+            SaiyanStage.entries.forEach { stage ->
+                val isCurrent = stage == currentStage
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp)
+                        .background(
+                            if (isCurrent) PowerAmber.copy(alpha = 0.12f) else Color.Transparent,
+                            RoundedCornerShape(6.dp)
+                        )
+                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (isCurrent) {
+                            Text("▶ ", color = PowerAmber, fontSize = 12.sp, fontWeight = FontWeight.Black)
+                        }
+                        Text(
+                            stage.label.uppercase(),
+                            color = if (isCurrent) PowerAmber else NeonGreen,
+                            fontSize = 13.sp, fontWeight = FontWeight.Black, letterSpacing = 1.sp
+                        )
+                    }
+                    Text(
+                        "%,d".format(stage.threshold),
+                        color = Color.White.copy(alpha = 0.6f), fontSize = 12.sp,
+                        fontFamily = FontFamily.Monospace
+                    )
+                }
+            }
+            Spacer(Modifier.height(14.dp))
+            Text(
+                "You're at %,d.".format(currentPower),
+                color = Color.White.copy(alpha = 0.45f), fontSize = 11.sp,
+                fontFamily = FontFamily.Monospace
+            )
         }
     }
 }
