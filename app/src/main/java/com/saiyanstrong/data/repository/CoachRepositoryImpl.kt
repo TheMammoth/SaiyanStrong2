@@ -6,6 +6,7 @@ import com.saiyanstrong.domain.model.AthleteSummary
 import com.saiyanstrong.domain.model.CoachLink
 import com.saiyanstrong.domain.model.CoachProfile
 import com.saiyanstrong.domain.model.ExerciseLog
+import com.saiyanstrong.domain.model.PushedTemplate
 import com.saiyanstrong.domain.model.SetLog
 import com.saiyanstrong.domain.model.WorkoutSession
 import com.saiyanstrong.domain.repository.CoachRepository
@@ -55,6 +56,26 @@ private data class LinkedProfileRow(
 
 @Serializable
 private data class RevokeStatusUpdate(val status: String = "revoked")
+
+@Serializable
+private data class PushedTemplateInsert(
+    @SerialName("coach_id") val coachId: String,
+    @SerialName("athlete_id") val athleteId: String,
+    val name: String,
+    @SerialName("exercise_ids") val exerciseIds: List<Int>
+)
+
+@Serializable
+private data class PushedTemplateRow(
+    val id: String,
+    @SerialName("coach_id") val coachId: String,
+    val name: String,
+    @SerialName("exercise_ids") val exerciseIds: List<Int>,
+    @SerialName("created_at") val createdAt: String
+)
+
+@Serializable
+private data class AcceptedUpdate(val accepted: Boolean = true)
 
 /** Excludes ambiguous-looking characters (0/O, 1/I/L) so a spoken/handwritten code is unambiguous. */
 private const val INVITE_CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
@@ -217,6 +238,49 @@ class CoachRepositoryImpl @Inject constructor(
                 title = sessionDto.title
             )
         }
+    }
+
+    override suspend fun pushTemplate(athleteId: String, name: String, exerciseIds: List<Int>): Result<Unit> = runCatching {
+        val userId = supabaseClient.auth.currentUserOrNull()?.id ?: error("Not signed in")
+        supabaseClient.postgrest.from("coach_pushed_templates").insert(
+            PushedTemplateInsert(coachId = userId, athleteId = athleteId, name = name, exerciseIds = exerciseIds)
+        )
+        Unit
+    }
+
+    override suspend fun getPendingPushedTemplates(): Result<List<PushedTemplate>> = runCatching {
+        val userId = supabaseClient.auth.currentUserOrNull()?.id ?: error("Not signed in")
+        val rows = supabaseClient.postgrest.from("coach_pushed_templates").select {
+            filter {
+                eq("athlete_id", userId)
+                eq("accepted", false)
+            }
+        }.decodeList<PushedTemplateRow>()
+
+        if (rows.isEmpty()) return@runCatching emptyList()
+
+        val coachIds = rows.map { it.coachId }.distinct()
+        val profilesById = supabaseClient.postgrest.from("linked_profile_public").select {
+            filter { isIn("id", coachIds) }
+        }.decodeList<LinkedProfileRow>().associateBy { it.id }
+
+        rows.map { row ->
+            val profile = profilesById[row.coachId]
+            PushedTemplate(
+                id = row.id,
+                coachName = profile?.displayName ?: profile?.email,
+                name = row.name,
+                exerciseIds = row.exerciseIds,
+                createdAtMs = OffsetDateTime.parse(row.createdAt).toInstant().toEpochMilli()
+            )
+        }
+    }
+
+    override suspend fun markPushedTemplateAccepted(pushedTemplateId: String): Result<Unit> = runCatching {
+        supabaseClient.postgrest.from("coach_pushed_templates").update(AcceptedUpdate()) {
+            filter { eq("id", pushedTemplateId) }
+        }
+        Unit
     }
 
     private suspend fun downloadAthleteBackupPayload(athleteId: String): BackupPayload {

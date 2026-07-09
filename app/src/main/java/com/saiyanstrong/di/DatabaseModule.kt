@@ -5,6 +5,7 @@ import androidx.room.Room
 import com.saiyanstrong.data.local.MIGRATION_3_4
 import com.saiyanstrong.data.local.MIGRATION_4_5
 import com.saiyanstrong.data.local.MIGRATION_5_6
+import com.saiyanstrong.data.local.MIGRATION_6_7
 import com.saiyanstrong.data.local.AppDatabase
 import com.saiyanstrong.data.local.dao.BodyWeightDao
 import com.saiyanstrong.data.local.dao.ExerciseDao
@@ -40,7 +41,8 @@ object DatabaseModule {
                 },
                 MIGRATION_3_4,
                 MIGRATION_4_5,
-                MIGRATION_5_6
+                MIGRATION_5_6,
+                MIGRATION_6_7
             )
             .build()
 

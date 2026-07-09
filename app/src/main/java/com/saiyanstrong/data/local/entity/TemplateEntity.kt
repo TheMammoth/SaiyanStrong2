@@ -8,5 +8,6 @@ import androidx.room.PrimaryKey
 data class TemplateEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val name: String,
-    @ColumnInfo(name = "created_ms") val createdMs: Long
+    @ColumnInfo(name = "created_ms") val createdMs: Long,
+    @ColumnInfo(name = "is_from_coach") val isFromCoach: Boolean = false
 )

@@ -5,6 +5,6 @@ import kotlinx.coroutines.flow.Flow
 
 interface TemplateRepository {
     fun getAllTemplates(): Flow<List<WorkoutTemplate>>
-    suspend fun saveTemplate(name: String, exerciseIds: List<Int>): Long
+    suspend fun saveTemplate(name: String, exerciseIds: List<Int>, isFromCoach: Boolean = false): Long
     suspend fun deleteTemplate(templateId: Long)
 }

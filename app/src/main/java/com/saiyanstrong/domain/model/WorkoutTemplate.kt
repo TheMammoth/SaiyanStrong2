@@ -5,5 +5,6 @@ data class WorkoutTemplate(
     val name: String,
     val createdMs: Long,
     val exerciseIds: List<Int>,
-    val exerciseNames: List<String>
+    val exerciseNames: List<String>,
+    val isFromCoach: Boolean = false
 )

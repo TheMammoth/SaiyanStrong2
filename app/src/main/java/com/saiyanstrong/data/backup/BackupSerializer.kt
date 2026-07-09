@@ -87,8 +87,8 @@ class BackupSerializer @Inject constructor(
     private fun SetLogEntity.toDto() = SetLogDto(id, exerciseLogId, setNumber, weightKg, reps, rpe, isFailure, volumeKg, timestampMs)
     private fun SetLogDto.toEntity() = SetLogEntity(id, exerciseLogId, setNumber, weightKg, reps, rpe, isFailure, volumeKg, timestampMs)
 
-    private fun TemplateEntity.toDto() = TemplateDto(id, name, createdMs)
-    private fun TemplateDto.toEntity() = TemplateEntity(id, name, createdMs)
+    private fun TemplateEntity.toDto() = TemplateDto(id, name, createdMs, isFromCoach)
+    private fun TemplateDto.toEntity() = TemplateEntity(id, name, createdMs, isFromCoach)
 
     private fun TemplateExerciseEntity.toDto() = TemplateExerciseDto(id, templateId, exerciseId, orderIndex)
     private fun TemplateExerciseDto.toEntity() = TemplateExerciseEntity(id, templateId, exerciseId, orderIndex)

@@ -21,11 +21,16 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Snackbar
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -42,6 +47,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.layout.size
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.saiyanstrong.domain.model.PushedTemplate
 import com.saiyanstrong.domain.model.WorkoutTemplate
 import com.saiyanstrong.presentation.components.ConfirmDialog
 import com.saiyanstrong.presentation.components.SaiyanButton
@@ -61,8 +67,21 @@ fun WorkoutLandingScreen(
 ) {
     val templates by viewModel.templates.collectAsStateWithLifecycle()
     val lastSession by viewModel.lastSession.collectAsStateWithLifecycle()
+    val pendingPushedTemplates by viewModel.pendingPushedTemplates.collectAsStateWithLifecycle()
+    val isAcceptingTemplateId by viewModel.isAcceptingTemplateId.collectAsStateWithLifecycle()
+    val snackbarHostState = remember { SnackbarHostState() }
 
-    Scaffold { padding ->
+    LaunchedEffect(Unit) {
+        viewModel.snackbarEvents.collect { snackbarHostState.showSnackbar(it) }
+    }
+
+    Scaffold(
+        snackbarHost = {
+            SnackbarHost(snackbarHostState) { data ->
+                Snackbar(snackbarData = data, containerColor = SaiyanGray, contentColor = Color.White, actionColor = NeonGreen)
+            }
+        }
+    ) { padding ->
         LazyVerticalGrid(
             columns = GridCells.Fixed(2),
             modifier = Modifier
@@ -127,6 +146,28 @@ fun WorkoutLandingScreen(
                 }
             }
 
+            if (pendingPushedTemplates.isNotEmpty()) {
+                item(span = { GridItemSpan(maxLineSpan) }) {
+                    Text(
+                        "FROM YOUR COACH",
+                        color = PowerAmber, fontSize = 10.sp, letterSpacing = 2.sp,
+                        fontFamily = FontFamily.Monospace,
+                        modifier = Modifier.padding(top = 6.dp)
+                    )
+                }
+                items(
+                    pendingPushedTemplates,
+                    key = { it.id },
+                    span = { GridItemSpan(maxLineSpan) }
+                ) { pending ->
+                    PendingPushedTemplateCard(
+                        pending = pending,
+                        isAccepting = isAcceptingTemplateId == pending.id,
+                        onAccept = { viewModel.onAcceptPushedTemplate(pending) }
+                    )
+                }
+            }
+
             item(span = { GridItemSpan(maxLineSpan) }) {
                 Text(
                     "MY TEMPLATES (${templates.size})",
@@ -174,6 +215,36 @@ fun WorkoutLandingScreen(
 }
 
 @Composable
+private fun PendingPushedTemplateCard(
+    pending: PushedTemplate,
+    isAccepting: Boolean,
+    onAccept: () -> Unit
+) {
+    Row(
+        Modifier.fillMaxWidth()
+            .background(SaiyanGray, RoundedCornerShape(6.dp))
+            .border(1.dp, PowerAmber, RoundedCornerShape(6.dp))
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(Icons.Default.Groups, null, tint = PowerAmber, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(10.dp))
+        Column(Modifier.weight(1f)) {
+            Text(pending.name, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Black)
+            Text(
+                "from ${pending.coachName ?: "your coach"} · ${pending.exerciseIds.size} exercises",
+                color = Color.White.copy(alpha = 0.45f), fontSize = 11.sp
+            )
+        }
+        Text(
+            if (isAccepting) "…" else "ACCEPT",
+            color = NeonGreen, fontSize = 12.sp, fontWeight = FontWeight.Black,
+            modifier = Modifier.clickable(enabled = !isAccepting) { onAccept() }.padding(start = 8.dp)
+        )
+    }
+}
+
+@Composable
 private fun TemplateCard(
     template: WorkoutTemplate,
     onStart: () -> Unit,
@@ -207,6 +278,12 @@ private fun TemplateCard(
             color = NeonGreen, fontSize = 13.sp, fontWeight = FontWeight.Bold,
             maxLines = 2, overflow = TextOverflow.Ellipsis
         )
+        if (template.isFromCoach) {
+            Text(
+                "FROM COACH", color = PowerAmber, fontSize = 8.sp, fontWeight = FontWeight.Black,
+                letterSpacing = 1.sp, fontFamily = FontFamily.Monospace
+            )
+        }
         Spacer(Modifier.height(4.dp))
         Text(
             template.exerciseNames.joinToString(", "),

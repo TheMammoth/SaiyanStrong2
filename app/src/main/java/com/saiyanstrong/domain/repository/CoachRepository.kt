@@ -3,6 +3,7 @@ package com.saiyanstrong.domain.repository
 import com.saiyanstrong.domain.model.AthleteSummary
 import com.saiyanstrong.domain.model.CoachLink
 import com.saiyanstrong.domain.model.CoachProfile
+import com.saiyanstrong.domain.model.PushedTemplate
 import com.saiyanstrong.domain.model.WorkoutSession
 
 interface CoachRepository {
@@ -34,4 +35,13 @@ interface CoachRepository {
 
     /** Read-only reconstruction of one athlete's session history from their latest backup. */
     suspend fun getAthleteHistory(athleteId: String): Result<List<WorkoutSession>>
+
+    /** Coach-only, requires an active link to the athlete (enforced by RLS). */
+    suspend fun pushTemplate(athleteId: String, name: String, exerciseIds: List<Int>): Result<Unit>
+
+    /** Athlete's not-yet-accepted templates pushed by any linked coach. */
+    suspend fun getPendingPushedTemplates(): Result<List<PushedTemplate>>
+
+    /** Flips accepted=true server-side. Does NOT create the local template — that's the caller's job. */
+    suspend fun markPushedTemplateAccepted(pushedTemplateId: String): Result<Unit>
 }

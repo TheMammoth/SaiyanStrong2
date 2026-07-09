@@ -31,15 +31,16 @@ class TemplateRepositoryImpl @Inject constructor(
                     name = template.name,
                     createdMs = template.createdMs,
                     exerciseIds = templateEntries.map { it.exerciseId },
-                    exerciseNames = templateEntries.map { it.name }
+                    exerciseNames = templateEntries.map { it.name },
+                    isFromCoach = template.isFromCoach
                 )
             }
         }
 
-    override suspend fun saveTemplate(name: String, exerciseIds: List<Int>): Long =
+    override suspend fun saveTemplate(name: String, exerciseIds: List<Int>, isFromCoach: Boolean): Long =
         appDatabase.withTransaction {
             val templateId = templateDao.insert(
-                TemplateEntity(name = name, createdMs = System.currentTimeMillis())
+                TemplateEntity(name = name, createdMs = System.currentTimeMillis(), isFromCoach = isFromCoach)
             )
             exerciseIds.forEachIndexed { index, exerciseId ->
                 templateDao.insertExercise(

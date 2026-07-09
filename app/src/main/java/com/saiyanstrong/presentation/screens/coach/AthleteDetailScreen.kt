@@ -14,10 +14,16 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Snackbar
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -27,6 +33,8 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.saiyanstrong.domain.model.WorkoutSession
+import com.saiyanstrong.domain.model.WorkoutTemplate
+import com.saiyanstrong.presentation.components.SaiyanButton
 import com.saiyanstrong.presentation.components.scanlineTexture
 import com.saiyanstrong.presentation.theme.DangerRed
 import com.saiyanstrong.presentation.theme.MatteBlack
@@ -43,8 +51,28 @@ fun AthleteDetailScreen(
     viewModel: AthleteDetailViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val myTemplates by viewModel.myTemplates.collectAsStateWithLifecycle()
+    val snackbarHostState = remember { SnackbarHostState() }
 
-    Scaffold { padding ->
+    LaunchedEffect(Unit) {
+        viewModel.snackbarEvents.collect { snackbarHostState.showSnackbar(it) }
+    }
+
+    if (uiState.showTemplatePicker) {
+        TemplatePickerSheet(
+            templates = myTemplates,
+            onPick = viewModel::onPushTemplate,
+            onDismiss = viewModel::onDismissTemplatePicker
+        )
+    }
+
+    Scaffold(
+        snackbarHost = {
+            SnackbarHost(snackbarHostState) { data ->
+                Snackbar(snackbarData = data, containerColor = SaiyanGray, contentColor = Color.White, actionColor = NeonGreen)
+            }
+        }
+    ) { padding ->
         Column(
             Modifier
                 .fillMaxSize()
@@ -71,11 +99,21 @@ fun AthleteDetailScreen(
                     letterSpacing = 2.sp
                 )
             }
-            Text(
-                "READ-ONLY",
-                color = PowerAmber, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp,
-                modifier = Modifier.padding(start = 16.dp, top = 8.dp)
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    "READ-ONLY",
+                    color = PowerAmber, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp
+                )
+                Text(
+                    if (uiState.isPushing) "PUSHING…" else "PUSH TEMPLATE",
+                    color = NeonGreen, fontSize = 12.sp, fontWeight = FontWeight.Bold,
+                    modifier = Modifier.clickable(enabled = !uiState.isPushing) { viewModel.onShowTemplatePicker() }
+                )
+            }
 
             when {
                 uiState.isLoading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -93,6 +131,46 @@ fun AthleteDetailScreen(
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     items(uiState.sessions) { session -> ReadOnlySessionCard(session) }
+                }
+            }
+        }
+    }
+}
+
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+private fun TemplatePickerSheet(
+    templates: List<WorkoutTemplate>,
+    onPick: (WorkoutTemplate) -> Unit,
+    onDismiss: () -> Unit
+) {
+    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = SaiyanGray) {
+        Column(Modifier.fillMaxWidth().padding(16.dp)) {
+            Text(
+                "PUSH A TEMPLATE", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Black,
+                letterSpacing = 1.sp, modifier = Modifier.padding(bottom = 12.dp)
+            )
+            if (templates.isEmpty()) {
+                Text(
+                    "You don't have any templates yet — save one from a finished workout first.",
+                    color = Color.White.copy(alpha = 0.5f), fontSize = 12.sp
+                )
+            } else {
+                templates.forEach { template ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onPick(template) }
+                            .padding(vertical = 12.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text(template.name, color = NeonGreen, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                            Text("${template.exerciseIds.size} exercises", color = Color.White.copy(alpha = 0.4f), fontSize = 11.sp)
+                        }
+                        Text("PUSH", color = PowerAmber, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
                 }
             }
         }

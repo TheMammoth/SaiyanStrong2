@@ -59,7 +59,8 @@ data class SetLogDto(
 data class TemplateDto(
     val id: Long,
     val name: String,
-    val createdMs: Long
+    val createdMs: Long,
+    val isFromCoach: Boolean = false
 )
 
 @Serializable
