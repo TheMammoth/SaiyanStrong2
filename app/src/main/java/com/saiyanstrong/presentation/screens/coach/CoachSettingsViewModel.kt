@@ -3,6 +3,7 @@ package com.saiyanstrong.presentation.screens.coach
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.saiyanstrong.domain.model.CoachLink
+import com.saiyanstrong.domain.repository.AuthRepository
 import com.saiyanstrong.domain.repository.CoachRepository
 import com.saiyanstrong.domain.usecase.GenerateInviteCodeUseCase
 import com.saiyanstrong.domain.usecase.IsCoachUseCase
@@ -37,7 +38,8 @@ class CoachSettingsViewModel @Inject constructor(
     private val generateInviteCodeUseCase: GenerateInviteCodeUseCase,
     private val redeemInviteCodeUseCase: RedeemInviteCodeUseCase,
     private val revokeCoachLinkUseCase: RevokeCoachLinkUseCase,
-    private val coachRepository: CoachRepository
+    private val coachRepository: CoachRepository,
+    private val authRepository: AuthRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(CoachSettingsUiState())
@@ -111,5 +113,14 @@ class CoachSettingsViewModel @Inject constructor(
                 .onSuccess { list -> _uiState.update { it.copy(linkedCoaches = list) } }
             _uiState.update { it.copy(isLoadingLinkedCoaches = false) }
         }
+    }
+
+    /**
+     * Checkout always happens on the web (never in-app) — required for Play policy on
+     * the play flavor, and kept identical on github so there's one purchase path, not two.
+     */
+    fun checkoutUrl(plan: String): String? {
+        val userId = authRepository.currentUserId() ?: return null
+        return "https://themammoth.github.io/SaiyanStrong2/checkout.html?uid=$userId&plan=$plan"
     }
 }

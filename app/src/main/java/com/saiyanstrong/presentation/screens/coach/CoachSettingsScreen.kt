@@ -177,6 +177,42 @@ fun CoachSettingsScreen(
                             fontWeight = FontWeight.Black, fontSize = 13.sp
                         )
                     }
+                } else if (!uiState.isLoadingStatus) {
+                    CoachSectionHeader("BECOME A COACH")
+                    Text(
+                        "Manage athletes, see their training history, and push them workout templates. " +
+                            "Checkout happens on the web — the app never handles payment.",
+                        color = Color.White.copy(alpha = 0.5f), fontSize = 11.sp
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Box(modifier = Modifier.weight(1f)) {
+                            SaiyanButton(
+                                onClick = {
+                                    viewModel.checkoutUrl("monthly")?.let { url ->
+                                        context.startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url)))
+                                    }
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text("€12 / MONTH", fontWeight = FontWeight.Black, fontSize = 12.sp)
+                            }
+                        }
+                        Box(modifier = Modifier.weight(1f)) {
+                            SaiyanButton(
+                                onClick = {
+                                    viewModel.checkoutUrl("annual")?.let { url ->
+                                        context.startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url)))
+                                    }
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text("€120 / YEAR", fontWeight = FontWeight.Black, fontSize = 12.sp)
+                            }
+                        }
+                    }
                 }
 
                 CoachSectionHeader("HAVE AN INVITE CODE?")
