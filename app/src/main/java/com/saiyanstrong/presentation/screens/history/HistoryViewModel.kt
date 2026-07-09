@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.saiyanstrong.domain.model.WorkoutSession
 import com.saiyanstrong.domain.repository.SessionRepository
+import com.saiyanstrong.domain.usecase.DeleteSessionUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -26,7 +27,8 @@ data class HistoryUiState(
 
 @HiltViewModel
 class HistoryViewModel @Inject constructor(
-    private val sessionRepository: SessionRepository
+    private val sessionRepository: SessionRepository,
+    private val deleteSessionUseCase: DeleteSessionUseCase
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(HistoryUiState())
@@ -44,7 +46,7 @@ class HistoryViewModel @Inject constructor(
     }
 
     fun deleteSession(sessionId: Long) {
-        viewModelScope.launch { sessionRepository.deleteSession(sessionId) }
+        viewModelScope.launch { deleteSessionUseCase.execute(sessionId) }
     }
 
     private fun buildHistoryItems(sessions: List<WorkoutSession>): List<HistoryItem> {

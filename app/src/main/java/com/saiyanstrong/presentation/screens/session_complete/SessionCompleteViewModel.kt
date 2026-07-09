@@ -8,6 +8,7 @@ import com.saiyanstrong.domain.model.PowerLevel
 import com.saiyanstrong.domain.model.WorkoutSession
 import com.saiyanstrong.domain.repository.SessionRepository
 import com.saiyanstrong.domain.repository.TemplateRepository
+import com.saiyanstrong.domain.usecase.DeleteSessionUseCase
 import com.saiyanstrong.domain.usecase.GetEvolutionStageUseCase
 import com.saiyanstrong.util.SessionShareImageSaver
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -49,6 +50,7 @@ class SessionCompleteViewModel @Inject constructor(
     private val sessionRepository: SessionRepository,
     private val templateRepository: TemplateRepository,
     private val sessionShareImageSaver: SessionShareImageSaver,
+    private val deleteSessionUseCase: DeleteSessionUseCase,
     getEvolutionStageUseCase: GetEvolutionStageUseCase
 ) : ViewModel() {
 
@@ -126,7 +128,7 @@ class SessionCompleteViewModel @Inject constructor(
 
     fun onDeleteSession() {
         viewModelScope.launch {
-            sessionRepository.deleteSession(sessionId)
+            deleteSessionUseCase.execute(sessionId)
             _uiState.update { it.copy(isDeleted = true) }
         }
     }

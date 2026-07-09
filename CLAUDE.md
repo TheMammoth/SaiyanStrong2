@@ -1073,6 +1073,29 @@ _(Claude Code appends here after each completed task)_
   scheduled but not yet manually invoked end-to-end — first real run is the scheduled
   03:00 UTC cron fire, worth checking `entitlement_reconcile_flags` + function logs after.
   versionCode 29, versionName 0.18.0.
+- [x] Bug fix (v0.18.1): Power Level stayed inflated after deleting sessions from History
+  (a user reported seeing Power Level 19,971 with History showing "NO SESSIONS LOGGED
+  YET" after deleting everything). Root cause: `CompleteSessionUseCase` incremented a
+  separate `lifetimePowerEarned` counter in DataStore on every finished session, but
+  nothing ever decremented it when a session was deleted (`HistoryViewModel.deleteSession`
+  and `SessionCompleteViewModel.onDeleteSession` both called
+  `sessionRepository.deleteSession()` directly) — the counter only ever went up,
+  permanently drifting from reality.
+  Real fix, not a patch: Power Level is now derived live from `SUM(sessions.power_earned)`
+  via a new `SessionDao.getTotalPowerEarned()` query, not from the separately-maintained
+  counter — `GetEvolutionStageUseCase` sources from `SessionRepository` instead of
+  `UserRepository`. This self-heals any already-corrupted install with no reset step
+  needed (0 sessions → 0 power, automatically) and eliminates the whole bug class going
+  forward, since nothing needs to remember to keep a counter in sync. Same latent bug
+  existed in the Coach Dashboard (Slice 4) — `CoachRepositoryImpl.getAthleteSummaries()`
+  was trusting an athlete's backed-up `lifetimePowerEarned` field, which could be
+  corrupted by this exact bug on their device too; now sums `payload.sessions` directly
+  instead. Added `DeleteSessionUseCase` (orchestrates `SessionRepository` +
+  `UserRepository`, subtracting the deleted session's power from the legacy DataStore
+  counter too, clamped at 0) so the vestigial counter — still kept for
+  `BackupPayload.lifetimePowerEarned` backup-format compatibility, no longer read for
+  display — doesn't drift either, even though nothing authoritative depends on it anymore.
+  versionCode 30, versionName 0.18.1.
 
 ## Release rules
 

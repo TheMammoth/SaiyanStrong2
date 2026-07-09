@@ -36,7 +36,7 @@ class UserPreferencesDataStore @Inject constructor(
     suspend fun addPowerEarned(amount: Int) {
         context.userPreferencesDataStore.edit { preferences ->
             val current = preferences[LIFETIME_POWER_EARNED] ?: 0
-            preferences[LIFETIME_POWER_EARNED] = current + amount
+            preferences[LIFETIME_POWER_EARNED] = (current + amount).coerceAtLeast(0)
         }
     }
 

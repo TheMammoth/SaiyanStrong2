@@ -35,6 +35,8 @@ class SessionRepositoryImpl @Inject constructor(
     override fun getSessionById(sessionId: Long): Flow<WorkoutSession?> =
         sessionDao.getById(sessionId).map { it?.toDomainWithDetails() }
 
+    override fun getTotalPowerEarned(): Flow<Int> = sessionDao.getTotalPowerEarned()
+
     override suspend fun saveSession(session: WorkoutSession): Long =
         appDatabase.withTransaction {
             val sessionId = sessionDao.insert(session.toEntity())

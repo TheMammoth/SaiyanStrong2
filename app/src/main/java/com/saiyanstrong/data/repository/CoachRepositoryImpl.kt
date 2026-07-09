@@ -195,7 +195,10 @@ class CoachRepositoryImpl @Inject constructor(
                 email = profile?.email,
                 lastSessionDateMs = lastSessionDateMs,
                 weeklyVolumeKg = weeklyVolumeKg,
-                powerLevel = calculatePowerLevelUseCase.getPowerLevel(payload?.lifetimePowerEarned ?: 0),
+                // Derived from the athlete's actual sessions, not the backup's separately
+                // maintained lifetimePowerEarned field — that field can drift from reality
+                // the same way it did locally (never decremented when a session is deleted).
+                powerLevel = calculatePowerLevelUseCase.getPowerLevel(payload?.sessions?.sumOf { it.powerEarned } ?: 0),
                 isStale = lastSessionDateMs == null || nowMs - lastSessionDateMs > SEVEN_DAYS_MS
             )
         }
