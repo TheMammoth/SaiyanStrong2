@@ -50,6 +50,7 @@ kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-
 supabase-bom = { group = "io.github.jan-tennert.supabase", name = "bom", version.ref = "supabaseBom" }
 supabase-auth = { group = "io.github.jan-tennert.supabase", name = "auth-kt" }
 supabase-storage = { group = "io.github.jan-tennert.supabase", name = "storage-kt" }
+supabase-postgrest = { group = "io.github.jan-tennert.supabase", name = "postgrest-kt" }
 ktor-client-android = { group = "io.ktor", name = "ktor-client-android", version.ref = "ktorClientAndroid" }
 androidx-credentials = { group = "androidx.credentials", name = "credentials", version.ref = "credentials" }
 androidx-credentials-play-services-auth = { group = "androidx.credentials", name = "credentials-play-services-auth", version.ref = "credentials" }

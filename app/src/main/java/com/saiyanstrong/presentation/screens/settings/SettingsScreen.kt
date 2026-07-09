@@ -70,6 +70,7 @@ fun SettingsScreen(
     val isSigningIn by viewModel.isSigningIn.collectAsStateWithLifecycle()
     val isBackingUp by viewModel.isBackingUp.collectAsStateWithLifecycle()
     val isRestoring by viewModel.isRestoring.collectAsStateWithLifecycle()
+    val coachStatus by viewModel.coachStatus.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
     var showRestoreConfirm by remember { mutableStateOf(false) }
@@ -197,6 +198,29 @@ fun SettingsScreen(
                         }
                     }
                     ActionButton(text = "SIGN OUT", color = DangerRed) { viewModel.onSignOut() }
+                }
+
+                // ── Coach Mode section — only meaningful once signed in ─
+                if (user != null) {
+                    HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
+                    SectionHeader("COACH MODE")
+                    when {
+                        coachStatus.isLoading -> {
+                            Text("Checking…", color = Color.White.copy(alpha = 0.5f), fontSize = 12.sp)
+                        }
+                        coachStatus.isCoach -> {
+                            val expiryText = coachStatus.entitlementExpiresAtMs?.let {
+                                "Active until ${DateFormat.getDateInstance(DateFormat.MEDIUM).format(Date(it))}"
+                            } ?: "Active"
+                            SettingsRow("Status", expiryText, valueColor = NeonGreen)
+                        }
+                        else -> {
+                            Text(
+                                "Not a coach yet. Coach tools for managing athletes are coming soon.",
+                                color = Color.White.copy(alpha = 0.5f), fontSize = 11.sp
+                            )
+                        }
+                    }
                 }
 
                 HorizontalDivider(color = Color.White.copy(alpha = 0.08f))

@@ -10,9 +10,11 @@ import com.saiyanstrong.domain.model.AuthUser
 import com.saiyanstrong.domain.model.BackupInfo
 import com.saiyanstrong.domain.repository.AuthRepository
 import com.saiyanstrong.domain.repository.BackupRepository
+import com.saiyanstrong.domain.repository.CoachRepository
 import com.saiyanstrong.domain.repository.UserRepository
 import com.saiyanstrong.domain.usecase.BackupNowUseCase
 import com.saiyanstrong.domain.usecase.CheckForUpdateUseCase
+import com.saiyanstrong.domain.usecase.IsCoachUseCase
 import com.saiyanstrong.domain.usecase.RestoreBackupUseCase
 import com.saiyanstrong.domain.usecase.SignInWithGoogleUseCase
 import com.saiyanstrong.domain.usecase.SignOutUseCase
@@ -27,9 +29,20 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+
+data class CoachStatusUiState(
+    val isLoading: Boolean = false,
+    val isCoach: Boolean = false,
+    val entitlementExpiresAtMs: Long? = null
+)
 
 sealed class UpdateCheckState {
     data object Idle : UpdateCheckState()
@@ -58,11 +71,35 @@ class SettingsViewModel @Inject constructor(
     private val signInWithGoogleUseCase: SignInWithGoogleUseCase,
     private val signOutUseCase: SignOutUseCase,
     private val backupNowUseCase: BackupNowUseCase,
-    private val restoreBackupUseCase: RestoreBackupUseCase
+    private val restoreBackupUseCase: RestoreBackupUseCase,
+    private val coachRepository: CoachRepository,
+    private val isCoachUseCase: IsCoachUseCase
 ) : ViewModel() {
 
     val authUser: StateFlow<AuthUser?> = authRepository.authState
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    private val _coachStatus = MutableStateFlow(CoachStatusUiState())
+    val coachStatus: StateFlow<CoachStatusUiState> = _coachStatus.asStateFlow()
+
+    init {
+        // Re-check coach status whenever sign-in state changes (including sign-out, which
+        // resets to "not a coach" since there's no signed-in user to check anymore).
+        authUser
+            .map { it?.id }
+            .distinctUntilChanged()
+            .onEach { userId -> if (userId != null) refreshCoachStatus() else _coachStatus.value = CoachStatusUiState() }
+            .launchIn(viewModelScope)
+    }
+
+    fun refreshCoachStatus() {
+        viewModelScope.launch {
+            _coachStatus.update { it.copy(isLoading = true) }
+            val isCoach = isCoachUseCase.execute()
+            val expiresAt = if (isCoach) coachRepository.getProfile().getOrNull()?.coachEntitlementExpiresAtMs else null
+            _coachStatus.value = CoachStatusUiState(isLoading = false, isCoach = isCoach, entitlementExpiresAtMs = expiresAt)
+        }
+    }
 
     val backupInfo: StateFlow<BackupInfo?> = backupRepository.lastBackupInfo
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
