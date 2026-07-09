@@ -25,6 +25,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.saiyanstrong.presentation.screens.coach.CoachSettingsScreen
 import com.saiyanstrong.presentation.screens.exercises.ExerciseBrowserScreen
 import com.saiyanstrong.presentation.screens.exercises.ExerciseDetailScreen
 import com.saiyanstrong.presentation.screens.history.HistoryScreen
@@ -197,8 +198,13 @@ fun NavGraph() {
             composable(Screen.Settings.route) {
                 SettingsScreen(
                     onBack = { navController.popBackStack() },
-                    onReplayIntro = { navController.navigate(Screen.Onboarding.createRoute(replay = true)) }
+                    onReplayIntro = { navController.navigate(Screen.Onboarding.createRoute(replay = true)) },
+                    onManageCoachMode = { navController.navigate(Screen.CoachSettings.route) }
                 )
+            }
+
+            composable(Screen.CoachSettings.route) {
+                CoachSettingsScreen(onBack = { navController.popBackStack() })
             }
         }
     }

@@ -59,6 +59,7 @@ import java.util.Date
 fun SettingsScreen(
     onBack: () -> Unit,
     onReplayIntro: () -> Unit = {},
+    onManageCoachMode: () -> Unit = {},
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
     val checkState by viewModel.checkState.collectAsStateWithLifecycle()
@@ -216,10 +217,24 @@ fun SettingsScreen(
                         }
                         else -> {
                             Text(
-                                "Not a coach yet. Coach tools for managing athletes are coming soon.",
+                                "Not a coach yet. You can still enter an invite code from a coach below.",
                                 color = Color.White.copy(alpha = 0.5f), fontSize = 11.sp
                             )
                         }
+                    }
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onManageCoachMode() }
+                            .padding(vertical = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            if (coachStatus.isCoach) "Manage invites & linked athletes" else "Invite codes & linked coaches",
+                            color = NeonGreen, fontSize = 13.sp, fontWeight = FontWeight.Bold
+                        )
+                        Text("→", color = NeonGreen, fontSize = 16.sp)
                     }
                 }
 
