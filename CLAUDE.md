@@ -995,6 +995,84 @@ _(Claude Code appends here after each completed task)_
   session share, exercise photos, updater on the github flavor) before trusting a
   release build in production.
   versionCode 28, versionName 0.17.0.
+- [x] Coach Mode (v0.18.0) — the monetization tier, built as 7 incremental slices per
+  SPEC.md, each independently verified and committed. Full stack: Postgres schema on the
+  existing `barbell-io` Supabase project, Paddle subscription billing, and the client-side
+  Coach Dashboard/invite/template-push UI.
+  (1) **Schema + RLS** (Slice 1, migration 0001): `profiles` gains
+  `coach_entitlement_active`/`coach_entitlement_expires_at`/`paddle_subscription_id`/
+  `paddle_customer_id` (additive — this Supabase project turned out to already have an
+  unrelated `profiles` table + 5 empty scaffolding tables from something else; none of
+  those were touched). `is_coach()` is the single entitlement-check function, backed by
+  role='coach' AND entitlement_active AND not expired — every client-side gate calls this,
+  nothing re-implements the check. New tables: `coach_invite_codes`, `coach_athletes`,
+  `coach_pushed_templates`, each with RLS plus BEFORE UPDATE triggers restricting an
+  athlete to exactly the one state transition they're allowed (revoke / accept — never
+  reassigning `coach_id`). Along the way, found and fixed a real pre-existing hole: the
+  original `profiles` table had a permissive UPDATE policy letting any signed-in user set
+  `role='admin'` on themselves; `profiles` is now client-read-only, writable only via the
+  service role (the webhook).
+  (2) **Client entitlement plumbing** (Slice 2): added `postgrest-kt` (verified against
+  actual 3.1.4 bytecode before use). `IsCoachUseCase` → `CoachRepository.isCoach()` →
+  `is_coach()` RPC is the only gating path anywhere in the app. Settings shows live COACH
+  MODE status for signed-in users.
+  (3) **Invite/consent/linking** (Slice 3, migration 0002): `profiles.email` added
+  (populated server-side via the sign-up trigger — Google Sign-In never fills
+  display_name, and profiles has no client-writable columns after the Slice 1 fix) plus a
+  `linked_profile_public` view (`security_invoker`, id/email/display_name only) so a
+  linked coach/athlete never sees the other side's billing columns. New
+  `CoachSettingsScreen`: coaches generate/share an 8-char invite code; any signed-in user
+  can redeem one behind an explicit consent dialog; "Linked Coaches" list with revoke.
+  (4) **Coach Dashboard** (Slice 4): athlete list (last session, this-week volume, Saiyan
+  stage, red flag at 7+ days quiet) built by downloading and decoding each linked
+  athlete's existing cloud backup (`BackupSerializer.decode()` — never `restore()`, so a
+  coach's device never writes an athlete's data locally) rather than a new sync table.
+  Tapping an athlete opens a read-only session history reconstructed from the same
+  payload. KNOWN GAP: no per-exercise e1RM progression charts for athletes (session-level
+  history and best-set breakdown only) — a reasonable follow-up, not built this round.
+  (5) **Push templates to athletes** (Slice 5): Room DB v6→7 adds
+  `templates.is_from_coach` (threaded through `BackupSerializer`/`BackupPayload` too, so
+  it survives cloud backup/restore) for a permanent "FROM COACH" badge. Coach picks one of
+  their own existing templates from `AthleteDetailScreen`; athlete sees a "FROM YOUR
+  COACH" banner on the Workout tab and accepts it into their own MY TEMPLATES.
+  `AcceptPushedTemplateUseCase` is the one place that orchestrates across both
+  `CoachRepository` and `TemplateRepository` — repositories never call each other.
+  (6) **Paddle checkout + entitlement sync** (Slice 6): new "SaiyanStrong Coach" Paddle
+  product (monthly €12, annual €120) created alongside the pre-existing unrelated "Zona X
+  Premium" product in the same vendor account — nothing there was touched.
+  `supabase/functions/paddle-webhook` verifies Paddle's HMAC signature, maps the event to
+  a Supabase user via `custom_data.supabase_user_id` (set at checkout time), writes
+  entitlement via the service role key, then re-queries and verifies the write actually
+  landed before returning success — the payment-reliability rule, not skipped. Checkout
+  itself is a static page (`docs/checkout.html` + `checkout-success.html`, Paddle.js
+  overlay) hosted on GitHub Pages — enabled for this repo, now also solves the
+  PRIVACY_POLICY.md hosting gap from the Play-prep sprint. The app never processes
+  payment in-app on either flavor; `CoachSettingsScreen`'s "BECOME A COACH" section just
+  opens the web page with the signed-in user's id.
+  (7) **Entitlement reconcile** (Slice 7, migrations 0003–0004): `reconcile-entitlements`
+  Edge Function runs daily via pg_cron, lists Paddle's active subscriptions (a new
+  read-only `saiyanstrong-reconcile` Paddle API key, Subscriptions:Read only — **expires
+  Oct 7, 2026, needs manual rotation**), compares against Supabase entitlements, flags
+  mismatches into `entitlement_reconcile_flags` (service-role-only, no RLS grants at
+  all) without ever auto-correcting anything. First design attempt (a custom shared
+  secret stored via `vault.create_secret()` typed into the SQL Editor) was correctly
+  blocked mid-session — the raw value would have sat in the editor's saved query history
+  indefinitely. Redesigned instead: the function keeps Supabase's own "Verify JWT" gate
+  ON (unlike paddle-webhook) and the cron job authenticates with the project's anon key,
+  safe to commit since it's public by design and already ships inside the compiled app.
+  Deployment was also interrupted mid-slice by a confirmed Supabase platform incident
+  (dashboard hangs, verified via status.supabase.com) — waited it out rather than working
+  around it.
+  KNOWN GAPS carried forward, not silently dropped: (a) the actual Paddle purchase flow
+  has never been exercised against a real card — this is a live production Paddle
+  account, so a real test means either a real charge or standing up Paddle sandbox
+  separately; (b) the Play-flavor billing-policy question from SPEC.md §7 (web checkout
+  satisfies "no in-app payment processing," confirmed acceptable) is resolved, but Play
+  Console submission itself is still the unfinished item from the Sprint 21 Play-prep
+  KNOWN GAP, unchanged by this feature; (c) reconcile function has been deployed and
+  scheduled but not yet manually invoked end-to-end — first real run is the scheduled
+  03:00 UTC cron fire, worth checking `entitlement_reconcile_flags` + function logs after.
+  versionCode 29, versionName 0.18.0.
 
 ## Release rules
 
