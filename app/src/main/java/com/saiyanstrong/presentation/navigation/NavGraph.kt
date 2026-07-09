@@ -25,6 +25,8 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.saiyanstrong.presentation.screens.coach.AthleteDetailScreen
+import com.saiyanstrong.presentation.screens.coach.CoachDashboardScreen
 import com.saiyanstrong.presentation.screens.coach.CoachSettingsScreen
 import com.saiyanstrong.presentation.screens.exercises.ExerciseBrowserScreen
 import com.saiyanstrong.presentation.screens.exercises.ExerciseDetailScreen
@@ -204,7 +206,24 @@ fun NavGraph() {
             }
 
             composable(Screen.CoachSettings.route) {
-                CoachSettingsScreen(onBack = { navController.popBackStack() })
+                CoachSettingsScreen(
+                    onBack = { navController.popBackStack() },
+                    onViewDashboard = { navController.navigate(Screen.CoachDashboard.route) }
+                )
+            }
+
+            composable(Screen.CoachDashboard.route) {
+                CoachDashboardScreen(
+                    onBack = { navController.popBackStack() },
+                    onAthleteClick = { athleteId -> navController.navigate(Screen.AthleteDetail.createRoute(athleteId)) }
+                )
+            }
+
+            composable(
+                route = Screen.AthleteDetail.route,
+                arguments = listOf(navArgument("athleteId") { type = NavType.StringType })
+            ) {
+                AthleteDetailScreen(onBack = { navController.popBackStack() })
             }
         }
     }

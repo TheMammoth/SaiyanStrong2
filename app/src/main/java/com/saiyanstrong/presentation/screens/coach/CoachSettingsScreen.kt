@@ -57,6 +57,7 @@ import java.util.Date
 @Composable
 fun CoachSettingsScreen(
     onBack: () -> Unit,
+    onViewDashboard: () -> Unit = {},
     viewModel: CoachSettingsViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -129,6 +130,13 @@ fun CoachSettingsScreen(
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 if (uiState.isCoach) {
+                    SaiyanButton(
+                        onClick = onViewDashboard,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("VIEW COACH DASHBOARD", fontWeight = FontWeight.Black, fontSize = 13.sp)
+                    }
+
                     CoachSectionHeader("INVITE AN ATHLETE")
                     Text(
                         "Generate a code and share it with an athlete. Once they redeem it and consent, " +
