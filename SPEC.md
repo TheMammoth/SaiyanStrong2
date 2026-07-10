@@ -1,110 +1,109 @@
-# SaiyanStrong — Rest Timer Sound Cues + RPE Entry Spec
+# SaiyanStrong — RPE-Based Progression Hints Spec
 
-## Status: BUILT (v0.20.0) — all 4 slices shipped, see CLAUDE.md progress log "Sprint 23"
+## Status: BUILT (v0.21.0) — all 3 slices shipped + unit tests added, see CLAUDE.md "Sprint 24"
 
-(Replaces the previous Coach Mode spec in this file — Coach Mode shipped in full; see
-`CLAUDE.md` progress log, Sprint "Coach Mode (v0.18.0)" through its Slice 7 reconcile job.)
+(Replaces the previous "Rest Timer Sounds + RPE Entry" spec in this file — that feature shipped
+in full as v0.20.0; see `CLAUDE.md` progress log, "Sprint 23".)
 
 ---
 
 ## 0. Decisions locked in via clarifying questions
 
-- **Sound source**: fully synthesized, no bundled audio assets — `ToneGenerator` for the
-  tick, a small hand-rolled `AudioTrack` PCM buffer for the gong. No licensing/sourcing
-  risk, no new asset pipeline.
-- **Mute control**: yes — a Settings → TRAINING toggle ("Rest timer sounds"), DataStore-backed,
-  default **on**.
-- **RPE picker UI**: a `ModalBottomSheet` (closer to the reference Strong screenshot's layout
-  than an inline third cell), not a persistent numpad-adjacent panel — SaiyanStrong doesn't have
-  a custom on-screen numpad like Strong's (KG/REPS use the system IME via `BasicTextField`), so
-  the reference screenshot's exact layout doesn't map 1:1; a bottom sheet reproduces its content
-  (chip row 6–10 in 0.5 steps + explanatory line) without needing a custom keypad.
-- **RPE scope**: active workout only (`ActiveWorkoutScreen`) — not the session-detail/History
-  edit view added in the previous sprint. Within active workout, RPE is offered both at initial
-  entry (`PendingSetRow`) and as an edit on an already-logged set (`CompletedSetRow`) — the latter
-  is my own design call, not something asked verbatim, because every other field on a logged row
-  (KG, REPS, failure) is already editable in place, and leaving RPE as entry-only would be an odd
-  inconsistency. Flagging this so you can trim it if you only want RPE at entry time.
+- **Placement**: active workout only, appended to the existing PREVIOUS column
+  (`PendingSetRow`/`CompletedSetRow` in `ActiveWorkoutScreen.kt`) — exactly where a lifter looks
+  right before logging the next set. Not added to the exercise detail RECORDS/CHARTS tabs.
+- **Calculation basis**: a real %1RM-by-RPE lookup table (the widely published
+  Tuchscherer/RTS-style RPE chart used across powerlifting autoregulation — public training
+  methodology, not proprietary code or copyrighted text), not an ad-hoc threshold table. This
+  estimates a "true" 1RM from *any* logged (reps, weight, RPE) triple, not just AMRAP sets like
+  the existing Epley formula assumes.
+- **Suggestion type**: weight **or** reps, whichever the RPE data implies is the gentler/safer
+  next step (a real coach doesn't always say "add weight" — sometimes "one more rep" is the
+  correct call).
 
 ---
 
 ## 1. Objective
 
-Two independent, small UX additions to the existing active-workout flow:
+Today, `PendingSetRow`/`CompletedSetRow` show a plain "PREVIOUS" readout (last time's weight ×
+reps) with no interpretation. Since RPE entry now exists (v0.20.0) but nothing reads it back, this
+closes that loop: use last session's logged RPE for the same exercise/set-slot to give a short,
+concrete autoregulation hint — "you had room, push a bit more" vs "you were maxed out, hold or
+ease off" — the way an experienced lifter or coach reads their own RPE log.
 
-1. **Audible rest-timer cues** — a tick at 3 seconds remaining, a gong at 0 — so lifters don't
-   have to keep glancing at the screen during rest.
-2. **RPE entry per set** — `SetLog.rpe: Float?` and `set_logs.rpe` already exist end-to-end in the
-   domain/Room layers and are already threaded through `LogSetUseCase`/`onLogSet` — today the app
-   always passes `null`. This closes the UI gap so RPE can actually be recorded.
+**Target users**: existing users who've started logging RPE (opt-in from v0.20.0) — no hint shows
+for sets logged without an RPE, since there's no basis for one.
 
-**Target users**: existing SaiyanStrong users mid-workout — no new user segment, this is a
-quality-of-life pass on the core logging loop.
+**Worked example (from your prompt)**: last week, set 1 of Bench Press was `100kg × 5 @ RPE 9`
+(1 rep in reserve). This week, PREVIOUS for that same set slot should read something like:
+
+```
+PREVIOUS
+100kg × 5 @9
+→ try 6 reps
+```
+
+— because at RPE 9 for 5 reps, the chart says there's exactly one more rep available before
+true failure; the smallest safe progression is "the same weight, one more rep," not necessarily
+more weight.
 
 ---
 
 ## 2. Core features & acceptance criteria
 
-### 2.1 Rest timer sound cues
-- Hook into `ActiveWorkoutViewModel.startRestTimerFrom(seconds)` — the existing countdown
-  coroutine (`for (secondsLeft in seconds downTo 1) { update; delay(1000) }`):
-  - When the loop's `secondsLeft == 3` update fires → play **tick**.
-  - When the loop completes naturally (timer reaches 0, not skipped/cancelled) → play **gong**.
-- New `util/RestTimerSoundPlayer.kt` (Hilt `@Singleton`), two methods: `playTick()`, `playGong()`.
-  - `playTick()`: `ToneGenerator(AudioManager.STREAM_MUSIC, volume).startTone(TONE_PROP_BEEP2, 120)`.
-  - `playGong()`: a short (~900ms) procedurally-generated PCM buffer played via `AudioTrack` in
-    `STREAM_MUSIC` mode — two sine partials (e.g. 90 Hz + 180 Hz) with an exponential-decay
-    amplitude envelope, giving a low "thud/gong" character without any bundled asset.
-  - Both respect the device media volume/silent-mode (using `STREAM_MUSIC`, not `STREAM_ALARM`,
-    so a silenced phone stays silent — matches user expectation for a workout app, not an alarm).
-- Gated by a new Settings toggle (§2.2) — when off, both methods no-op.
-- Cancelling the timer early (SKIP, or `onAdjustRestTimer` restarting it) must **not** fire the
-  gong — only a countdown that reaches 0 naturally does. This falls out for free: `restTimerJob
-  .cancel()` throws `CancellationException` mid-`delay`, so code after the loop never runs.
-- **Acceptance**: start a rest timer ≥ 4s, let it run out untouched → hear tick once near the end,
-  gong once at expiry. Tap SKIP before it reaches 0 → no gong. Toggle the Settings switch off →
-  next timer run is silent.
+### 2.1 RPE → %1RM chart (`domain/util/RpeChart.kt` or similar — pure, no dependencies)
+- A 12×9 lookup table: reps 1–12 (rows) × RPE 10.0 down to 6.0 in 0.5 steps (9 columns) → % of
+  1RM. Values match the standard published RTS/Tuchscherer chart (e.g. 5 reps @ RPE9 ≈ 83.7%,
+  5 reps @ RPE10 ≈ 86.3%).
+- `fun percentOf1Rm(reps: Int, rpe: Float): Double` — reps clamped to `1..12` (beyond 12 the
+  chart's accuracy craters for a compound barbell lift; clamping to 12 is an explicit, documented
+  approximation, not silently wrong), RPE clamped to `6f..10f` and snapped to the nearest 0.5
+  (matches the RPE bottom sheet's own granularity exactly, so no interpolation is needed for
+  values the picker can actually produce).
+- `fun estimateTrue1Rm(weightKg: Double, reps: Int, rpe: Float): Double = weightKg /
+  percentOf1Rm(reps, rpe)`.
+- **Acceptance**: `estimateTrue1Rm(100.0, 5, 9f)` ≈ `119.5` (100 / 0.837); feeding that back —
+  `100.0 * percentOf1Rm(5, 9f)` — round-trips to ≈100.0.
 
-### 2.2 Mute toggle
-- `UserPreferencesDataStore`: new `restTimerSoundsEnabled` (`booleanPreferencesKey`, default
-  `true`), following the exact existing pattern of `useFemaleDotsFormula`/`defaultRestSeconds`.
-- `UserRepository`/`Impl`: `getRestTimerSoundsEnabled(): Flow<Boolean>` +
-  `setRestTimerSoundsEnabled(enabled: Boolean)`.
-- `SettingsScreen` TRAINING section gains a "Rest timer sounds" row (label + `Switch`), next to
-  the existing "Default rest timer −15s/+15s" row.
-- `ActiveWorkoutViewModel` collects this as a `StateFlow<Boolean>` (same shape as
-  `defaultRestSeconds`) and checks it before calling `RestTimerSoundPlayer`.
+### 2.2 Suggestion rule (`domain/usecase/SuggestNextLoadUseCase.kt`)
+Given the previous set's `(weightKg, reps, rpe)` for the same exercise/set-slot:
 
-### 2.3 RPE entry at set logging
-- New `presentation/components/RpeBottomSheet.kt`: `ModalBottomSheet` showing the reference
-  screenshot's explanatory line ("RPE is a way to measure the difficulty of a set. Tap a number
-  to select an RPE value.") plus a wrapped row of selectable chips: 6, 6.5, 7, 7.5, 8, 8.5, 9,
-  9.5, 10 (matches the reference exactly), plus a "NO RPE" / clear option. Selected chip
-  highlighted `NeonGreen`, matching existing chip-selection language elsewhere in the app
-  (ExercisePickerSheet's sort chips).
-- `PendingSetRow` (ActiveWorkoutScreen.kt): add a small tappable "RPE" affordance below the
-  SET/KG/REPS row (own slim row, ~24dp, matching the existing "expand below the row" pattern
-  already used for KG/REPS steppers) — shows "+ RPE" (dim, unset) or "RPE 8.5" (`NeonGreen`, set).
-  Tapping opens `RpeBottomSheet`; selecting a value updates local pending-row state so it's
-  included in the `onLogSet(kg, reps, rpe, isFailure)` call already wired end-to-end today (only
-  the `rpe` argument is currently hardcoded `null` in `PendingSetRow.logSet()`).
-- `CompletedSetRow`: same affordance, editable after the fact — extends
-  `onEditSet: (Int, Int, Double, Int, Boolean) -> Unit` to
-  `(Int, Int, Double, Int, Float?, Boolean) -> Unit`, threading through
-  `ActiveWorkoutViewModel.onEditSet` to `SetLog.copy(rpe = ...)`.
-- **Acceptance**: logging a set with RPE 8.5 persists `set_logs.rpe = 8.5` for that row (visible
-  via the exercise detail HISTORY tab, which already reads the `rpe` column — no changes needed
-  there); a set logged with no RPE stores `null`, unchanged from today's behavior.
+| Last RPE | Reps-in-reserve implied | Suggestion |
+|---|---|---|
+| ≤ 8.0 | ≥ 2 | **More weight, same reps.** Target a new weight so the *same reps* land at RPE 9 next time: `targetWeight = round(estimate1Rm × percentOf1Rm(reps, 9.0), toNearestStep)`. |
+| 8.5 or 9.0 | 1–1.5 | **Depends on rep count.** If `reps ≤ 6`: **one more rep, same weight** (the gentler progression at lower rep counts). If `reps > 6`: **a small weight bump** toward RPE 9.5 at the same reps (adding a whole rep at already-high rep counts is the bigger relative jump, not the safer one). |
+| 9.5 | 0.5 | **Hold.** Same weight, same reps — you were right at the edge, repeat it to confirm before pushing further. |
+| 10.0 | 0 | **Ease off.** Suggest the same weight for one fewer rep, or note it plainly as a max-effort set — no "push more" hint at true failure. |
+
+- No previous RPE recorded for that set slot (pre-v0.20.0 history, or user skipped RPE) →
+  no hint, falls back to today's plain PREVIOUS text exactly as it is now.
+- Weight is rounded to the exercise's existing step convention (`2.0kg` for
+  Dumbbell/Kettlebell exercises, `2.5kg` otherwise — the same `stepKg` logic
+  `ExerciseLogCard`/`ActiveWorkoutScreen` already compute from the exercise name).
+- **Acceptance**: the worked example in §1 (`100kg×5 @9`) produces "try 6 reps," not a weight
+  change, since reps(5) ≤ 6. A set logged `100kg×8 @9` produces a small weight-bump suggestion
+  instead, since reps(8) > 6.
+
+### 2.3 UI — PREVIOUS column gets a second line
+- `ActiveWorkoutScreen.kt`: both `PendingSetRow` and `CompletedSetRow` already receive
+  `previousSet: SetLog?` for their slot. Compute the suggestion (pure function call, no new
+  ViewModel state needed — it's a deterministic function of `previousSet` alone) and, when present,
+  render it as a small second line under the existing "100kg × 5 @9" text — `NeonGreen`,
+  `→ try 6 reps` / `→ try 102.5kg` / `→ hold` / `→ ease off` — reusing the exact visual weight
+  the app already gives to "this is actionable" text (matches how `RpeChip`'s set state reads).
+- No change to `ExerciseDetailScreen`, `HistoryScreen`, `SessionCompleteScreen`, or any existing
+  e1RM/DOTS calculation — those keep using the existing Epley-based `EstimateOneRepMaxUseCase`
+  untouched; this is a new, additive, active-workout-only signal.
+- **Acceptance**: an exercise with no logged history (first time ever) shows the existing "—"
+  PREVIOUS text, unchanged. An exercise with history but no RPE on the relevant set shows the
+  existing plain weight×reps text, unchanged. Only a set with a previous RPE gains the second line.
 
 ---
 
 ## 3. Tech stack additions
 
-| Addition | Purpose |
-|---|---|
-| `android.media.ToneGenerator` (platform API, no dependency) | Tick sound |
-| `android.media.AudioTrack` (platform API, no dependency) | Procedurally synthesized gong sound |
-| No new Gradle dependencies, no new permissions | Both APIs are already available on minSdk 26 with no manifest changes |
+None — pure Kotlin math + existing Compose UI. No new dependencies, no schema changes (this
+reads `SetLog.rpe`, which already exists and is already populated since v0.20.0).
 
 ---
 
@@ -112,105 +111,87 @@ quality-of-life pass on the core logging loop.
 
 ```
 app/src/main/java/com/saiyanstrong/
-├── util/
-│   └── RestTimerSoundPlayer.kt         ← new — @Singleton, playTick()/playGong(), ToneGenerator +
-│                                          AudioTrack-synthesized gong, both gated by an enabled
-│                                          flag passed in per-call (no internal DataStore read —
-│                                          keeps it a pure player, ViewModel owns the setting)
+├── domain/
+│   ├── util/
+│   │   └── RpeChart.kt                 ← new — pure lookup table + percentOf1Rm()/estimateTrue1Rm()
+│   ├── model/
+│   │   └── LoadSuggestion.kt           ← new — sealed class: MoreWeight(kg), MoreReps(reps), Hold, EaseOff
+│   └── usecase/
+│       └── SuggestNextLoadUseCase.kt   ← new — pure function: (previousSet: SetLog, stepKg: Double)
+│                                          -> LoadSuggestion?
 │
-├── data/datastore/
-│   └── UserPreferencesDataStore.kt     ← + restTimerSoundsEnabled key/flow/setter
-├── domain/repository/
-│   └── UserRepository.kt               ← + getRestTimerSoundsEnabled()/setRestTimerSoundsEnabled()
-├── data/repository/
-│   └── UserRepositoryImpl.kt           ← + passthrough to the DataStore methods above
-│
-├── presentation/components/
-│   └── RpeBottomSheet.kt               ← new — ModalBottomSheet, chip row 6–10 step 0.5 + clear
-│
-├── presentation/screens/workout/
-│   ├── ActiveWorkoutViewModel.kt       ← restTimerSoundsEnabled StateFlow; startRestTimerFrom()
-│   │                                      calls RestTimerSoundPlayer at secondsLeft==3 and on
-│   │                                      natural expiry; onEditSet gains an rpe parameter
-│   └── ActiveWorkoutScreen.kt          ← PendingSetRow + CompletedSetRow gain the RPE affordance
-│                                          row + RpeBottomSheet wiring
-│
-└── presentation/screens/settings/
-    ├── SettingsScreen.kt               ← + "Rest timer sounds" Switch row in TRAINING section
-    └── SettingsViewModel.kt            ← + restTimerSoundsEnabled StateFlow + toggle handler
+└── presentation/screens/workout/
+    └── ActiveWorkoutScreen.kt          ← PendingSetRow/CompletedSetRow call SuggestNextLoadUseCase.
+                                          (or a small local composable helper, since it's a pure
+                                          function with no DI needs) and render the second line
 ```
 
-No Room schema change — `set_logs.rpe` already exists (has since Phase 1). No new Android
-dependencies, no new permissions.
+`SuggestNextLoadUseCase` deliberately takes no repository/DI dependencies (pure function of its
+arguments) — Hilt-injectable per convention, but trivially unit-testable without a container if a
+test source set is ever added.
 
 ---
 
 ## 5. Code style (extends existing CLAUDE.md rules)
 
-- `RestTimerSoundPlayer` takes an `enabled: Boolean` parameter on each play call rather than
-  reading DataStore itself, keeping it a stateless utility — the ViewModel (which already
-  collects `StateFlow`s the same way for `defaultRestSeconds`) is the single place that knows the
-  current setting.
-- RPE values are `Float?` end-to-end, matching the existing `SetLog.rpe: Float?` — the bottom
-  sheet only ever emits one of the nine reference values (6.0–10.0 step 0.5) or `null`, no free
-  text entry, so no new validation logic is needed at the boundary.
-- No hardcoded colors — RPE chip selection state uses `NeonGreen`/`Color.White.copy(alpha=...)`
-  exactly like existing chip components.
-- `StateFlow` everywhere, `collectAsStateWithLifecycle()` in Compose — same as every other screen.
+- `RpeChart`/`SuggestNextLoadUseCase` are pure functions — no side effects, no `Flow`, no
+  suspend — consistent with how `CalculatePowerLevelUseCase`/`EstimateOneRepMaxUseCase` are
+  already written.
+- `LoadSuggestion` as a `sealed class` (`data class`/`data object` variants), matching the
+  project's stated style preference for `when` over `if/else` chains when the UI renders it.
+- No hardcoded colors — the suggestion line reuses `NeonGreen`/`Color.White.copy(alpha=...)`.
+- Reuses the exact existing `stepKg` derivation (`Dumbbell`/`Kettlebell` → 2.0, else 2.5) already
+  duplicated in `ExerciseLogCard` — no new constant introduced.
 
 ---
 
 ## 6. Testing strategy
 
-Same reality as the rest of this project: no `app/src/test` source set, no device/emulator access
-this session. Verification is build success + manual QA checklist (flagged, not assumed done):
+No `app/src/test` source set exists in this project (same reality as every prior sprint) — this
+would be an unusually good candidate for one, since `RpeChart`/`SuggestNextLoadUseCase` are pure
+functions with no Android dependencies, but adding a test source set is out of scope unless you
+want it added as part of this slice. Flagging as a question below rather than assuming either way.
 
-1. Start a rest timer, let it run to completion untouched → tick near the end, gong at expiry.
-2. Start a rest timer, tap SKIP before expiry → no gong.
-3. Toggle "Rest timer sounds" off in Settings → next timer run (tick and gong) is silent; toggle
-   back on → sound returns without restarting the app.
-4. Log a set, tap the RPE affordance, pick 8.5 → set row shows "RPE 8.5"; finish the workout →
-   open that exercise's HISTORY tab and confirm the same RPE value is shown for that set.
-5. Log a set with no RPE → confirm nothing regresses (unaffected, same as today).
-6. Edit an already-logged set's RPE via `CompletedSetRow` → confirm the change persists after
-   FINISH (session save reads the in-memory `ExerciseLog.sets`, which already includes `rpe` in
-   `SetLog` — no repository change needed for the happy path, this is UI-state plumbing only).
+Manual verification (build + by-hand table checks, no device needed for the math itself):
+1. Compute `estimateTrue1Rm`/`percentOf1Rm` for a handful of known chart values by hand, confirm
+   they match §2.1.
+2. Walk through §2's rule table for each RPE band (≤8, 8.5–9 at low/high reps, 9.5, 10) and
+   confirm the exact hint text matches the table.
+3. `assembleGithubDebug` build check (same as every prior sprint this session).
+
+Device-needed manual QA (flagged, not assumed done): log a set with RPE, finish the workout,
+start a new workout with the same exercise, confirm the second PREVIOUS line appears with the
+expected suggestion.
 
 ---
 
 ## 7. Boundaries
 
 **Always do:**
-- Keep both sound cues on `STREAM_MUSIC` so device silent mode / media-volume-zero is respected
-  — never use `STREAM_ALARM` to force sound through a silenced phone.
-- Respect the mute toggle for both the tick and the gong — no cue that ignores it.
-- Keep RPE optional — never require a value before a set can be logged (matches how `rpe` has
-  always been nullable in the domain model).
+- Only ever suggest based on an actual logged RPE — never fabricate or assume one.
+- Keep the existing plain PREVIOUS text as a fallback in every case where no suggestion applies —
+  never regress the current behavior for RPE-less history.
+- Round suggested weights to the exercise's existing step convention, never a raw unrounded float.
 
 **Ask first about:**
-- Whether the "editable after logging" half of §2.3 (RPE on `CompletedSetRow`, not just
-  `PendingSetRow`) is wanted, since it was my own extrapolation from the existing edit-everything
-  pattern rather than something explicitly requested — easy to drop if you only want RPE at
-  initial entry.
-- Exact tick/gong tone character (frequencies, duration) — the plan above is a reasonable first
-  pass with no assets to reference; happy to adjust after you hear it once it's built (no way to
-  preview audio without a device/emulator this session).
+- Whether to add an `app/src/test` source set for this (see §6) — it's the first genuinely
+  test-friendly pure-function code in the project, but introducing a test source set is a small
+  standing infrastructure decision beyond this one feature.
+- Exact wording/tone for the four hint variants (`try 102.5kg`, `try 6 reps`, `hold`, `ease off`)
+  — happy to adjust once you see them rendered.
 
 **Never do:**
-- Never fetch or bundle third-party audio assets without your explicit sign-off (moot here since
-  everything's synthesized, but stating it since audio was the topic).
-- Never make the rest-timer cues bypass silent mode.
+- Never suggest a weight/rep jump that ignores the exercise's rounding step.
+- Never touch the existing Epley-based e1RM calculations used elsewhere (History, Exercise
+  Records, Home DOTS/big-three) — this is additive, not a replacement.
 
 ---
 
 ## 8. Suggested incremental slices
 
-1. `RestTimerSoundPlayer` (tick + gong synthesis) + wiring into
-   `ActiveWorkoutViewModel.startRestTimerFrom` — testable by ear alone, no RPE dependency.
-2. Mute toggle: DataStore key, `UserRepository` methods, Settings row, ViewModel wiring.
-3. `RpeBottomSheet` component + `PendingSetRow` entry wiring (the core ask).
-4. `CompletedSetRow` RPE editing (the extrapolated half — pending your confirmation in
-   Boundaries above; skip this slice entirely if you only want entry-time RPE).
+1. `RpeChart.kt` (table + lookup functions) — verifiable by hand against known values, no UI yet.
+2. `LoadSuggestion.kt` + `SuggestNextLoadUseCase.kt` — the rule table from §2.2, unit-testable in
+   isolation if a test source set is added (see Boundaries).
+3. `ActiveWorkoutScreen.kt` wiring — second PREVIOUS line in `PendingSetRow`/`CompletedSetRow`.
 
-Each slice independently buildable/verifiable, own commit, per your established convention this
-project.
+Each independently buildable/verifiable, own commit, per your established convention.

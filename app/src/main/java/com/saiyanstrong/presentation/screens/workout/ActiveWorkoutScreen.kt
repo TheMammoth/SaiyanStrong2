@@ -63,8 +63,10 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.saiyanstrong.domain.model.Exercise
 import com.saiyanstrong.domain.model.ExerciseCategory
 import com.saiyanstrong.domain.model.ExerciseLog
+import com.saiyanstrong.domain.model.LoadSuggestion
 import com.saiyanstrong.domain.model.MuscleGroup
 import com.saiyanstrong.domain.model.SetLog
+import com.saiyanstrong.domain.usecase.SuggestNextLoadUseCase
 import com.saiyanstrong.presentation.components.ConfirmDialog
 import com.saiyanstrong.presentation.components.RpeBottomSheet
 import com.saiyanstrong.presentation.components.SetCell
@@ -84,6 +86,13 @@ private val PendingSetBg     = Color(0xFF111111)
 private val RestLabelColor   = Color(0xFF4CAF50)
 
 private fun Double.fmtKg(): String = WeightFormatter.format(this).replace(" kg", "")
+
+private fun LoadSuggestion.label(): String = when (this) {
+    is LoadSuggestion.MoreWeight -> "→ try ${targetWeightKg.fmtKg()}kg"
+    is LoadSuggestion.MoreReps -> "→ try $targetReps reps"
+    LoadSuggestion.Hold -> "→ hold"
+    LoadSuggestion.EaseOff -> "→ ease off"
+}
 
 // ── Entry point ───────────────────────────────────────────────────────────────
 
@@ -385,6 +394,9 @@ private fun CompletedSetRow(
     val prevText = previousSet?.let {
         "${it.weightKg.fmtKg()} × ${it.reps}${if (it.isFailure) " [F]" else ""}"
     } ?: "—"
+    val suggestion = remember(previousSet, stepKg) {
+        previousSet?.let { SuggestNextLoadUseCase().execute(it, stepKg) }
+    }
 
     fun confirm() {
         val kg = kgTfv.text.toDoubleOrNull() ?: set.weightKg
@@ -432,7 +444,10 @@ private fun CompletedSetRow(
                     onEdit(kgTfv.text.toDoubleOrNull() ?: set.weightKg, repsTfv.text.toIntOrNull() ?: set.reps, editRpe, f)
                 }
             )
-            Text(prevText, color = Color.White.copy(alpha = 0.45f), fontSize = 11.sp, modifier = Modifier.weight(1.2f))
+            Column(Modifier.weight(1.2f)) {
+                Text(prevText, color = Color.White.copy(alpha = 0.45f), fontSize = 11.sp)
+                suggestion?.let { Text(it.label(), color = NeonGreen, fontSize = 10.sp, fontWeight = FontWeight.Bold) }
+            }
             SetCell(
                 value = kgTfv, onValueChange = { kgTfv = it },
                 keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Next,
@@ -496,6 +511,9 @@ private fun PendingSetRow(
     val focusMgr  = LocalFocusManager.current
 
     val prevText = previousSet?.let { "${it.weightKg.fmtKg()} × ${it.reps}" } ?: "—"
+    val suggestion = remember(previousSet, stepKg) {
+        previousSet?.let { SuggestNextLoadUseCase().execute(it, stepKg) }
+    }
 
     fun logSet() {
         val kg = (kgTfv.text.toDoubleOrNull() ?: initialWeightKg).coerceAtLeast(0.0)
@@ -527,7 +545,10 @@ private fun PendingSetRow(
                 fontSize = 13.sp, fontWeight = FontWeight.Bold,
                 modifier = Modifier.width(28.dp).clickable { isFailure = !isFailure }
             )
-            Text(prevText, color = Color.White.copy(alpha = 0.38f), fontSize = 11.sp, modifier = Modifier.weight(1.2f))
+            Column(Modifier.weight(1.2f)) {
+                Text(prevText, color = Color.White.copy(alpha = 0.38f), fontSize = 11.sp)
+                suggestion?.let { Text(it.label(), color = NeonGreen, fontSize = 10.sp, fontWeight = FontWeight.Bold) }
+            }
             SetCell(
                 value = kgTfv, onValueChange = { kgTfv = it },
                 keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Next,

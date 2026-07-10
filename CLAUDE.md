@@ -1180,6 +1180,44 @@ _(Claude Code appends here after each completed task)_
   rows, RPE surviving through to the exercise detail HISTORY tab) on a real device before fully
   trusting it.
   versionCode 33, versionName 0.20.0.
+- [x] Sprint 24 — RPE-based progression hints (v0.21.0), per SPEC.md: since RPE entry now exists
+  (Sprint 23) but nothing read it back, the PREVIOUS column in the active workout stayed a plain
+  readout. Closed that loop with a real autoregulation hint, not a guess.
+  (1) `domain/util/RpeChart.kt` (new, pure object): the standard published RTS/Tuchscherer
+  %1RM-by-RPE table (12 rep rows × 9 RPE columns, 6.0–10.0 in 0.5 steps).
+  `percentOf1Rm(reps, rpe)` clamps reps to 1..12 and RPE to 6.0–10.0 (documented, explicit
+  approximations, not silent ones); `estimateTrue1Rm(weightKg, reps, rpe)` backs out an estimated
+  true 1RM from *any* logged set, not just an AMRAP one like the existing Epley-based
+  `EstimateOneRepMaxUseCase` (left completely untouched — this is additive, not a replacement).
+  (2) `domain/model/LoadSuggestion.kt` (sealed class: `MoreWeight`/`MoreReps`/`Hold`/`EaseOff`) +
+  `domain/usecase/SuggestNextLoadUseCase.kt`: reads the previous set's RPE and applies a real
+  coaching rule, not a fixed percentage-progression scheme — RPE ≤8 → more weight at the same
+  reps (targeting RPE9 next time); RPE 8.5–9 → **one more rep** if reps ≤6 (the gentler
+  progression at lower rep counts) else a small weight bump (adding a whole rep at already-high
+  rep counts is the bigger relative jump, not the safer one); RPE9.5 → hold; RPE10 → ease off.
+  No previous RPE recorded → returns `null`, existing plain PREVIOUS text is unchanged. Weight
+  suggestions round to the exercise's existing step convention (2.0kg dumbbell/kettlebell, 2.5kg
+  else) and are floored to strictly exceed the previous weight (a monotonic-table rounding-edge
+  guard, not expected to trigger in practice since targeting a harder RPE than what was actually
+  logged is always heavier on this chart).
+  (3) `ActiveWorkoutScreen.kt`: `PendingSetRow`/`CompletedSetRow` compute the suggestion from
+  their existing `previousSet` prop (`remember(previousSet, stepKg) { ... }`, `
+  SuggestNextLoadUseCase` instantiated inline — a zero-dependency pure class, no Hilt/ViewModel
+  plumbing needed) and render it as a second `NeonGreen` line under the existing PREVIOUS text —
+  "100kg × 5 @9" / "→ try 6 reps". No changes to `ExerciseDetailScreen`, `HistoryScreen`,
+  `SessionCompleteScreen`, or any DOTS/big-three calculation — scoped to the active workout only,
+  per spec.
+  (4) First real unit tests in this project: `app/src/test/java/com/saiyanstrong/domain/`
+  (`RpeChartTest.kt`, `SuggestNextLoadUseCaseTest.kt`, 16 tests total, all passing via
+  `testGithubDebugUnitTest`) — added `junit:junit:4.13.2` as `testImplementation` (version
+  catalog). Pure-function domain logic with zero Android dependencies made this the first
+  genuinely test-friendly code in the project; every other sprint's verification stays
+  manual/build-only as before.
+  KNOWN GAP: not device/emulator-tested this session — the math itself is now unit-tested and
+  verified correct, but the actual on-screen rendering (second PREVIOUS line, real RPE-logged
+  history feeding it) has not been eyeballed on a device. Hint wording is a first pass per
+  SPEC.md, adjustable once seen.
+  versionCode 34, versionName 0.21.0.
 
 ## Release rules
 
