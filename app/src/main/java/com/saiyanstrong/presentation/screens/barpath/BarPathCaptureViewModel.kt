@@ -33,8 +33,15 @@ data class BarPathCaptureUiState(
     val step: CaptureStep = CaptureStep.RECORDING,
     val videoPath: String? = null,
     val calibrationFrame: Bitmap? = null,
+    /** True (the recommended default): two-marker calibration, per-frame depth-drift
+     * correction. False: the original manual tap-two-known-distance-points calibration. */
+    val useDualMarkerMode: Boolean = true,
     val markerSamplePoint: TapPoint? = null,
     val colorProfile: MarkerColorProfile? = null,
+    /** Dual-marker mode only — the reference marker, a known real-world distance from A. */
+    val markerBSamplePoint: TapPoint? = null,
+    val colorProfileB: MarkerColorProfile? = null,
+    val referenceDistanceCm: String = "130",
     val calibrationPoint1: TapPoint? = null,
     val calibrationPoint2: TapPoint? = null,
     val referenceLengthCm: String = "45",
@@ -135,11 +142,34 @@ class BarPathCaptureViewModel @Inject constructor(
                     val profile = sampleMarkerColor(state.calibrationFrame, point)
                     state.copy(markerSamplePoint = point, colorProfile = profile)
                 }
+                state.useDualMarkerMode -> {
+                    // Second (or re-)tap always sets marker B in dual-marker mode -- there's
+                    // nothing else to tap once both markers are placed.
+                    val profile = sampleMarkerColor(state.calibrationFrame, point)
+                    state.copy(markerBSamplePoint = point, colorProfileB = profile)
+                }
                 state.calibrationPoint1 == null -> state.copy(calibrationPoint1 = point)
                 state.calibrationPoint2 == null -> state.copy(calibrationPoint2 = point)
                 else -> state.copy(calibrationPoint1 = point, calibrationPoint2 = null)
             }
         }
+    }
+
+    /** Switching modes changes what every tap means, so all existing taps are cleared. */
+    fun onDualMarkerModeChanged(enabled: Boolean) {
+        _uiState.update {
+            it.copy(
+                useDualMarkerMode = enabled,
+                markerSamplePoint = null, colorProfile = null,
+                markerBSamplePoint = null, colorProfileB = null,
+                calibrationPoint1 = null, calibrationPoint2 = null,
+                errorMessage = null
+            )
+        }
+    }
+
+    fun onReferenceDistanceChanged(cm: String) {
+        _uiState.update { it.copy(referenceDistanceCm = cm) }
     }
 
     /** Averages a small pixel neighborhood around the tap to reduce single-pixel noise. */
@@ -167,7 +197,11 @@ class BarPathCaptureViewModel @Inject constructor(
 
     fun onResetCalibrationPoints() {
         _uiState.update {
-            it.copy(markerSamplePoint = null, colorProfile = null, calibrationPoint1 = null, calibrationPoint2 = null)
+            it.copy(
+                markerSamplePoint = null, colorProfile = null,
+                markerBSamplePoint = null, colorProfileB = null,
+                calibrationPoint1 = null, calibrationPoint2 = null
+            )
         }
     }
 
@@ -177,6 +211,10 @@ class BarPathCaptureViewModel @Inject constructor(
 
     fun onConfirmCalibration() {
         val state = _uiState.value
+        if (state.useDualMarkerMode) onConfirmDualMarkerCalibration(state) else onConfirmManualCalibration(state)
+    }
+
+    private fun onConfirmManualCalibration(state: BarPathCaptureUiState) {
         val colorProfile = state.colorProfile
         val p1 = state.calibrationPoint1
         val p2 = state.calibrationPoint2
@@ -221,6 +259,61 @@ class BarPathCaptureViewModel @Inject constructor(
             val analysis = analyzeBarPathUseCase.execute(
                 samples = samples,
                 pixelsPerMeter = pixelsPerMeter,
+                massKg = massKg ?: 0.0,
+                concentricStartMs = samples.first().timestampMs,
+                concentricEndMs = samples.last().timestampMs
+            )
+            _uiState.update { it.copy(step = CaptureStep.RESULTS, analysis = analysis, trackedSamples = samples) }
+        }
+    }
+
+    private fun onConfirmDualMarkerCalibration(state: BarPathCaptureUiState) {
+        val colorProfileA = state.colorProfile
+        val colorProfileB = state.colorProfileB
+        val referenceCm = state.referenceDistanceCm.toDoubleOrNull()
+        val videoPath = state.videoPath
+        val massKg = if (isStandalone) state.weightKgInput.toDoubleOrNull() else knownWeightKg
+
+        if (colorProfileA == null) {
+            _uiState.update { it.copy(errorMessage = "Tap the primary marker on the bar in this frame first.") }
+            return
+        }
+        if (colorProfileB == null) {
+            _uiState.update { it.copy(errorMessage = "Tap the second reference marker on the bar.") }
+            return
+        }
+        if (referenceCm == null || referenceCm <= 0.0) {
+            _uiState.update { it.copy(errorMessage = "Enter a valid distance between the two markers in cm.") }
+            return
+        }
+        if (isStandalone && (massKg == null || massKg <= 0.0)) {
+            _uiState.update { it.copy(errorMessage = "Enter the weight lifted in this video (kg).") }
+            return
+        }
+        if (videoPath == null) return
+
+        val referenceDistanceMeters = referenceCm / 100.0
+
+        _uiState.update { it.copy(step = CaptureStep.PROCESSING, errorMessage = null) }
+        viewModelScope.launch(Dispatchers.Default) {
+            val samples = barPathFrameTracker.trackMarkerPair(videoPath, colorProfileA, colorProfileB, referenceDistanceMeters)
+            if (samples.size < 2) {
+                _uiState.update {
+                    it.copy(
+                        step = CaptureStep.ERROR,
+                        errorMessage = "Couldn't track both markers across enough frames — check they're " +
+                            "visible and brightly lit against the background, then try again."
+                    )
+                }
+                return@launch
+            }
+            // Safe fallback if perFramePixelsPerMeter somehow never populated (e.g. the reference
+            // marker was never found even once) — AnalyzeBarPathUseCase's own pixelsPerMeter<=0.0
+            // guard handles total failure by returning a zeroed result rather than crashing.
+            val fallbackPixelsPerMeter = samples.firstNotNullOfOrNull { it.perFramePixelsPerMeter } ?: 0.0
+            val analysis = analyzeBarPathUseCase.execute(
+                samples = samples,
+                pixelsPerMeter = fallbackPixelsPerMeter,
                 massKg = massKg ?: 0.0,
                 concentricStartMs = samples.first().timestampMs,
                 concentricEndMs = samples.last().timestampMs

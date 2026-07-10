@@ -1653,6 +1653,56 @@ _(Claude Code appends here after each completed task)_
   present in this file before this sprint, not fixed here (out of scope, real risk to a live
   camera session for a toggle that's expected to be set before recording anyway).
   versionCode 44, versionName 0.30.0.
+- [x] Sprint 34 — dual-marker depth calibration (v0.31.0): the biggest single VBT addition this
+  session. Two independently color-tracked markers a known real-world distance apart (e.g. the
+  bar's two sleeve end-caps) give a directly-measured pixels-per-meter for every single frame,
+  replacing the whole session-wide-constant + diameter-heuristic calibration stack with a real
+  geometric measurement.
+  **The interaction this needed to get right, not mentioned in the request**: dual-marker
+  per-frame ppm and Sprint 32's single-marker diameter-based `ScaleCorrection` both correct for
+  the exact same physical effect (depth drift). Running both at once would double-correct. They
+  are now strictly mutually exclusive — `AnalyzeBarPathUseCase.execute`'s new
+  `effectivePixelsPerMeter(sample)` picks `sample.perFramePixelsPerMeter` outright when present
+  (dual-marker), otherwise falls through to the existing diameter/`ScaleCorrection` path
+  unchanged. Proved algebraically (not just tested) that this reduces to the *exact* pre-Sprint-34
+  formula, including the first-sample edge case, when `perFramePixelsPerMeter` is absent — a new
+  test (`dual-marker ppm takes priority over apparentDiameterPx — never both corrections at
+  once`) locks in that a sample carrying both a real depth-implying diameter AND a
+  no-depth-change ppm produces the ppm's answer, not a blend.
+  **A real efficiency adaptation from the literal request**: rather than two independent
+  `MarkerTracker` objects each running their own frame-decode loop (doubling the video seek+decode
+  cost already flagged as an unmeasured performance risk in Sprint 33), `BarPathFrameTracker`
+  decodes each frame once and runs blob detection against it twice — once per marker's color
+  profile — via a new shared `findMarkerCentroidInScaledBitmap` (refactored out of the existing
+  single-marker `findMarkerCentroid`, which is now a thin wrapper over it, completely unchanged
+  in behavior). New `trackMarkerPair(videoPath, primaryProfile, referenceProfile,
+  referenceDistanceMeters, ...)`: for each frame, finds both markers independently (each with its
+  own nearest-neighbor tracking continuity, exactly like the single-marker path), computes
+  `pixelDist(A, B) / referenceDistanceMeters`, and carries the last successfully-measured ppm
+  forward when the reference marker (but not the primary) is occluded for a frame — per the
+  literal request, not left null to silently fall through to a different fallback mechanism.
+  `BarPathSample` gains `perFramePixelsPerMeter: Double?` (defaulted, existing single-marker path
+  and every existing test fixture untouched).
+  Calibration is now a genuine mode choice, not additive taps on top of the existing flow:
+  **dual-marker mode** (default, "recommended") — tap marker A, tap marker B, type the known
+  distance between them (default 130cm, "standard bar sleeve-to-sleeve distance" per the
+  request) — 2 taps + a number, actually *simpler* than before. **Manual mode** (the pre-existing
+  flow, fully preserved as a toggle-away fallback) — tap the marker, tap two reference points,
+  type their known length — unchanged. Switching modes clears all taps, since a tap means
+  something different in each mode. `CalibrationStep` gained a two-button mode row (matching the
+  existing RECORD/IMPORT visual pattern) and a third tap-dot color (`MarkerBlue`) so marker A/B/
+  reference-points are visually distinguishable at a glance.
+  `ResultsStep` gains a small `PpmChart` (a new local `Canvas` line chart — `ExerciseDetailScreen`'s
+  `ChartCard`/`DetailLineChart` are private to that file, not reused across packages) plotting
+  `perFramePixelsPerMeter` over the rep when dual-marker data exists, titled "SCALE (PX/M) OVER
+  REP — FLAT = NO DEPTH DRIFT" per the request's own framing for validating the correction.
+  KNOWN GAP, larger than most: **zero device testing**, on top of the already-substantial
+  untested surface from the last several sprints (marker tracking, high-speed capture, frame
+  extraction performance). This sprint is pure logic + UI wiring, algebraically verified where it
+  touches existing math, but the actual two-marker tracking reliability, the mode-toggle UX, and
+  whether users can realistically place and track two distinguishable-colored markers on a
+  barbell sleeve are all real open questions a real device session needs to answer.
+  versionCode 45, versionName 0.31.0.
 
 ## Release rules
 

@@ -111,6 +111,35 @@ class AnalyzeBarPathUseCaseTest {
     }
 
     @Test
+    fun `dual-marker per-frame ppm is used directly for displacement conversion`() {
+        // Sample 0's own ppm (1000) sets the baseline height; sample 1's ppm (500, meaning the
+        // reference markers appeared closer together -- the bar is nearer the camera at that
+        // instant) means the same 80px apparent displacement represents twice the real
+        // distance: 80/500 = 0.16m instead of 80/1000 = 0.08m, over 0.1s -> 1.6 m/s.
+        val samples = listOf(
+            BarPathSample(0, 300.0, 1000.0, perFramePixelsPerMeter = 1000.0),
+            BarPathSample(100, 300.0, 920.0, perFramePixelsPerMeter = 500.0)
+        )
+        val result = useCase.execute(samples, pixelsPerMeter = 1000.0, massKg = 100.0, 0, 100)
+        assertEquals(1.6, result.meanConcentricVelocityMs, 0.001)
+    }
+
+    @Test
+    fun `dual-marker ppm takes priority over apparentDiameterPx -- never both corrections at once`() {
+        // Same displacement as the diameter-correction test above, but this time the sample
+        // ALSO carries a diameter that would imply a completely different (2x) correction if
+        // the diameter-based path were used. perFramePixelsPerMeter must win outright, not blend.
+        val samples = listOf(
+            BarPathSample(0, 300.0, 1000.0, apparentDiameterPx = 40.0, perFramePixelsPerMeter = 1000.0),
+            BarPathSample(100, 300.0, 920.0, apparentDiameterPx = 20.0, perFramePixelsPerMeter = 1000.0)
+        )
+        val result = useCase.execute(samples, pixelsPerMeter = 1000.0, massKg = 100.0, 0, 100)
+        // If the diameter path leaked in, this would be 1.6 (per the diameter test above).
+        // With perFramePixelsPerMeter=1000 for both samples and no depth change, it's the plain 0.8.
+        assertEquals(0.8, result.meanConcentricVelocityMs, 0.001)
+    }
+
+    @Test
     fun `image Y decreasing means the bar is moving up — positive velocity`() {
         val samples = listOf(BarPathSample(0, 0.0, 500.0), BarPathSample(100, 0.0, 400.0))
         val result = useCase.execute(samples, pixelsPerMeter = 1000.0, massKg = 100.0, 0, 100)

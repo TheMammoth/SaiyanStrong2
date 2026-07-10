@@ -5,6 +5,7 @@ import android.graphics.Color
 import android.media.MediaMetadataRetriever
 import com.saiyanstrong.domain.model.BarPathSample
 import javax.inject.Inject
+import kotlin.math.hypot
 
 internal data class Blob(
     val centroidX: Double,
@@ -165,6 +166,79 @@ class BarPathFrameTracker @Inject constructor() {
     }
 
     /**
+     * Tracks two independent color markers per frame — the primary marker (returned as each
+     * sample's position, exactly like [trackMarker]) and a reference marker a known real-world
+     * distance away, used purely to compute a directly-measured pixels-per-meter for that exact
+     * frame ([BarPathSample.perFramePixelsPerMeter]). This is a more accurate depth-drift
+     * correction than [BarPathSample.apparentDiameterPx]'s single-marker size heuristic — see
+     * [com.saiyanstrong.domain.usecase.AnalyzeBarPathUseCase], which uses one or the other, never
+     * both (the two aren't additive corrections for the same effect).
+     *
+     * Decodes each video frame once (not twice) and runs blob detection against it for both
+     * color profiles — doubling the CPU cost per frame, not the I/O cost of seeking/decoding,
+     * which is the more expensive part (see [deriveSampleIntervalMs]'s performance note).
+     *
+     * @param referenceDistanceMeters the known real-world distance between the two markers.
+     * If the reference marker isn't detected in a given frame (occlusion) but the primary marker
+     * is, the last successfully-measured pixels-per-meter is carried forward for that sample
+     * rather than leaving it unmeasured.
+     */
+    fun trackMarkerPair(
+        videoPath: String,
+        primaryColorProfile: MarkerColorProfile,
+        referenceColorProfile: MarkerColorProfile,
+        referenceDistanceMeters: Double,
+        sampleIntervalMs: Long? = null,
+        downscaleFactor: Double = 0.25
+    ): List<BarPathSample> {
+        val retriever = MediaMetadataRetriever()
+        return try {
+            retriever.setDataSource(videoPath)
+            val durationMs = retriever
+                .extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+                ?.toLongOrNull() ?: 0L
+            val effectiveIntervalMs = sampleIntervalMs ?: deriveSampleIntervalMs(retriever)
+
+            val samples = mutableListOf<BarPathSample>()
+            var previousPrimaryCentroid: Pair<Double, Double>? = null
+            var previousReferenceCentroid: Pair<Double, Double>? = null
+            var lastKnownPpm: Double? = null
+            var timestampMs = 0L
+            while (timestampMs <= durationMs) {
+                val frame = retriever.getFrameAtTime(timestampMs * 1000, MediaMetadataRetriever.OPTION_CLOSEST)
+                if (frame != null) {
+                    val scaledWidth = (frame.width * downscaleFactor).toInt().coerceAtLeast(1)
+                    val scaledHeight = (frame.height * downscaleFactor).toInt().coerceAtLeast(1)
+                    val scaled = Bitmap.createScaledBitmap(frame, scaledWidth, scaledHeight, false)
+
+                    val primary = findMarkerCentroidInScaledBitmap(
+                        scaled, primaryColorProfile, downscaleFactor, previousPrimaryCentroid
+                    )
+                    val reference = findMarkerCentroidInScaledBitmap(
+                        scaled, referenceColorProfile, downscaleFactor, previousReferenceCentroid
+                    )
+                    scaled.recycle()
+                    frame.recycle()
+
+                    if (primary != null) {
+                        previousPrimaryCentroid = primary.xPx to primary.yPx
+                        if (reference != null) {
+                            previousReferenceCentroid = reference.xPx to reference.yPx
+                            val pixelDist = hypot(primary.xPx - reference.xPx, primary.yPx - reference.yPx)
+                            lastKnownPpm = pixelDist / referenceDistanceMeters
+                        }
+                        samples += BarPathSample(timestampMs, primary.xPx, primary.yPx, primary.diameterPx, lastKnownPpm)
+                    }
+                }
+                timestampMs += effectiveIntervalMs
+            }
+            samples
+        } finally {
+            retriever.release()
+        }
+    }
+
+    /**
      * METADATA_KEY_CAPTURE_FRAMERATE isn't guaranteed to be present — many encoders/devices
      * don't report it, in which case this falls back to the historical 33ms (~30fps) default.
      * NOTE: at high frame rates (e.g. 120fps -> ~8ms interval) this means many more individual
@@ -198,6 +272,27 @@ class BarPathFrameTracker @Inject constructor() {
         val scaledWidth = (frame.width * downscaleFactor).toInt().coerceAtLeast(1)
         val scaledHeight = (frame.height * downscaleFactor).toInt().coerceAtLeast(1)
         val scaled = Bitmap.createScaledBitmap(frame, scaledWidth, scaledHeight, false)
+        val result = findMarkerCentroidInScaledBitmap(scaled, colorProfile, downscaleFactor, previousCentroidPx)
+        scaled.recycle()
+        return result
+    }
+
+    /**
+     * Same centroid-finding logic as [findMarkerCentroid], but takes an already-downscaled
+     * bitmap — lets [trackMarkerPair] decode/downscale each frame once and run this twice (once
+     * per marker color profile) instead of decoding the same frame twice.
+     *
+     * @param previousCentroidPx the last tracked position, in the SAME original-frame
+     * coordinate space this function returns, or null for the first frame.
+     */
+    private fun findMarkerCentroidInScaledBitmap(
+        scaled: Bitmap,
+        colorProfile: MarkerColorProfile,
+        downscaleFactor: Double,
+        previousCentroidPx: Pair<Double, Double>?
+    ): TrackedPoint? {
+        val scaledWidth = scaled.width
+        val scaledHeight = scaled.height
 
         val mask = BooleanArray(scaledWidth * scaledHeight)
         val weights = DoubleArray(scaledWidth * scaledHeight)
@@ -211,7 +306,6 @@ class BarPathFrameTracker @Inject constructor() {
                 if (isMatch) weights[idx] = colorProfile.matchScore(r, g, b).coerceAtLeast(MIN_WEIGHT)
             }
         }
-        scaled.recycle()
 
         val blobs = findBlobs(mask, weights, scaledWidth, scaledHeight).filter { it.size >= MIN_MARKER_PIXELS }
         val previousScaled = previousCentroidPx?.let { (it.first * downscaleFactor) to (it.second * downscaleFactor) }

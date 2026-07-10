@@ -71,6 +71,7 @@ import com.saiyanstrong.util.barpath.HighSpeedCapabilityChecker
 import com.saiyanstrong.util.barpath.HighSpeedTier
 
 private val MarkerGreen = Color(0xFF39FF14)
+private val MarkerBlue = Color(0xFF2E9EFF)
 
 @Composable
 fun BarPathCaptureScreen(
@@ -105,6 +106,8 @@ fun BarPathCaptureScreen(
                     isStandalone = viewModel.isStandalone,
                     onTap = viewModel::onCalibrationTap,
                     onResetPoints = viewModel::onResetCalibrationPoints,
+                    onDualMarkerModeChanged = viewModel::onDualMarkerModeChanged,
+                    onReferenceDistanceChanged = viewModel::onReferenceDistanceChanged,
                     onReferenceLengthChanged = viewModel::onReferenceLengthChanged,
                     onWeightKgChanged = viewModel::onWeightKgChanged,
                     onConfirm = viewModel::onConfirmCalibration
@@ -345,6 +348,8 @@ private fun CalibrationStep(
     isStandalone: Boolean,
     onTap: (TapPoint) -> Unit,
     onResetPoints: () -> Unit,
+    onDualMarkerModeChanged: (Boolean) -> Unit,
+    onReferenceDistanceChanged: (String) -> Unit,
     onReferenceLengthChanged: (String) -> Unit,
     onWeightKgChanged: (String) -> Unit,
     onConfirm: () -> Unit
@@ -354,13 +359,33 @@ private fun CalibrationStep(
     var boxHeightPx by remember { mutableStateOf(1f) }
 
     val instruction = when {
-        uiState.markerSamplePoint == null -> "Tap the marker on the bar in this frame."
+        uiState.markerSamplePoint == null -> "Tap the primary marker on the bar in this frame."
+        uiState.useDualMarkerMode && uiState.markerBSamplePoint == null ->
+            "Tap the second reference marker on the bar (other end of the sleeve)."
+        uiState.useDualMarkerMode -> "Ready — RESET POINTS to redo, or ANALYZE to continue."
         uiState.calibrationPoint1 == null || uiState.calibrationPoint2 == null ->
             "Now tap two points of known length (a plate diameter, the bar sleeve)."
         else -> "Ready — RESET POINTS to redo, or ANALYZE to continue."
     }
 
     Column(Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState())) {
+        Row(Modifier.fillMaxWidth().padding(bottom = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(
+                onClick = { onDualMarkerModeChanged(true) },
+                modifier = Modifier.weight(1f),
+                colors = ButtonDefaults.outlinedButtonColors(
+                    contentColor = if (uiState.useDualMarkerMode) NeonGreen else Color.White.copy(alpha = 0.6f)
+                )
+            ) { Text("DUAL-MARKER (RECOMMENDED)", fontSize = 10.sp, fontWeight = FontWeight.Black) }
+            OutlinedButton(
+                onClick = { onDualMarkerModeChanged(false) },
+                modifier = Modifier.weight(1f),
+                colors = ButtonDefaults.outlinedButtonColors(
+                    contentColor = if (!uiState.useDualMarkerMode) NeonGreen else Color.White.copy(alpha = 0.6f)
+                )
+            ) { Text("MANUAL CALIBRATION", fontSize = 10.sp, fontWeight = FontWeight.Black) }
+        }
+
         Text(
             instruction,
             color = Color.White.copy(alpha = 0.6f), fontSize = 12.sp, modifier = Modifier.padding(bottom = 10.dp)
@@ -387,6 +412,9 @@ private fun CalibrationStep(
                     uiState.markerSamplePoint?.let {
                         drawCircle(color = PowerAmber, radius = 14f, center = Offset(it.xPx * scaleX, it.yPx * scaleY))
                     }
+                    uiState.markerBSamplePoint?.let {
+                        drawCircle(color = MarkerBlue, radius = 14f, center = Offset(it.xPx * scaleX, it.yPx * scaleY))
+                    }
                     uiState.calibrationPoint1?.let {
                         drawCircle(color = MarkerGreen, radius = 12f, center = Offset(it.xPx * scaleX, it.yPx * scaleY))
                     }
@@ -399,19 +427,35 @@ private fun CalibrationStep(
 
         Spacer(Modifier.height(12.dp))
 
-        OutlinedTextField(
-            value = uiState.referenceLengthCm,
-            onValueChange = onReferenceLengthChanged,
-            label = { Text("Reference length (cm)", fontSize = 12.sp) },
-            singleLine = true,
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = NeonGreen,
-                unfocusedBorderColor = Color.White.copy(alpha = 0.2f),
-                focusedTextColor = Color.White,
-                unfocusedTextColor = Color.White
-            ),
-            modifier = Modifier.fillMaxWidth()
-        )
+        if (uiState.useDualMarkerMode) {
+            OutlinedTextField(
+                value = uiState.referenceDistanceCm,
+                onValueChange = onReferenceDistanceChanged,
+                label = { Text("Distance between markers (cm)", fontSize = 12.sp) },
+                singleLine = true,
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = NeonGreen,
+                    unfocusedBorderColor = Color.White.copy(alpha = 0.2f),
+                    focusedTextColor = Color.White,
+                    unfocusedTextColor = Color.White
+                ),
+                modifier = Modifier.fillMaxWidth()
+            )
+        } else {
+            OutlinedTextField(
+                value = uiState.referenceLengthCm,
+                onValueChange = onReferenceLengthChanged,
+                label = { Text("Reference length (cm)", fontSize = 12.sp) },
+                singleLine = true,
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = NeonGreen,
+                    unfocusedBorderColor = Color.White.copy(alpha = 0.2f),
+                    focusedTextColor = Color.White,
+                    unfocusedTextColor = Color.White
+                ),
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
 
         if (isStandalone) {
             Spacer(Modifier.height(12.dp))
@@ -489,9 +533,43 @@ private fun ResultsStep(
         ResultRow("Range of motion", "%.1f cm".format(analysis.rangeOfMotionCm))
         ResultRow("Bar path deviation", "%.1f cm".format(analysis.barPathDeviationCm))
 
+        val ppmPoints = trackedSamples.mapNotNull { it.perFramePixelsPerMeter }
+        if (ppmPoints.size >= 2) {
+            Spacer(Modifier.height(16.dp))
+            Text(
+                "SCALE (PX/M) OVER REP — FLAT = NO DEPTH DRIFT", color = PowerAmber, fontSize = 10.sp,
+                fontWeight = FontWeight.Black, letterSpacing = 0.5.sp, modifier = Modifier.padding(bottom = 6.dp)
+            )
+            PpmChart(points = ppmPoints, modifier = Modifier.fillMaxWidth().height(80.dp))
+        }
+
         Spacer(Modifier.height(20.dp))
         SaiyanButton(onClick = onSave, modifier = Modifier.fillMaxWidth()) {
             Text("SAVE TO SET  >>>", fontWeight = FontWeight.Black)
+        }
+    }
+}
+
+/** Small line chart of dual-marker per-frame pixels-per-meter over the rep — a flat line means
+ * no depth drift was detected; a curve means it was detected and corrected for. */
+@Composable
+private fun PpmChart(points: List<Double>, modifier: Modifier = Modifier) {
+    Canvas(
+        modifier
+            .background(SaiyanGray, androidx.compose.foundation.shape.RoundedCornerShape(4.dp))
+            .padding(8.dp)
+    ) {
+        if (points.size < 2) return@Canvas
+        val minVal = points.min()
+        val maxVal = points.max()
+        val range = (maxVal - minVal).takeIf { it > 0.0 } ?: 1.0
+        val stepX = size.width / (points.size - 1)
+
+        val offsets = points.mapIndexed { i, v ->
+            Offset(i * stepX, size.height - ((v - minVal) / range * size.height).toFloat())
+        }
+        for (i in 0 until offsets.size - 1) {
+            drawLine(color = NeonGreen, start = offsets[i], end = offsets[i + 1], strokeWidth = 3f)
         }
     }
 }

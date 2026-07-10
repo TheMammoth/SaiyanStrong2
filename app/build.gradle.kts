@@ -39,8 +39,8 @@ android {
         applicationId = "com.saiyanstrong"
         minSdk = 26
         targetSdk = 35
-        versionCode = 44
-        versionName = "0.30.0"
+        versionCode = 45
+        versionName = "0.31.0"
 
         buildConfigField("String", "SUPABASE_URL", "\"${localProps["supabase.url"] ?: ""}\"")
         buildConfigField("String", "SUPABASE_ANON_KEY", "\"${localProps["supabase.anonKey"] ?: ""}\"")

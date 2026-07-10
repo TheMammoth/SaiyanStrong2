@@ -35,24 +35,32 @@ class AnalyzeBarPathUseCase @Inject constructor() {
             return BarPathAnalysis(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, VelocityZone.ABSOLUTE_STRENGTH)
         }
 
-        // Depth-drift correction: the marker's own apparent size in the first successfully-
-        // tracked frame is the baseline against which every later frame's size is compared. If
-        // the bar has moved farther from the camera, the marker looks smaller and its real
-        // displacement is under-represented in pixels — ScaleCorrection scales it back up (and
-        // vice versa). Missing/unreliable diameters fall back to 1.0 (no correction), so this
-        // is a no-op for samples that never populated apparentDiameterPx.
-        //
-        // Correction must be applied to the frame-to-frame PIXEL DISPLACEMENT and the corrected
-        // series rebuilt via cumulative sum — NOT by scaling the raw yPx value directly, which
-        // has no true zero to scale from (it's an arbitrary pixel coordinate, not a physical
-        // displacement). Image Y increases downward; each delta is negated so "up" is positive.
+        // Depth-drift correction, two mutually exclusive mechanisms (never both — they'd
+        // double-correct the same effect):
+        //  - Dual-marker mode: sample.perFramePixelsPerMeter is a DIRECT per-frame measurement
+        //    (pixel distance between two real markers a known real-world distance apart), more
+        //    accurate than a heuristic. When present, it's used as-is.
+        //  - Single-marker mode (legacy, unaffected): the marker's own apparent size in the
+        //    first successfully-tracked frame is the baseline every later frame's size is
+        //    compared against. If the bar has moved farther from the camera, the marker looks
+        //    smaller and its real displacement is under-represented in pixels — ScaleCorrection
+        //    scales it back up (and vice versa). Missing/unreliable diameters fall back to 1.0
+        //    (no correction).
+        // Either way, correction is applied to the frame-to-frame PIXEL DISPLACEMENT and the
+        // corrected series rebuilt via cumulative sum — NOT by scaling the raw yPx value
+        // directly, which has no true zero to scale from. Image Y increases downward; each
+        // delta is negated so "up" is positive.
         val baselineDiameterPx = window.firstNotNullOfOrNull { it.apparentDiameterPx }
+        fun effectivePixelsPerMeter(sample: BarPathSample): Double {
+            sample.perFramePixelsPerMeter?.let { return it }
+            val scaleCorrection = ScaleCorrection.compute(baselineDiameterPx, sample.apparentDiameterPx)
+            return pixelsPerMeter / scaleCorrection
+        }
         val correctedHeights = DoubleArray(window.size)
-        correctedHeights[0] = -window[0].yPx / pixelsPerMeter
+        correctedHeights[0] = -window[0].yPx / effectivePixelsPerMeter(window[0])
         for (i in 1 until window.size) {
             val rawDisplacementPx = window[i - 1].yPx - window[i].yPx
-            val scaleCorrection = ScaleCorrection.compute(baselineDiameterPx, window[i].apparentDiameterPx)
-            correctedHeights[i] = correctedHeights[i - 1] + rawDisplacementPx * scaleCorrection / pixelsPerMeter
+            correctedHeights[i] = correctedHeights[i - 1] + rawDisplacementPx / effectivePixelsPerMeter(window[i])
         }
         val heightsMeters = correctedHeights.toList()
 
