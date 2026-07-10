@@ -34,13 +34,22 @@ class BarPathFrameTrackerTest {
     }
 
     @Test
-    fun `a single contiguous blob with uniform weight reports the plain centroid and size`() {
+    fun `a single contiguous blob with uniform weight reports the plain centroid, size, and diameter`() {
         val mask = grid(4, listOf("##", "##").map { it.padEnd(4, '.') })
         val blobs = findBlobs(mask, uniformWeights(mask), 4, 2)
         assertEquals(1, blobs.size)
         assertEquals(4, blobs.single().size)
         assertEquals(0.5, blobs.single().centroidX, 0.0001)
         assertEquals(0.5, blobs.single().centroidY, 0.0001)
+        assertEquals(2.0, blobs.single().diameterPx, 0.0001) // 2x2 bounding box
+    }
+
+    @Test
+    fun `blob diameter is the larger of bounding-box width and height`() {
+        // A 5-wide, 2-tall blob -- diameter should be 5 (the larger dimension), not 2.
+        val mask = grid(5, listOf("#####", "#####"))
+        val blob = findBlobs(mask, uniformWeights(mask), 5, 2).single()
+        assertEquals(5.0, blob.diameterPx, 0.0001)
     }
 
     @Test

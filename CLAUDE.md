@@ -1556,6 +1556,45 @@ _(Claude Code appends here after each completed task)_
   refinement on top of Sprint 28's blob detection + Sprint 29's tap-to-calibrate color — it
   doesn't change what counts as a match, only how confidently the centroid trusts each match.
   versionCode 42, versionName 0.28.0.
+- [x] Sprint 32 — depth-drift scale correction (v0.29.0): the standing accuracy caveat since
+  Sprint 25 ("a single 2D camera has no depth — if the bar drifts toward/away during a rep,
+  that foreshortens apparent displacement and under-reports velocity") now has a real, if
+  partial, fix. Uses the tracked marker's own apparent size as a depth proxy: if it shrinks
+  relative to its first successfully-tracked-frame baseline, the bar has moved farther away and
+  its real displacement is being under-represented in pixels, so displacement gets scaled back
+  up (and vice versa for a marker growing larger).
+  New `domain/util/ScaleCorrection.kt` (pure, `domain/util/` — not `domain/analysis/`, which
+  doesn't exist in this project, same correction as the last two requests): `compute(baseline,
+  current)` returns `baseline/current` clamped to `[0.5, 2.0]` (one bad frame can't corrupt a
+  whole rep), falling back to `1.0` (no correction) when either diameter is missing or below a
+  3px reliability floor.
+  `Blob` (Sprint 28) gains `diameterPx` — the bounding-box diameter (larger of width/height)
+  tracked during the same BFS flood fill that already computes the weighted centroid (Sprint
+  31), no second pass over the mask. `BarPathSample` gains `apparentDiameterPx: Double?`
+  (defaulted, so every existing test fixture that constructs one positionally still compiles
+  unchanged), populated by `BarPathFrameTracker` alongside centroid x/y, scaled back to
+  full-frame pixels the same way centroid already is.
+  **A real bug caught before it shipped**: the first implementation attempt applied the scale
+  correction by multiplying the raw `yPx` pixel coordinate directly — wrong, because pixel Y
+  has no true physical zero to scale from (it's an arbitrary frame-relative coordinate, not a
+  displacement). Caught by hand-deriving a concrete worked example (marker shrinking 40px→20px
+  should double a 0.8 m/s reading to 1.6 m/s) before trusting the code, which the flawed version
+  did not produce. Fixed by correcting each frame-to-frame PIXEL DISPLACEMENT and rebuilding the
+  position series via cumulative sum instead — proven algebraically (not just tested) to
+  telescope back to the exact original formula when no diameter data is present, and the new
+  `depth-drift correction doubles apparent displacement...` test locks in the corrected 1.6 m/s
+  result so this can't silently regress back to the broken version.
+  Declined to build (per the user's own admission they're not needed for this correction):
+  a "marker diameter (cm)" session-setup input field and a debug overlay showing `apparentDiameterPx`
+  — both were requested as groundwork for a hypothetical future absolute-depth-estimation
+  feature with nothing yet to connect them to.
+  9 new tests in `ScaleCorrectionTest.kt`, 2 new integration tests in
+  `AnalyzeBarPathUseCaseTest.kt`, 2 new/updated in `BarPathFrameTrackerTest.kt` (bounding-box
+  diameter, larger-of-width/height selection).
+  KNOWN GAP unchanged: still no real-footage re-verification this session, and this only
+  corrects the Y-axis (vertical, velocity-relevant) displacement — `barPathDeviationCm` (X-axis
+  range) is untouched, matching the minimal-scope precedent from prior sprints.
+  versionCode 43, versionName 0.29.0.
 
 ## Release rules
 

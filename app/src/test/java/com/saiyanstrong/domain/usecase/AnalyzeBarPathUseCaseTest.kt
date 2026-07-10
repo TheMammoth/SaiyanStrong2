@@ -86,6 +86,31 @@ class AnalyzeBarPathUseCaseTest {
     }
 
     @Test
+    fun `depth-drift correction doubles apparent displacement when the marker shrinks to half size`() {
+        // Marker shrinks from 40px to 20px baseline-to-frame diameter -- the bar moved farther
+        // from the camera, so its real displacement (80px apparent) should be corrected up by
+        // 2x (40/20), turning a raw 0.8 m/s reading into a corrected 1.6 m/s.
+        val samples = listOf(
+            BarPathSample(0, 300.0, 1000.0, apparentDiameterPx = 40.0),
+            BarPathSample(100, 300.0, 920.0, apparentDiameterPx = 20.0)
+        )
+        val result = useCase.execute(samples, pixelsPerMeter = 1000.0, massKg = 100.0, 0, 100)
+        assertEquals(1.6, result.meanConcentricVelocityMs, 0.001)
+    }
+
+    @Test
+    fun `depth-drift correction is a no-op when apparentDiameterPx is absent`() {
+        // Same displacement as the constant-velocity fixture, but explicitly asserts the
+        // no-diameter-data path reproduces the uncorrected 0.8 m/s exactly.
+        val samples = listOf(
+            BarPathSample(0, 300.0, 1000.0),
+            BarPathSample(100, 300.0, 920.0)
+        )
+        val result = useCase.execute(samples, pixelsPerMeter = 1000.0, massKg = 100.0, 0, 100)
+        assertEquals(0.8, result.meanConcentricVelocityMs, 0.001)
+    }
+
+    @Test
     fun `image Y decreasing means the bar is moving up — positive velocity`() {
         val samples = listOf(BarPathSample(0, 0.0, 500.0), BarPathSample(100, 0.0, 400.0))
         val result = useCase.execute(samples, pixelsPerMeter = 1000.0, massKg = 100.0, 0, 100)

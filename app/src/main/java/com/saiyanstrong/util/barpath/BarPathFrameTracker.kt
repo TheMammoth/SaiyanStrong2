@@ -6,7 +6,13 @@ import android.media.MediaMetadataRetriever
 import com.saiyanstrong.domain.model.BarPathSample
 import javax.inject.Inject
 
-internal data class Blob(val centroidX: Double, val centroidY: Double, val size: Int)
+internal data class Blob(
+    val centroidX: Double,
+    val centroidY: Double,
+    val size: Int,
+    /** Bounding-box diameter (larger of width/height, in pixels) — feeds depth-drift correction. */
+    val diameterPx: Double = 0.0
+)
 
 /**
  * 4-connected BFS flood fill over a boolean match mask — separates distinct matched objects.
@@ -30,6 +36,8 @@ internal fun findBlobs(mask: BooleanArray, weights: DoubleArray, width: Int, hei
         var sumX = 0.0
         var sumY = 0.0
         var size = 0
+        var minX = Int.MAX_VALUE; var maxX = Int.MIN_VALUE
+        var minY = Int.MAX_VALUE; var maxY = Int.MIN_VALUE
         queue.clear()
         queue.add(start)
         visited[start] = true
@@ -44,6 +52,10 @@ internal fun findBlobs(mask: BooleanArray, weights: DoubleArray, width: Int, hei
             sumX += x
             sumY += y
             size++
+            if (x < minX) minX = x
+            if (x > maxX) maxX = x
+            if (y < minY) minY = y
+            if (y > maxY) maxY = y
             for ((nx, ny) in listOf(x - 1 to y, x + 1 to y, x to y - 1, x to y + 1)) {
                 if (nx in 0 until width && ny in 0 until height) {
                     val nIdx = ny * width + nx
@@ -59,7 +71,8 @@ internal fun findBlobs(mask: BooleanArray, weights: DoubleArray, width: Int, hei
         } else {
             sumX / size to sumY / size
         }
-        blobs += Blob(centroidX, centroidY, size)
+        val diameterPx = maxOf(maxX - minX + 1, maxY - minY + 1).toDouble()
+        blobs += Blob(centroidX, centroidY, size, diameterPx)
     }
     return blobs
 }
@@ -132,9 +145,9 @@ class BarPathFrameTracker @Inject constructor() {
             while (timestampMs <= durationMs) {
                 val frame = retriever.getFrameAtTime(timestampMs * 1000, MediaMetadataRetriever.OPTION_CLOSEST)
                 if (frame != null) {
-                    findMarkerCentroid(frame, colorProfile, downscaleFactor, previousCentroid)?.let { (x, y) ->
-                        samples += BarPathSample(timestampMs, x, y)
-                        previousCentroid = x to y
+                    findMarkerCentroid(frame, colorProfile, downscaleFactor, previousCentroid)?.let { tracked ->
+                        samples += BarPathSample(timestampMs, tracked.xPx, tracked.yPx, tracked.diameterPx)
+                        previousCentroid = tracked.xPx to tracked.yPx
                     }
                     frame.recycle()
                 }
@@ -146,6 +159,9 @@ class BarPathFrameTracker @Inject constructor() {
         }
     }
 
+    /** Centroid + apparent bounding-box diameter, both already scaled to full-frame pixels. */
+    private data class TrackedPoint(val xPx: Double, val yPx: Double, val diameterPx: Double)
+
     /**
      * @param previousCentroidPx the last tracked position, in the SAME original-frame
      * coordinate space this function returns, or null for the first frame.
@@ -155,7 +171,7 @@ class BarPathFrameTracker @Inject constructor() {
         colorProfile: MarkerColorProfile,
         downscaleFactor: Double,
         previousCentroidPx: Pair<Double, Double>?
-    ): Pair<Double, Double>? {
+    ): TrackedPoint? {
         val scaledWidth = (frame.width * downscaleFactor).toInt().coerceAtLeast(1)
         val scaledHeight = (frame.height * downscaleFactor).toInt().coerceAtLeast(1)
         val scaled = Bitmap.createScaledBitmap(frame, scaledWidth, scaledHeight, false)
@@ -178,8 +194,12 @@ class BarPathFrameTracker @Inject constructor() {
         val previousScaled = previousCentroidPx?.let { (it.first * downscaleFactor) to (it.second * downscaleFactor) }
         val chosen = chooseTrackedBlob(blobs, previousScaled) ?: return null
 
-        // Centroid was computed in downscaled coordinates — scale back up to the original frame.
-        return (chosen.centroidX / downscaleFactor) to (chosen.centroidY / downscaleFactor)
+        // Centroid and diameter were computed in downscaled coordinates — scale back up.
+        return TrackedPoint(
+            xPx = chosen.centroidX / downscaleFactor,
+            yPx = chosen.centroidY / downscaleFactor,
+            diameterPx = chosen.diameterPx / downscaleFactor
+        )
     }
 
     private companion object {
