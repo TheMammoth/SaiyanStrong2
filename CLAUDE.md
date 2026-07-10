@@ -1595,6 +1595,64 @@ _(Claude Code appends here after each completed task)_
   corrects the Y-axis (vertical, velocity-relevant) displacement — `barPathDeviationCm` (X-axis
   range) is untouched, matching the minimal-scope precedent from prior sprints.
   versionCode 43, versionName 0.29.0.
+- [x] Sprint 33 — high-speed (120fps) capture attempt, redirected mid-request (v0.30.0): user
+  asked for raw-Camera2 `CameraConstrainedHighSpeedCaptureSession`. **This app's camera pipeline
+  is CameraX** (`BarPathVideoRecorder.kt`), and that session type has no CameraX equivalent —
+  reaching it literally would mean dropping CameraX for the recording path and hand-rolling raw
+  Camera2 session management, losing CameraX's device-compatibility/lifecycle handling in the
+  process. Flagged this before writing anything (per the user's own instruction to flag
+  architecture conflicts rather than silently do something unexpected) and got direction: stay
+  on CameraX, nudge frame rate via Camera2Interop instead — narrower device coverage than the
+  constrained high-speed API guarantees, but no rewrite.
+  Two things resolved without new code: the "don't add ImageAnalysis surfaces to a high-speed
+  session" warning doesn't apply — this pipeline records to a file and analyzes it afterward via
+  `MediaMetadataRetriever`, there's no live `ImageAnalysis`/`ImageReader` surface here at all.
+  And "derive dt from real timestamps, never hardcode 1/30 or 1/120" was already true —
+  `AnalyzeBarPathUseCase`/`SavitzkyGolayFilter` have always computed dt from each sample's
+  actual `timestampMs`, never a frame-rate constant.
+  A separate, real bottleneck the user hadn't asked about but which made the whole feature
+  pointless without fixing it: `BarPathFrameTracker.trackMarker`'s frame-extraction interval was
+  hardcoded to 33ms (~30fps) regardless of the source video's actual frame rate — recording
+  faster footage would have changed nothing, since the tracker would still only pull ~30
+  samples/second. Fixed: `sampleIntervalMs` now defaults to null, deriving the interval from
+  `METADATA_KEY_CAPTURE_FRAMERATE` (falling back to the historical 33ms when an encoder doesn't
+  report it — not guaranteed present on every device).
+  (1) New `util/barpath/HighSpeedCapabilityChecker.kt`: checks
+  `CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES` via `Camera2CameraInfo` (not
+  `SCALER_STREAM_CONFIGURATION_MAP`'s high-speed sizes, which is specifically for the
+  constrained-high-speed session type this app isn't using) — returns `FPS_120`/`FPS_60`/
+  `STANDARD_30`.
+  (2) `BarPathVideoRecorder.bindCamera` gains `highSpeedEnabled`/`onHighSpeedUnavailable`:
+  applies `CONTROL_AE_TARGET_FPS_RANGE` via `Camera2Interop.Extender` on the `Preview.Builder`
+  (a session-wide 3A parameter, not stream-specific, so this influences the whole bound session
+  including what `VideoCapture` records — applying it to any one bound use case's interop point
+  is sufficient). This is a *request*, not the guarantee `CameraConstrainedHighSpeedCaptureSession`
+  provides — some devices will silently record at a lower rate than requested rather than throw,
+  which the already-derived-from-real-timestamps dt handling absorbs gracefully. Bind failure
+  while high-speed was requested retries once at standard rate and invokes the callback.
+  (3) `RecordingStep` (standalone flow only — capability check needs a `ProcessCameraProvider`,
+  meaningless for gallery-imported footage recorded by some other app): checks capability on
+  compose, shows a toggle only when the device supports it, defaults to on unless the user has
+  explicitly chosen otherwise (new `UserPreferencesDataStore`/`UserRepository` nullable
+  `highSpeedModeEnabled` — null means "never explicitly set," same dismiss-and-remember
+  DataStore pattern as `barPathTipsDismissed` but tri-state instead of defaulting to a fixed
+  boolean). Toggle copy dropped the "reduces resolution to 720p" framing from the original ask —
+  this app's `Quality.HD` is already fixed at 720p regardless of high-speed mode, so there's no
+  resolution tradeoff to warn about here. Bind-failure fallback surfaces via a `SnackbarHost`
+  local to `RecordingStep`, matching the exact requested copy ("High-speed mode unavailable on
+  this device, using 30fps").
+  KNOWN GAP, larger than usual for this feature: **none of this has been tested on a real
+  device**, and unlike prior VBT sprints this one carries a real, not-yet-measured performance
+  risk — extracting frames at ~8ms intervals (120fps) via `MediaMetadataRetriever.getFrameAtTime`
+  means several times more individual seek+decode calls than the 30fps path, and this session
+  had no device to check whether that's fast enough to be usable or a real problem. Test high-
+  speed mode's actual achieved frame rate, the toggle's device-support detection, and frame-
+  extraction performance before trusting this feature. Also known and accepted: toggling
+  high-speed mode after the camera preview is already showing doesn't re-bind live — takes
+  effect next time this screen opens, an `AndroidView` factory-runs-once limitation already
+  present in this file before this sprint, not fixed here (out of scope, real risk to a live
+  camera session for a toggle that's expected to be set before recording anyway).
+  versionCode 44, versionName 0.30.0.
 
 ## Release rules
 

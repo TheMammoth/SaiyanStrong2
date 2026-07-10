@@ -79,4 +79,11 @@ class UserRepositoryImpl @Inject constructor(
     override suspend fun setBarPathTipsDismissed(dismissed: Boolean) {
         userPreferencesDataStore.setBarPathTipsDismissed(dismissed)
     }
+
+    override fun getHighSpeedModeEnabled(): Flow<Boolean?> =
+        userPreferencesDataStore.highSpeedModeEnabled
+
+    override suspend fun setHighSpeedModeEnabled(enabled: Boolean) {
+        userPreferencesDataStore.setHighSpeedModeEnabled(enabled)
+    }
 }

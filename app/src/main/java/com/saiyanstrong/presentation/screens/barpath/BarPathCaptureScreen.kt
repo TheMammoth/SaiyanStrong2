@@ -6,6 +6,7 @@ import android.graphics.Bitmap
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
@@ -29,6 +30,10 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -62,6 +67,8 @@ import com.saiyanstrong.presentation.theme.NeonGreen
 import com.saiyanstrong.presentation.theme.PowerAmber
 import com.saiyanstrong.presentation.theme.SaiyanGray
 import com.saiyanstrong.util.barpath.BarPathVideoRecorder
+import com.saiyanstrong.util.barpath.HighSpeedCapabilityChecker
+import com.saiyanstrong.util.barpath.HighSpeedTier
 
 private val MarkerGreen = Color(0xFF39FF14)
 
@@ -72,6 +79,7 @@ fun BarPathCaptureScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val tipsDismissed by viewModel.tipsDismissed.collectAsStateWithLifecycle()
+    val highSpeedPreference by viewModel.highSpeedModeEnabled.collectAsStateWithLifecycle()
 
     LaunchedEffect(uiState.isSaved) { if (uiState.isSaved) onDone() }
 
@@ -87,6 +95,8 @@ fun BarPathCaptureScreen(
                     isStandalone = viewModel.isStandalone,
                     tipsDismissed = tipsDismissed,
                     onDismissTips = viewModel::onDismissTips,
+                    highSpeedPreference = highSpeedPreference,
+                    onHighSpeedPreferenceChanged = viewModel::onHighSpeedModeChanged,
                     onFinished = viewModel::onRecordingFinished,
                     onGalleryVideoPicked = viewModel::onGalleryVideoPicked
                 )
@@ -130,6 +140,8 @@ private fun RecordingStep(
     isStandalone: Boolean,
     tipsDismissed: Boolean,
     onDismissTips: () -> Unit,
+    highSpeedPreference: Boolean?,
+    onHighSpeedPreferenceChanged: (Boolean) -> Unit,
     onFinished: (String?) -> Unit,
     onGalleryVideoPicked: (android.net.Uri) -> Unit = {}
 ) {
@@ -155,8 +167,33 @@ private fun RecordingStep(
         ActivityResultContracts.PickVisualMedia()
     ) { uri -> uri?.let(onGalleryVideoPicked) }
 
-    Column(Modifier.fillMaxSize().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(
+    // CameraConstrainedHighSpeedCaptureSession (raw Camera2) isn't reachable through this app's
+    // CameraX pipeline — this checks CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES instead, to see if a
+    // high frame rate can be requested via Camera2Interop on a normal session. See
+    // HighSpeedCapabilityChecker/BarPathVideoRecorder for the full tradeoff.
+    var highSpeedTier by remember { mutableStateOf<HighSpeedTier?>(null) }
+    LaunchedEffect(Unit) {
+        val providerFuture = ProcessCameraProvider.getInstance(context)
+        providerFuture.addListener({
+            highSpeedTier = HighSpeedCapabilityChecker.check(providerFuture.get())
+        }, ContextCompat.getMainExecutor(context))
+    }
+    val deviceSupportsHighSpeed = highSpeedTier != null && highSpeedTier != HighSpeedTier.STANDARD_30
+    // Defaults to on when the device supports it, unless the user has explicitly chosen otherwise.
+    val effectiveHighSpeedEnabled = highSpeedPreference ?: deviceSupportsHighSpeed
+
+    val snackbarHostState = remember { SnackbarHostState() }
+    var snackbarMessage by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(snackbarMessage) {
+        snackbarMessage?.let {
+            snackbarHostState.showSnackbar(it)
+            snackbarMessage = null
+        }
+    }
+
+    Box(Modifier.fillMaxSize()) {
+        Column(Modifier.fillMaxSize().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(
             "Attach a bright, distinctly-colored marker to the bar. Point the camera so the full range of motion stays in frame.",
             color = Color.White.copy(alpha = 0.6f), fontSize = 12.sp,
             modifier = Modifier.padding(bottom = 12.dp)
@@ -182,11 +219,27 @@ private fun RecordingStep(
             }
         }
         if (!showCamera) return@Column
+
+        if (deviceSupportsHighSpeed) {
+            HighSpeedToggleRow(
+                tier = highSpeedTier!!,
+                enabled = effectiveHighSpeedEnabled,
+                onToggle = onHighSpeedPreferenceChanged,
+                modifier = Modifier.padding(bottom = 12.dp)
+            )
+        }
+
         if (hasPermission) {
             AndroidView(
                 factory = { ctx ->
                     PreviewView(ctx).also { previewView ->
-                        recorder.bindCamera(ctx, lifecycleOwner, previewView)
+                        recorder.bindCamera(
+                            ctx, lifecycleOwner, previewView,
+                            highSpeedEnabled = effectiveHighSpeedEnabled,
+                            onHighSpeedUnavailable = {
+                                snackbarMessage = "High-speed mode unavailable on this device, using 30fps"
+                            }
+                        )
                     }
                 },
                 modifier = Modifier.fillMaxWidth().height(360.dp)
@@ -219,6 +272,36 @@ private fun RecordingStep(
         ) {
             Text(if (isRecording) "STOP" else "RECORD", fontWeight = FontWeight.Black, letterSpacing = 1.sp)
         }
+    }
+
+        SnackbarHost(hostState = snackbarHostState, modifier = Modifier.align(Alignment.BottomCenter))
+    }
+}
+
+@Composable
+private fun HighSpeedToggleRow(
+    tier: HighSpeedTier,
+    enabled: Boolean,
+    onToggle: (Boolean) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val targetFps = if (tier == HighSpeedTier.FPS_120) 120 else 60
+    Row(modifier = modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(
+                "HIGH-SPEED MODE (${targetFps}FPS)", color = Color.White,
+                fontSize = 12.sp, fontWeight = FontWeight.Bold
+            )
+            Text(
+                "Requests a higher frame rate for finer velocity detail — not guaranteed on every device.",
+                color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp
+            )
+        }
+        Switch(
+            checked = enabled,
+            onCheckedChange = onToggle,
+            colors = SwitchDefaults.colors(checkedThumbColor = NeonGreen, checkedTrackColor = NeonGreen.copy(alpha = 0.5f))
+        )
     }
 }
 

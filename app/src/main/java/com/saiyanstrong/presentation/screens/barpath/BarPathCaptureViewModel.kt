@@ -80,6 +80,14 @@ class BarPathCaptureViewModel @Inject constructor(
         viewModelScope.launch { userRepository.setBarPathTipsDismissed(true) }
     }
 
+    /** Null = user hasn't explicitly chosen — the screen defaults this to "on if supported." */
+    val highSpeedModeEnabled: StateFlow<Boolean?> = userRepository.getHighSpeedModeEnabled()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    fun onHighSpeedModeChanged(enabled: Boolean) {
+        viewModelScope.launch { userRepository.setHighSpeedModeEnabled(enabled) }
+    }
+
     fun onRecordingFinished(path: String?) {
         if (path == null) {
             _uiState.update { it.copy(step = CaptureStep.ERROR, errorMessage = "Recording failed — try again.") }

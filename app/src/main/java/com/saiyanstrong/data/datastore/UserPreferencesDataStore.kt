@@ -24,6 +24,7 @@ private val LAST_BACKUP_VERSION_CODE        = intPreferencesKey("last_backup_ver
 private val ONBOARDING_COMPLETE             = booleanPreferencesKey("onboarding_complete")
 private val REST_TIMER_SOUNDS_ENABLED       = booleanPreferencesKey("rest_timer_sounds_enabled")
 private val BAR_PATH_TIPS_DISMISSED         = booleanPreferencesKey("bar_path_tips_dismissed")
+private val HIGH_SPEED_MODE_ENABLED         = booleanPreferencesKey("high_speed_mode_enabled")
 
 @Singleton
 class UserPreferencesDataStore @Inject constructor(
@@ -109,6 +110,16 @@ class UserPreferencesDataStore @Inject constructor(
     suspend fun setBarPathTipsDismissed(dismissed: Boolean) {
         context.userPreferencesDataStore.edit { preferences ->
             preferences[BAR_PATH_TIPS_DISMISSED] = dismissed
+        }
+    }
+
+    /** Null = user has never explicitly chosen — caller defaults to "on if the device supports it." */
+    val highSpeedModeEnabled: Flow<Boolean?> = context.userPreferencesDataStore.data
+        .map { preferences -> preferences[HIGH_SPEED_MODE_ENABLED] }
+
+    suspend fun setHighSpeedModeEnabled(enabled: Boolean) {
+        context.userPreferencesDataStore.edit { preferences ->
+            preferences[HIGH_SPEED_MODE_ENABLED] = enabled
         }
     }
 }

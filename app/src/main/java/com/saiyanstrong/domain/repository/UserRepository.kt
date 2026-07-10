@@ -27,4 +27,8 @@ interface UserRepository {
 
     fun getBarPathTipsDismissed(): Flow<Boolean>
     suspend fun setBarPathTipsDismissed(dismissed: Boolean)
+
+    /** Null = user hasn't explicitly chosen — caller defaults to "on if the device supports it." */
+    fun getHighSpeedModeEnabled(): Flow<Boolean?>
+    suspend fun setHighSpeedModeEnabled(enabled: Boolean)
 }

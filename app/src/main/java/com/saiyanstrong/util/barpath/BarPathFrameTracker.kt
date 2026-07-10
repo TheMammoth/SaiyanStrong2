@@ -120,8 +120,12 @@ class BarPathFrameTracker @Inject constructor() {
     }
 
     /**
-     * @param sampleIntervalMs how often to sample the video. 33ms ≈ 30fps; lower this if your
-     * device records at 60fps and you want every frame, at the cost of more processing time.
+     * @param sampleIntervalMs how often to sample the video. Null (the default) derives it from
+     * the video's own recorded capture frame rate, so a high-speed recording actually yields
+     * more samples instead of being extracted at a fixed ~30fps regardless of source frame
+     * rate — recording faster footage did nothing useful before this without also lowering this
+     * interval. Falls back to 33ms (~30fps) when the encoder didn't report a capture frame rate
+     * (not guaranteed present on every device/encoder).
      * @param downscaleFactor frames are shrunk before scanning for the marker — exact pixel
      * precision isn't needed for a centroid, and scanning a full-resolution frame per sample is
      * needlessly slow.
@@ -129,7 +133,7 @@ class BarPathFrameTracker @Inject constructor() {
     fun trackMarker(
         videoPath: String,
         colorProfile: MarkerColorProfile,
-        sampleIntervalMs: Long = 33,
+        sampleIntervalMs: Long? = null,
         downscaleFactor: Double = 0.25
     ): List<BarPathSample> {
         val retriever = MediaMetadataRetriever()
@@ -138,6 +142,7 @@ class BarPathFrameTracker @Inject constructor() {
             val durationMs = retriever
                 .extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
                 ?.toLongOrNull() ?: 0L
+            val effectiveIntervalMs = sampleIntervalMs ?: deriveSampleIntervalMs(retriever)
 
             val samples = mutableListOf<BarPathSample>()
             var previousCentroid: Pair<Double, Double>? = null
@@ -151,11 +156,29 @@ class BarPathFrameTracker @Inject constructor() {
                     }
                     frame.recycle()
                 }
-                timestampMs += sampleIntervalMs
+                timestampMs += effectiveIntervalMs
             }
             samples
         } finally {
             retriever.release()
+        }
+    }
+
+    /**
+     * METADATA_KEY_CAPTURE_FRAMERATE isn't guaranteed to be present — many encoders/devices
+     * don't report it, in which case this falls back to the historical 33ms (~30fps) default.
+     * NOTE: at high frame rates (e.g. 120fps -> ~8ms interval) this means many more individual
+     * seek+decode calls via getFrameAtTime, which is genuinely slower — not yet measured on a
+     * real device this session, flagged as a real performance unknown, not assumed fine.
+     */
+    private fun deriveSampleIntervalMs(retriever: MediaMetadataRetriever): Long {
+        val captureFps = retriever
+            .extractMetadata(MediaMetadataRetriever.METADATA_KEY_CAPTURE_FRAMERATE)
+            ?.toFloatOrNull()
+        return if (captureFps != null && captureFps > 0f) {
+            (1000.0 / captureFps).toLong().coerceAtLeast(MIN_SAMPLE_INTERVAL_MS)
+        } else {
+            DEFAULT_SAMPLE_INTERVAL_MS
         }
     }
 
@@ -210,5 +233,8 @@ class BarPathFrameTracker @Inject constructor() {
         // proportionally tiny rather than letting a whole blob's weight vanish to 0 and force
         // the unweighted fallback for what could otherwise be a legitimately weighted blob.
         const val MIN_WEIGHT = 0.01
+
+        const val DEFAULT_SAMPLE_INTERVAL_MS = 33L
+        const val MIN_SAMPLE_INTERVAL_MS = 5L // sanity floor, ~200fps worst case
     }
 }
