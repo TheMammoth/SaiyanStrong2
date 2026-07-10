@@ -8,7 +8,7 @@ import javax.inject.Inject
 class CalculatePowerLevelUseCase @Inject constructor() {
 
     companion object {
-        const val BASE_POWER = 9_001
+        const val BASE_POWER = 0
 
         fun intensityMultiplier(reps: Int): Double = when {
             reps <= 3 -> 1.5

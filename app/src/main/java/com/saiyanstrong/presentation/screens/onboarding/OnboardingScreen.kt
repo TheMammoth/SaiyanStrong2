@@ -243,7 +243,7 @@ private fun EarnPowerPage(isCurrentPage: Boolean) {
     ) {
         Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
             ScouterGauge(
-                powerCurrent = (9_001 + 25_199 * progress).toInt(),
+                powerCurrent = (35_000 * progress).toInt(),
                 stageLabel = "Super Saiyan",
                 progressToNext = progress
             )

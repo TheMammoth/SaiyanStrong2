@@ -337,7 +337,7 @@ fun execute(weightKg: Double, reps: Int): Double =
 ```kotlin
 // CalculatePowerLevelUseCase.kt
 companion object {
-    const val BASE_POWER = 9_001
+    const val BASE_POWER = 0
 
     fun intensityMultiplier(reps: Int): Double = when {
         reps <= 3 -> 1.5
@@ -1129,6 +1129,20 @@ _(Claude Code appends here after each completed task)_
   are O(n) per edit (re-reads every set to recompute totals) — fine at real-world set
   counts, would need a SUM query instead of the Kotlin-side fold if that ever mattered.
   versionCode 31, versionName 0.19.0.
+- [x] Power Level base changed to 0 (v0.19.1): `BASE_POWER` was a `9_001` "over 9000" easter
+  egg added into every user's total from Phase 1 onward (`getPowerLevel` = `BASE_POWER +
+  lifetimePowerEarned`). User feedback: prefer starting from 0 so the number and stage
+  thresholds map directly onto power actually earned. Changed `CalculatePowerLevelUseCase.
+  BASE_POWER` to `0` — no other logic changes needed, since it was already a single
+  additive constant read at display time (not stored per-session), so every screen that
+  shows Power Level picks up the new baseline immediately with no migration. Updated the
+  onboarding "EARN POWER" demo animation (`OnboardingScreen.kt` `EarnPowerPage`), which had
+  `9_001 + 25_199 * progress` hardcoded to land inside the Super Saiyan band at its 0.68
+  demo progress — replaced with `35_000 * progress` so the demo still lands inside the
+  same Super Saiyan (20,000–50,000) band, just re-based from 0. The launcher icon artwork
+  itself still shows "POWER:9001" as a baked-in scouter aesthetic graphic (Sprint 8) — that
+  is static image asset text, unrelated to this runtime constant, and was left untouched.
+  versionCode 32, versionName 0.19.1.
 
 ## Release rules
 
