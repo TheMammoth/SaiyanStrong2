@@ -88,7 +88,11 @@ data class ExerciseRestTimerOverrideDto(
 @Serializable
 data class BarPathMetricsDto(
     val id: Long,
-    val setLogId: Long,
+    val setLogId: Long? = null,
+    // Defaulted so pre-v0.25.0 backups (always set-linked) still decode; real value is
+    // backfilled at restore time from the set's exercise when this field is absent.
+    val exerciseId: Int = 0,
+    val createdAtMs: Long = 0L,
     val peakVelocityMs: Double,
     val meanConcentricVelocityMs: Double,
     val peakPowerWatts: Double,

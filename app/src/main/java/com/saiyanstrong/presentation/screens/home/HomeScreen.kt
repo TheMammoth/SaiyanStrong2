@@ -63,11 +63,15 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.saiyanstrong.BuildConfig
 import com.saiyanstrong.domain.model.AppUpdate
 import com.saiyanstrong.domain.model.BodyWeightLog
+import com.saiyanstrong.domain.model.Exercise
 import com.saiyanstrong.domain.model.PowerLevel
 import com.saiyanstrong.domain.model.SaiyanStage
+import com.saiyanstrong.domain.usecase.BarPathQuota
+import com.saiyanstrong.presentation.components.ConfirmDialog
 import com.saiyanstrong.presentation.components.SaiyanButton
 import com.saiyanstrong.presentation.components.ScouterGauge
 import com.saiyanstrong.presentation.components.scanlineTexture
+import com.saiyanstrong.presentation.screens.workout.ExercisePickerSheet
 import com.saiyanstrong.presentation.theme.DangerRed
 import com.saiyanstrong.presentation.theme.NeonGreen
 import com.saiyanstrong.presentation.theme.PowerAmber
@@ -81,6 +85,8 @@ fun HomeScreen(
     onStartWorkout: () -> Unit,
     onViewHistory: () -> Unit,
     onSettings: () -> Unit = {},
+    onStartBarPathAnalysis: (exerciseId: Int) -> Unit = {},
+    onOpenCoachUpgrade: () -> Unit = {},
     viewModel: HomeViewModel = hiltViewModel()
 ) {
     val powerLevel by viewModel.powerLevel.collectAsStateWithLifecycle()
@@ -91,6 +97,8 @@ fun HomeScreen(
     val updateAvailable by viewModel.updateAvailable.collectAsStateWithLifecycle()
     val downloadState by viewModel.downloadState.collectAsStateWithLifecycle()
     val updateStatus by viewModel.updateStatus.collectAsStateWithLifecycle()
+    val exercises by viewModel.exercises.collectAsStateWithLifecycle()
+    val barPathQuota by viewModel.barPathQuota.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
     LaunchedEffect(downloadState) {
@@ -129,7 +137,11 @@ fun HomeScreen(
         onDismissUpdate = viewModel::onDismissUpdate,
         updateStatus = updateStatus,
         onRetryUpdateCheck = viewModel::retryUpdateCheck,
-        onLogBodyWeight = viewModel::onLogBodyWeight
+        onLogBodyWeight = viewModel::onLogBodyWeight,
+        exercises = exercises,
+        barPathQuota = barPathQuota,
+        onStartBarPathAnalysis = onStartBarPathAnalysis,
+        onOpenCoachUpgrade = onOpenCoachUpgrade
     )
 }
 
@@ -148,9 +160,37 @@ internal fun HomeContent(
     onRetryUpdateCheck: () -> Unit = {},
     bodyWeightLogs: List<BodyWeightLog> = emptyList(),
     dotsScore: Double? = null,
-    onLogBodyWeight: (Double) -> Unit = {}
+    onLogBodyWeight: (Double) -> Unit = {},
+    exercises: List<Exercise> = emptyList(),
+    barPathQuota: BarPathQuota = BarPathQuota(0, isUnlimited = false),
+    onStartBarPathAnalysis: (exerciseId: Int) -> Unit = {},
+    onOpenCoachUpgrade: () -> Unit = {}
 ) {
     var showPowerInfoSheet by remember { mutableStateOf(false) }
+    var showExercisePicker by remember { mutableStateOf(false) }
+    var showQuotaUpsell by remember { mutableStateOf(false) }
+
+    if (showExercisePicker) {
+        ExercisePickerSheet(
+            exercises = exercises,
+            onExerciseSelected = { exercise ->
+                showExercisePicker = false
+                onStartBarPathAnalysis(exercise.id)
+            },
+            onDismiss = { showExercisePicker = false }
+        )
+    }
+
+    if (showQuotaUpsell) {
+        ConfirmDialog(
+            title = "FREE LIMIT REACHED",
+            message = "You've used all ${barPathQuota.limit} free bar path analyses this month. " +
+                "Coach unlocks unlimited analyses.",
+            confirmLabel = "UPGRADE",
+            onConfirm = onOpenCoachUpgrade,
+            onDismiss = { showQuotaUpsell = false }
+        )
+    }
 
     if (showPowerInfoSheet) {
         PowerLevelInfoSheet(
@@ -304,6 +344,18 @@ internal fun HomeContent(
                     logs = bodyWeightLogs,
                     dotsScore = null,  // DOTS already shown in the tile row
                     onLogBodyWeight = onLogBodyWeight,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp)
+                )
+
+                Spacer(Modifier.height(12.dp))
+
+                BarPathCard(
+                    quota = barPathQuota,
+                    onNewAnalysis = {
+                        if (barPathQuota.isExhausted) showQuotaUpsell = true else showExercisePicker = true
+                    },
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp)
@@ -538,6 +590,37 @@ private fun BodyWeightCard(
                 TextButton(onClick = { save() }) {
                     Text("SAVE", color = NeonGreen, fontWeight = FontWeight.Black, fontSize = 12.sp)
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun BarPathCard(
+    quota: BarPathQuota,
+    onNewAnalysis: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier
+            .background(SaiyanGray, RoundedCornerShape(6.dp))
+            .padding(horizontal = 12.dp, vertical = 10.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("BAR PATH ANALYSIS", color = TelemetryGreen, style = MaterialTheme.typography.labelSmall,
+                    fontSize = 9.sp, letterSpacing = 2.sp)
+                Text(
+                    if (quota.isUnlimited) "UNLIMITED · COACH"
+                    else "${quota.usedThisMonth}/${quota.limit} analyses this month",
+                    color = if (quota.isUnlimited || !quota.isExhausted) NeonGreen else PowerAmber,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Black,
+                    fontFamily = FontFamily.Monospace
+                )
+            }
+            TextButton(onClick = onNewAnalysis) {
+                Text("NEW ANALYSIS", color = NeonGreen, fontWeight = FontWeight.Black, fontSize = 12.sp)
             }
         }
     }

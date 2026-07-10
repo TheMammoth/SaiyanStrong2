@@ -21,6 +21,12 @@ interface BarPathMetricsDao {
     @Query("SELECT * FROM bar_path_metrics WHERE set_log_id IN (:setLogIds)")
     fun getForSetLogIds(setLogIds: List<Long>): Flow<List<BarPathMetricsEntity>>
 
+    @Query("SELECT * FROM bar_path_metrics WHERE exercise_id = :exerciseId AND set_log_id IS NULL ORDER BY created_at_ms DESC")
+    fun getFreestandingForExercise(exerciseId: Int): Flow<List<BarPathMetricsEntity>>
+
+    @Query("SELECT COUNT(*) FROM bar_path_metrics WHERE set_log_id IS NULL AND created_at_ms >= :monthStartMs")
+    fun countFreestandingSince(monthStartMs: Long): Flow<Int>
+
     @Query("SELECT * FROM bar_path_metrics")
     fun getAll(): Flow<List<BarPathMetricsEntity>>
 

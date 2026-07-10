@@ -73,7 +73,20 @@ class BackupSerializer @Inject constructor(
             templateDao.insertAll(payload.templates.map { it.toEntity() })
             templateDao.insertExercises(payload.templateExercises.map { it.toEntity() })
             bodyWeightDao.insertAll(payload.bodyWeightLogs.map { it.toEntity() })
-            barPathMetricsDao.insertAll(payload.barPathMetrics.map { it.toEntity() })
+
+            // Pre-v0.25.0 backups have no exerciseId on bar path rows — resolve it from the
+            // payload itself (set -> exercise_log -> exercise_id) rather than a DB query,
+            // since these lists are already in memory here.
+            val exerciseLogIdToExerciseId = payload.exerciseLogs.associate { it.id to it.exerciseId }
+            val setLogIdToExerciseLogId = payload.setLogs.associate { it.id to it.exerciseLogId }
+            barPathMetricsDao.insertAll(
+                payload.barPathMetrics.map { dto ->
+                    val resolvedExerciseId = dto.exerciseId.takeIf { it != 0 }
+                        ?: dto.setLogId?.let { setLogIdToExerciseLogId[it] }?.let { exerciseLogIdToExerciseId[it] }
+                        ?: 0
+                    dto.toEntity(resolvedExerciseId)
+                }
+            )
 
             payload.exerciseRestTimerOverrides.forEach { override ->
                 exerciseDao.updateRestTimer(override.exerciseId, override.restTimerSec)
@@ -103,11 +116,12 @@ class BackupSerializer @Inject constructor(
     private fun BodyWeightDto.toEntity() = BodyWeightEntity(id, dateMs, weightKg)
 
     private fun BarPathMetricsEntity.toDto() = BarPathMetricsDto(
-        id, setLogId, peakVelocityMs, meanConcentricVelocityMs, peakPowerWatts,
-        meanPowerWatts, rangeOfMotionCm, barPathDeviationCm, velocityZone
+        id, setLogId, exerciseId, createdAtMs, peakVelocityMs, meanConcentricVelocityMs,
+        peakPowerWatts, meanPowerWatts, rangeOfMotionCm, barPathDeviationCm, velocityZone
     )
-    private fun BarPathMetricsDto.toEntity() = BarPathMetricsEntity(
-        id, setLogId, peakVelocityMs, meanConcentricVelocityMs, peakPowerWatts,
-        meanPowerWatts, rangeOfMotionCm, barPathDeviationCm, velocityZone
+    private fun BarPathMetricsDto.toEntity(resolvedExerciseId: Int) = BarPathMetricsEntity(
+        id, setLogId, resolvedExerciseId, createdAtMs.takeIf { it != 0L } ?: System.currentTimeMillis(),
+        peakVelocityMs, meanConcentricVelocityMs, peakPowerWatts, meanPowerWatts,
+        rangeOfMotionCm, barPathDeviationCm, velocityZone
     )
 }

@@ -1,6 +1,7 @@
 package com.saiyanstrong.presentation.screens.barpath
 
 import android.graphics.Bitmap
+import android.net.Uri
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -8,6 +9,7 @@ import com.saiyanstrong.domain.model.BarPathAnalysis
 import com.saiyanstrong.domain.repository.BarPathRepository
 import com.saiyanstrong.domain.usecase.AnalyzeBarPathUseCase
 import com.saiyanstrong.util.barpath.BarPathFrameTracker
+import com.saiyanstrong.util.barpath.BarPathVideoImporter
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -29,6 +31,7 @@ data class BarPathCaptureUiState(
     val calibrationPoint1: TapPoint? = null,
     val calibrationPoint2: TapPoint? = null,
     val referenceLengthCm: String = "45",
+    val weightKgInput: String = "",
     val errorMessage: String? = null,
     val analysis: BarPathAnalysis? = null,
     val isSaved: Boolean = false
@@ -43,12 +46,17 @@ data class BarPathCaptureUiState(
 class BarPathCaptureViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val barPathFrameTracker: BarPathFrameTracker,
+    private val barPathVideoImporter: BarPathVideoImporter,
     private val analyzeBarPathUseCase: AnalyzeBarPathUseCase,
     private val barPathRepository: BarPathRepository
 ) : ViewModel() {
 
-    private val setLogId: Long = checkNotNull(savedStateHandle["setLogId"])
-    private val weightKg: Double = (savedStateHandle.get<Float>("weightKg") ?: 0f).toDouble()
+    private val exerciseId: Int = checkNotNull(savedStateHandle["exerciseId"])
+    private val setLogId: Long = savedStateHandle.get<Long>("setLogId") ?: -1L
+    private val knownWeightKg: Double = (savedStateHandle.get<Float>("weightKg") ?: -1f).toDouble()
+
+    /** No logged set to attach to — user picked an exercise, not a set, from the Home card. */
+    val isStandalone: Boolean = setLogId <= 0L
 
     private val _uiState = MutableStateFlow(BarPathCaptureUiState())
     val uiState: StateFlow<BarPathCaptureUiState> = _uiState.asStateFlow()
@@ -58,16 +66,35 @@ class BarPathCaptureViewModel @Inject constructor(
             _uiState.update { it.copy(step = CaptureStep.ERROR, errorMessage = "Recording failed — try again.") }
             return
         }
+        loadCalibrationFrame(path, failureMessage = "Couldn't read the recorded video.")
+    }
+
+    fun onGalleryVideoPicked(uri: Uri) {
+        viewModelScope.launch(Dispatchers.Default) {
+            val path = barPathVideoImporter.importFromGallery(uri)
+            if (path == null) {
+                _uiState.update { it.copy(step = CaptureStep.ERROR, errorMessage = "Couldn't import that video — try again.") }
+            } else {
+                loadCalibrationFrame(path, failureMessage = "Couldn't read the imported video.")
+            }
+        }
+    }
+
+    private fun loadCalibrationFrame(path: String, failureMessage: String) {
         viewModelScope.launch(Dispatchers.Default) {
             val frame = runCatching { barPathFrameTracker.extractFirstFrame(path) }.getOrNull()
             _uiState.update {
                 if (frame != null) {
                     it.copy(step = CaptureStep.CALIBRATING, videoPath = path, calibrationFrame = frame)
                 } else {
-                    it.copy(step = CaptureStep.ERROR, errorMessage = "Couldn't read the recorded video.")
+                    it.copy(step = CaptureStep.ERROR, errorMessage = failureMessage)
                 }
             }
         }
+    }
+
+    fun onWeightKgChanged(kg: String) {
+        _uiState.update { it.copy(weightKgInput = kg) }
     }
 
     fun onCalibrationTap(point: TapPoint) {
@@ -94,6 +121,7 @@ class BarPathCaptureViewModel @Inject constructor(
         val p2 = state.calibrationPoint2
         val referenceCm = state.referenceLengthCm.toDoubleOrNull()
         val videoPath = state.videoPath
+        val massKg = if (isStandalone) state.weightKgInput.toDoubleOrNull() else knownWeightKg
 
         if (p1 == null || p2 == null) {
             _uiState.update { it.copy(errorMessage = "Tap two points on a reference object of known length first.") }
@@ -101,6 +129,10 @@ class BarPathCaptureViewModel @Inject constructor(
         }
         if (referenceCm == null || referenceCm <= 0.0) {
             _uiState.update { it.copy(errorMessage = "Enter a valid reference length in cm.") }
+            return
+        }
+        if (isStandalone && (massKg == null || massKg <= 0.0)) {
+            _uiState.update { it.copy(errorMessage = "Enter the weight lifted in this video (kg).") }
             return
         }
         if (videoPath == null) return
@@ -124,7 +156,7 @@ class BarPathCaptureViewModel @Inject constructor(
             val analysis = analyzeBarPathUseCase.execute(
                 samples = samples,
                 pixelsPerMeter = pixelsPerMeter,
-                massKg = weightKg,
+                massKg = massKg ?: 0.0,
                 concentricStartMs = samples.first().timestampMs,
                 concentricEndMs = samples.last().timestampMs
             )
@@ -135,7 +167,11 @@ class BarPathCaptureViewModel @Inject constructor(
     fun onSave() {
         val analysis = _uiState.value.analysis ?: return
         viewModelScope.launch {
-            barPathRepository.saveBarPathMetrics(setLogId, analysis)
+            if (isStandalone) {
+                barPathRepository.saveFreestandingBarPathMetrics(exerciseId, analysis)
+            } else {
+                barPathRepository.saveBarPathMetrics(setLogId, exerciseId, analysis)
+            }
             _uiState.update { it.copy(isSaved = true) }
         }
     }

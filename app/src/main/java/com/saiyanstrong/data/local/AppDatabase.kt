@@ -86,6 +86,48 @@ val MIGRATION_7_8 = object : Migration(7, 8) {
     }
 }
 
+// Widens bar_path_metrics from "one row per set" to "one row per exercise, optionally
+// linked to a set" so a standalone (non-workout) bar path analysis has somewhere to live.
+// SQLite can't alter a column's NOT NULL-ness or drop a unique index in place, so this is
+// a full table-recreate migration: build the new shape, backfill exercise_id/created_at_ms
+// for existing (always set-linked) rows via a join, swap the table, recreate indices.
+val MIGRATION_8_9 = object : Migration(8, 9) {
+    override fun migrate(database: SupportSQLiteDatabase) {
+        database.execSQL(
+            "CREATE TABLE `bar_path_metrics_new` (" +
+                "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                "`set_log_id` INTEGER, " +
+                "`exercise_id` INTEGER NOT NULL, " +
+                "`created_at_ms` INTEGER NOT NULL, " +
+                "`peak_velocity_ms` REAL NOT NULL, " +
+                "`mean_concentric_velocity_ms` REAL NOT NULL, " +
+                "`peak_power_watts` REAL NOT NULL, " +
+                "`mean_power_watts` REAL NOT NULL, " +
+                "`range_of_motion_cm` REAL NOT NULL, " +
+                "`bar_path_deviation_cm` REAL NOT NULL, " +
+                "`velocity_zone` TEXT NOT NULL, " +
+                "FOREIGN KEY(`set_log_id`) REFERENCES `set_logs`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE, " +
+                "FOREIGN KEY(`exercise_id`) REFERENCES `exercises`(`id`) ON UPDATE NO ACTION ON DELETE NO ACTION)"
+        )
+        database.execSQL(
+            "INSERT INTO `bar_path_metrics_new` " +
+                "(id, set_log_id, exercise_id, created_at_ms, peak_velocity_ms, mean_concentric_velocity_ms, " +
+                "peak_power_watts, mean_power_watts, range_of_motion_cm, bar_path_deviation_cm, velocity_zone) " +
+                "SELECT bpm.id, bpm.set_log_id, " +
+                "(SELECT el.exercise_id FROM set_logs sl JOIN exercise_logs el ON el.id = sl.exercise_log_id WHERE sl.id = bpm.set_log_id), " +
+                "(SELECT sl.timestamp_ms FROM set_logs sl WHERE sl.id = bpm.set_log_id), " +
+                "bpm.peak_velocity_ms, bpm.mean_concentric_velocity_ms, bpm.peak_power_watts, bpm.mean_power_watts, " +
+                "bpm.range_of_motion_cm, bpm.bar_path_deviation_cm, bpm.velocity_zone " +
+                "FROM bar_path_metrics bpm"
+        )
+        database.execSQL("DROP TABLE `bar_path_metrics`")
+        database.execSQL("ALTER TABLE `bar_path_metrics_new` RENAME TO `bar_path_metrics`")
+        database.execSQL("CREATE INDEX IF NOT EXISTS `index_bar_path_metrics_set_log_id` ON `bar_path_metrics` (`set_log_id`)")
+        database.execSQL("CREATE INDEX IF NOT EXISTS `index_bar_path_metrics_exercise_id` ON `bar_path_metrics` (`exercise_id`)")
+        database.execSQL("CREATE INDEX IF NOT EXISTS `index_bar_path_metrics_created_at_ms` ON `bar_path_metrics` (`created_at_ms`)")
+    }
+}
+
 @Database(
     entities = [
         ExerciseEntity::class,
@@ -97,7 +139,7 @@ val MIGRATION_7_8 = object : Migration(7, 8) {
         BodyWeightEntity::class,
         BarPathMetricsEntity::class
     ],
-    version = 8,
+    version = 9,
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {

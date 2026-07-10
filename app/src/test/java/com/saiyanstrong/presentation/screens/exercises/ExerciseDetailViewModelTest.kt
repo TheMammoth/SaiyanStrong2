@@ -3,6 +3,7 @@ package com.saiyanstrong.presentation.screens.exercises
 import com.saiyanstrong.domain.model.BarPathAnalysis
 import com.saiyanstrong.domain.model.ExerciseSetHistory
 import com.saiyanstrong.domain.model.VelocityZone
+import com.saiyanstrong.domain.repository.TimestampedBarPathAnalysis
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -61,5 +62,21 @@ class ExerciseDetailViewModelTest {
     @Test
     fun `no sessions produce an empty chart`() {
         assertTrue(buildVelocityChart(emptyMap(), emptyMap()).isEmpty())
+    }
+
+    @Test
+    fun `freestanding analyses merge in alongside set-linked ones, sorted by date`() {
+        val setLinked = listOf(analysis(0.7).let { ChartPoint(2000L, it.meanConcentricVelocityMs) })
+        val freestanding = listOf(TimestampedBarPathAnalysis(1000L, analysis(0.6)))
+        val merged = mergeVelocityChart(setLinked, freestanding)
+        assertEquals(listOf(1000L, 2000L), merged.map { it.dateMs })
+        assertEquals(listOf(0.6, 0.7), merged.map { it.value })
+    }
+
+    @Test
+    fun `freestanding-only exercise still produces chart points with no session history`() {
+        val merged = mergeVelocityChart(emptyList(), listOf(TimestampedBarPathAnalysis(500L, analysis(0.9))))
+        assertEquals(1, merged.size)
+        assertEquals(500L, merged.single().dateMs)
     }
 }

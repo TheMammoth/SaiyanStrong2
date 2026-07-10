@@ -298,17 +298,20 @@ template_exercises : id(PK autoGen), template_id(FK→templates CASCADE),
 
 body_weight_logs   : id(PK autoGen), date_ms, weight_kg
 
-bar_path_metrics   : id(PK autoGen), set_log_id(FK→set_logs CASCADE, unique),
+bar_path_metrics   : id(PK autoGen), set_log_id(FK→set_logs CASCADE, nullable),
+                     exercise_id(FK→exercises), created_at_ms,
                      peak_velocity_ms, mean_concentric_velocity_ms, peak_power_watts,
                      mean_power_watts, range_of_motion_cm, bar_path_deviation_cm,
                      velocity_zone(TEXT)
 ```
 
-Room DB version: **8**. Migrations: 1→2 sessions.title, 2→3 set_logs.is_failure,
+Room DB version: **9**. Migrations: 1→2 sessions.title, 2→3 set_logs.is_failure,
 3→4 exercise re-seed (DELETE FROM exercises), 4→5 templates/template_exercises/
 body_weight_logs, 5→6 exercises.rest_timer_sec, 6→7 templates.is_from_coach,
-7→8 bar_path_metrics. Any future schema change requires a Migration, never
-`fallbackToDestructiveMigration()` in production.
+7→8 bar_path_metrics, 8→9 bar_path_metrics widened to exercise-scoped (set_log_id
+nullable, + exercise_id, + created_at_ms — table-recreate migration, see Sprint 28).
+Any future schema change requires a Migration, never `fallbackToDestructiveMigration()`
+in production.
 
 ---
 
@@ -1337,6 +1340,70 @@ _(Claude Code appends here after each completed task)_
   produces, and that pipeline is still unverified against real footage. This sprint made the
   *data* visible, not the *tracking* trustworthy — those are still two separate open items.
   versionCode 37, versionName 0.24.0.
+- [x] Sprint 28 — calibration scroll fix + standalone bar path analysis + free/Coach quota
+  (v0.25.0): a real device test surfaced a genuine bug and a real UX gap, fixed together.
+  (0) **Calibration screen scroll fix**: after recording and tapping the two calibration
+  points, the reference-length field and ANALYZE button were unreachable. Root cause:
+  `CalibrationStep`'s outer `Column` had no scroll and the portrait video frame preview
+  (`fillMaxWidth().aspectRatio(...)`) consumed the whole viewport height on a tall clip,
+  pushing the rest of the screen below the fold with no way to reach it. Fixed: capped the
+  frame preview to `heightIn(max = 420.dp)` and wrapped the step in `verticalScroll`. Not a
+  tracking/logic bug — `BarPathCaptureViewModel.onConfirmCalibration` was already correct and
+  reachable, just not visible. While diagnosing this the user separately reported a genuine
+  discoverability gap: no way to find bar path capture outside an active workout. That's the
+  rest of this sprint.
+  (1) **Schema**: Room v8→9 (`MIGRATION_8_9`, table-recreate — SQLite can't alter `NOT NULL`/
+  drop a unique index in place). `bar_path_metrics.set_log_id` is now nullable; gained
+  `exercise_id` (NOT NULL) and `created_at_ms` (NOT NULL), backfilled for existing rows via a
+  `set_logs → exercise_logs` join. The old unique index on `set_log_id` is dropped — SQLite
+  partial unique indexes aren't expressible via Room's `@Index`, so "one bar-path row per set"
+  for the existing linked flow is now enforced in `BarPathRepositoryImpl.saveBarPathMetrics`
+  (delete-then-insert) instead of the DB layer, a deliberate simplification, not an oversight.
+  (2) **Repository**: `BarPathRepository` gained `saveFreestandingBarPathMetrics`,
+  `getFreestandingAnalysesForExercise`, `getFreestandingCountThisMonth` (new
+  `TimestampedBarPathAnalysis` — a freestanding row has no set to hang a date off of, so it
+  carries its own timestamp). `GetBarPathQuotaUseCase` (mirrors `IsCoachUseCase`'s "one shared
+  check" precedent) combines the live monthly count with `IsCoachUseCase` into a `BarPathQuota`;
+  the count is derived from `COUNT(*) WHERE created_at_ms >= monthStart`, never a separately
+  maintained counter — the same fix pattern as the Power Level drift bug (v0.18.1). Free limit:
+  5/calendar month; Coach entitlement (existing, reused as-is — no new Paddle product) =
+  unlimited.
+  (3) **Home card**: new `BarPathCard` on `HomeScreen` (after `BodyWeightCard`) shows
+  "X/5 analyses this month" or "UNLIMITED · COACH"; NEW ANALYSIS opens the existing
+  `ExercisePickerSheet` (reused verbatim) when quota allows, or a `ConfirmDialog`-based upsell
+  pointing at `CoachSettingsScreen` when exhausted. `HomeViewModel` gained `exercises` and
+  `barPathQuota` StateFlows.
+  (4) **Capture flow, standalone mode**: `Screen.BarPathCapture` route changed shape
+  (`bar_path_capture?exerciseId={}&setLogId={}&weightKg={}`, sentinel `-1` for the latter two
+  matching the existing `templateId=-1` convention) — the workout ⋮-menu path is unchanged
+  behaviorally, just now also passes `exerciseId` (threaded through
+  `ActiveWorkoutScreen`/`ExerciseLogCard`'s `onRecordBarPath` callback, which gained an
+  `exerciseId` parameter). `BarPathCaptureViewModel.isStandalone = setLogId <= 0`.
+  `RecordingStep` gains a RECORD/IMPORT FROM GALLERY choice, standalone-only — gallery import
+  uses `ActivityResultContracts.PickVisualMedia` (Android Photo Picker, no storage permission)
+  and a new `util/barpath/BarPathVideoImporter.kt` copies the picked `content://` Uri to a
+  cache file (mirrors `SessionShareImageSaver`'s existing cache-copy pattern in reverse) since
+  `MediaMetadataRetriever`/`BarPathFrameTracker` both need a real path. `CalibrationStep` gains
+  a "Weight lifted (kg)" field, standalone-only, validated the same way `referenceLengthCm`
+  already is.
+  (5) **ExerciseDetailScreen**: `buildVelocityChart` (Sprint 27) is unchanged; new pure
+  `mergeVelocityChart` folds in freestanding analyses (keyed by their own timestamp, not a
+  session) so the existing "BAR SPEED" chart card picks up standalone-recorded data for free,
+  including exercises with freestanding-only tracked data and no session history at all.
+  (6) **Backup**: `BarPathMetricsDto` gained `exerciseId`/`createdAtMs` (both defaulted so
+  pre-v0.25.0 backups still decode); `BackupSerializer.restore` backfills a missing
+  `exerciseId` from the payload's own `setLogs`/`exerciseLogs` lists (in-memory join, no extra
+  DB query needed since those are already loaded for the restore).
+  (7) Unit tests: `GetBarPathQuotaUseCaseTest` (3 tests, pure `computeBarPathQuota` extracted
+  for testability without faking the repository chain) + 2 new `ExerciseDetailViewModelTest`
+  cases for `mergeVelocityChart`.
+  KNOWN GAP unchanged: the marker-tracking pipeline itself is still unverified against real
+  footage — this sprint adds more ways to trigger it (gallery import, standalone entry), not
+  less risk on that front. Real-device testing of the now-fixed calibration flow, gallery
+  import, and the Home card end-to-end is still owed before trusting any of this in production.
+  Also not built: any UI listing past freestanding analyses directly (they surface only via the
+  ExerciseDetailScreen velocity chart, per spec — no dedicated history list this sprint).
+  versionCode 38, versionName 0.25.0.
 
 ## Release rules
 

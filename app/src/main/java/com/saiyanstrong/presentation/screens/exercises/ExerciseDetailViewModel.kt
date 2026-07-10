@@ -11,6 +11,7 @@ import com.saiyanstrong.domain.repository.BarPathRepository
 import com.saiyanstrong.domain.repository.ExerciseMediaRepository
 import com.saiyanstrong.domain.repository.ExerciseRepository
 import com.saiyanstrong.domain.repository.SessionRepository
+import com.saiyanstrong.domain.repository.TimestampedBarPathAnalysis
 import com.saiyanstrong.domain.usecase.EstimateOneRepMaxUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -73,6 +74,11 @@ internal fun buildVelocityChart(
         ChartPoint(best.dateMs, barPathBySetId.getValue(best.setLogId).meanConcentricVelocityMs)
     }.sortedBy { it.dateMs }
 
+/** Freestanding (no set) analyses have no session to compete with — they just add their own point. */
+internal fun mergeVelocityChart(setLinked: List<ChartPoint>, freestanding: List<TimestampedBarPathAnalysis>): List<ChartPoint> =
+    (setLinked + freestanding.map { ChartPoint(it.createdAtMs, it.analysis.meanConcentricVelocityMs) })
+        .sortedBy { it.dateMs }
+
 @HiltViewModel
 class ExerciseDetailViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
@@ -101,17 +107,25 @@ class ExerciseDetailViewModel @Inject constructor(
         sessionRepository.getExerciseHistory(exerciseId)
     ) { exercise, history -> exercise to history }
         .flatMapLatest { (exercise, history) ->
-            barPathRepository.getBarPathMetricsForSets(history.map { it.setLogId })
-                .map { barPathBySetId -> buildState(exercise, history, barPathBySetId) }
+            combine(
+                barPathRepository.getBarPathMetricsForSets(history.map { it.setLogId }),
+                barPathRepository.getFreestandingAnalysesForExercise(exerciseId)
+            ) { barPathBySetId, freestanding -> buildState(exercise, history, barPathBySetId, freestanding) }
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ExerciseDetailUiState())
 
     private fun buildState(
         exercise: Exercise?,
         history: List<ExerciseSetHistory>,
-        barPathBySetId: Map<Long, BarPathAnalysis>
+        barPathBySetId: Map<Long, BarPathAnalysis>,
+        freestandingBarPath: List<TimestampedBarPathAnalysis>
     ): ExerciseDetailUiState {
-        if (history.isEmpty()) return ExerciseDetailUiState(exercise = exercise)
+        if (history.isEmpty()) {
+            return ExerciseDetailUiState(
+                exercise = exercise,
+                velocityChart = mergeVelocityChart(emptyList(), freestandingBarPath)
+            )
+        }
 
         val bySession = history.groupBy { it.sessionId }
 
@@ -131,7 +145,7 @@ class ExerciseDetailViewModel @Inject constructor(
             .map { sets -> SessionHistoryGroup(dateMs = sets.first().dateMs, sets = sets) }
             .sortedByDescending { it.dateMs }
 
-        val velocityChart = buildVelocityChart(bySession, barPathBySetId)
+        val velocityChart = mergeVelocityChart(buildVelocityChart(bySession, barPathBySetId), freestandingBarPath)
 
         // Best performance per rep count (1..10), Strong-style records table
         val repMaxRecords = (1..10).mapNotNull { reps ->

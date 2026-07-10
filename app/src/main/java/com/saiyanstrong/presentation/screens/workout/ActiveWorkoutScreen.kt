@@ -101,7 +101,7 @@ private fun LoadSuggestion.label(): String = when (this) {
 fun ActiveWorkoutScreen(
     onWorkoutFinished: (Long) -> Unit,
     onViewHistory: () -> Unit,
-    onRecordBarPath: (setLogId: Long, weightKg: Double) -> Unit = { _, _ -> },
+    onRecordBarPath: (exerciseId: Int, setLogId: Long, weightKg: Double) -> Unit = { _, _, _ -> },
     workoutViewModel: ActiveWorkoutViewModel = hiltViewModel()
 ) {
     val uiState by workoutViewModel.uiState.collectAsStateWithLifecycle()
@@ -148,7 +148,7 @@ internal fun ActiveWorkoutContent(
     onFinishWorkout: () -> Unit,
     onRemoveExercise: (Int) -> Unit = {},
     onSetExerciseRestTimer: (Int, Int?) -> Unit = { _, _ -> },
-    onRecordBarPath: (setLogId: Long, weightKg: Double) -> Unit = { _, _ -> }
+    onRecordBarPath: (exerciseId: Int, setLogId: Long, weightKg: Double) -> Unit = { _, _, _ -> }
 ) {
     val totalSets = uiState.exerciseLogs.sumOf { it.sets.size }
     val totalVolumeKg = uiState.exerciseLogs.sumOf { log -> log.sets.sumOf { it.volumeKg } }
@@ -210,7 +210,7 @@ internal fun ActiveWorkoutContent(
                         onRemoveExercise = { onRemoveExercise(log.exercise.id) },
                         onSetRestTimer = { seconds -> onSetExerciseRestTimer(log.exercise.id, seconds) },
                         onRecordBarPath = {
-                            log.sets.lastOrNull()?.let { onRecordBarPath(it.id, it.weightKg) }
+                            log.sets.lastOrNull()?.let { onRecordBarPath(log.exercise.id, it.id, it.weightKg) }
                         }
                     )
                 }

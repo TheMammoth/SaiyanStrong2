@@ -7,12 +7,16 @@ import androidx.lifecycle.viewModelScope
 import com.saiyanstrong.BuildConfig
 import com.saiyanstrong.domain.model.AppUpdate
 import com.saiyanstrong.domain.model.BodyWeightLog
+import com.saiyanstrong.domain.model.Exercise
 import com.saiyanstrong.domain.model.PowerLevel
 import com.saiyanstrong.domain.model.WorkoutSession
+import com.saiyanstrong.domain.repository.ExerciseRepository
 import com.saiyanstrong.domain.repository.SessionRepository
 import com.saiyanstrong.domain.repository.UserRepository
+import com.saiyanstrong.domain.usecase.BarPathQuota
 import com.saiyanstrong.domain.usecase.CheckForUpdateUseCase
 import com.saiyanstrong.domain.usecase.EstimateOneRepMaxUseCase
+import com.saiyanstrong.domain.usecase.GetBarPathQuotaUseCase
 import com.saiyanstrong.domain.usecase.GetEvolutionStageUseCase
 import com.saiyanstrong.util.UpdateInstaller
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -67,8 +71,16 @@ class HomeViewModel @Inject constructor(
     private val userRepository: UserRepository,
     private val checkForUpdateUseCase: CheckForUpdateUseCase,
     private val updateInstaller: UpdateInstaller,
-    private val estimateOneRepMaxUseCase: EstimateOneRepMaxUseCase
+    private val estimateOneRepMaxUseCase: EstimateOneRepMaxUseCase,
+    exerciseRepository: ExerciseRepository,
+    getBarPathQuotaUseCase: GetBarPathQuotaUseCase
 ) : ViewModel() {
+
+    val exercises: StateFlow<List<Exercise>> = exerciseRepository.getAllExercises()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val barPathQuota: StateFlow<BarPathQuota> = getBarPathQuotaUseCase.execute()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), BarPathQuota(0, isUnlimited = false))
 
     val powerLevel: StateFlow<PowerLevel?> = getEvolutionStageUseCase.execute()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)

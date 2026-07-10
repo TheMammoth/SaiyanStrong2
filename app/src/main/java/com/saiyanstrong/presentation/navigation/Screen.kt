@@ -24,7 +24,13 @@ sealed class Screen(val route: String) {
     data object AthleteDetail : Screen("athlete/{athleteId}") {
         fun createRoute(athleteId: String) = "athlete/$athleteId"
     }
-    data object BarPathCapture : Screen("bar_path_capture/{setLogId}/{weightKg}") {
-        fun createRoute(setLogId: Long, weightKg: Double) = "bar_path_capture/$setLogId/${weightKg.toFloat()}"
+    data object BarPathCapture : Screen("bar_path_capture?exerciseId={exerciseId}&setLogId={setLogId}&weightKg={weightKg}") {
+        /** Set-linked, from the workout ⋮ menu — behaves exactly as before this route changed shape. */
+        fun createRoute(exerciseId: Int, setLogId: Long, weightKg: Double) =
+            "bar_path_capture?exerciseId=$exerciseId&setLogId=$setLogId&weightKg=${weightKg.toFloat()}"
+
+        /** Standalone, from the Home card — no set, no weight known yet. */
+        fun createStandaloneRoute(exerciseId: Int) =
+            "bar_path_capture?exerciseId=$exerciseId&setLogId=-1&weightKg=-1"
     }
 }

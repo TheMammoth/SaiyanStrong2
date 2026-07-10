@@ -3,6 +3,7 @@ package com.saiyanstrong.presentation.screens.barpath
 import android.Manifest
 import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.Canvas
@@ -18,7 +19,10 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.OutlinedButton
@@ -75,12 +79,18 @@ fun BarPathCaptureScreen(
             letterSpacing = 1.5.sp, modifier = Modifier.fillMaxWidth().padding(16.dp)
         )
         when (uiState.step) {
-            CaptureStep.RECORDING -> RecordingStep(onFinished = viewModel::onRecordingFinished)
+            CaptureStep.RECORDING -> RecordingStep(
+                isStandalone = viewModel.isStandalone,
+                onFinished = viewModel::onRecordingFinished,
+                onGalleryVideoPicked = viewModel::onGalleryVideoPicked
+            )
             CaptureStep.CALIBRATING -> CalibrationStep(
                 uiState = uiState,
+                isStandalone = viewModel.isStandalone,
                 onTap = viewModel::onCalibrationTap,
                 onResetPoints = viewModel::onResetCalibrationPoints,
                 onReferenceLengthChanged = viewModel::onReferenceLengthChanged,
+                onWeightKgChanged = viewModel::onWeightKgChanged,
                 onConfirm = viewModel::onConfirmCalibration
             )
             CaptureStep.PROCESSING -> ProcessingStep()
@@ -91,7 +101,11 @@ fun BarPathCaptureScreen(
 }
 
 @Composable
-private fun RecordingStep(onFinished: (String?) -> Unit) {
+private fun RecordingStep(
+    isStandalone: Boolean,
+    onFinished: (String?) -> Unit,
+    onGalleryVideoPicked: (android.net.Uri) -> Unit = {}
+) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val recorder = remember { BarPathVideoRecorder() }
@@ -108,6 +122,11 @@ private fun RecordingStep(onFinished: (String?) -> Unit) {
     LaunchedEffect(Unit) { if (!hasPermission) permissionLauncher.launch(Manifest.permission.CAMERA) }
 
     var isRecording by remember { mutableStateOf(false) }
+    var showCamera by remember { mutableStateOf(!isStandalone) }
+
+    val galleryLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.PickVisualMedia()
+    ) { uri -> uri?.let(onGalleryVideoPicked) }
 
     Column(Modifier.fillMaxSize().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         Text(
@@ -115,6 +134,24 @@ private fun RecordingStep(onFinished: (String?) -> Unit) {
             color = Color.White.copy(alpha = 0.6f), fontSize = 12.sp,
             modifier = Modifier.padding(bottom = 12.dp)
         )
+        if (isStandalone) {
+            Row(Modifier.fillMaxWidth().padding(bottom = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(
+                    onClick = { showCamera = true },
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = if (showCamera) NeonGreen else Color.White.copy(alpha = 0.6f))
+                ) { Text("RECORD", fontSize = 12.sp, fontWeight = FontWeight.Black) }
+                OutlinedButton(
+                    onClick = {
+                        showCamera = false
+                        galleryLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly))
+                    },
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = if (!showCamera) NeonGreen else Color.White.copy(alpha = 0.6f))
+                ) { Text("IMPORT FROM GALLERY", fontSize = 12.sp, fontWeight = FontWeight.Black) }
+            }
+        }
+        if (!showCamera) return@Column
         if (hasPermission) {
             AndroidView(
                 factory = { ctx ->
@@ -158,16 +195,18 @@ private fun RecordingStep(onFinished: (String?) -> Unit) {
 @Composable
 private fun CalibrationStep(
     uiState: BarPathCaptureUiState,
+    isStandalone: Boolean,
     onTap: (TapPoint) -> Unit,
     onResetPoints: () -> Unit,
     onReferenceLengthChanged: (String) -> Unit,
+    onWeightKgChanged: (String) -> Unit,
     onConfirm: () -> Unit
 ) {
     val frame = uiState.calibrationFrame
     var boxWidthPx by remember { mutableStateOf(1f) }
     var boxHeightPx by remember { mutableStateOf(1f) }
 
-    Column(Modifier.fillMaxSize().padding(16.dp)) {
+    Column(Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState())) {
         Text(
             "Tap two points on something of known length (a plate diameter, the bar sleeve) in this frame.",
             color = Color.White.copy(alpha = 0.6f), fontSize = 12.sp, modifier = Modifier.padding(bottom = 10.dp)
@@ -176,6 +215,7 @@ private fun CalibrationStep(
             Box(
                 Modifier
                     .fillMaxWidth()
+                    .heightIn(max = 420.dp)
                     .aspectRatio(frame.width.toFloat() / frame.height.toFloat())
                     .onSizeChanged { size -> boxWidthPx = size.width.toFloat(); boxHeightPx = size.height.toFloat() }
                     .pointerInput(frame) {
@@ -215,6 +255,23 @@ private fun CalibrationStep(
             ),
             modifier = Modifier.fillMaxWidth()
         )
+
+        if (isStandalone) {
+            Spacer(Modifier.height(12.dp))
+            OutlinedTextField(
+                value = uiState.weightKgInput,
+                onValueChange = onWeightKgChanged,
+                label = { Text("Weight lifted (kg)", fontSize = 12.sp) },
+                singleLine = true,
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = NeonGreen,
+                    unfocusedBorderColor = Color.White.copy(alpha = 0.2f),
+                    focusedTextColor = Color.White,
+                    unfocusedTextColor = Color.White
+                ),
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
 
         Spacer(Modifier.height(12.dp))
 

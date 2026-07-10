@@ -130,7 +130,11 @@ fun NavGraph() {
                 HomeScreen(
                     onStartWorkout = { navController.navigate(Screen.WorkoutLanding.route) },
                     onViewHistory = { navController.navigate(Screen.History.route) },
-                    onSettings = { navController.navigate(Screen.Settings.route) }
+                    onSettings = { navController.navigate(Screen.Settings.route) },
+                    onStartBarPathAnalysis = { exerciseId ->
+                        navController.navigate(Screen.BarPathCapture.createStandaloneRoute(exerciseId))
+                    },
+                    onOpenCoachUpgrade = { navController.navigate(Screen.CoachSettings.route) }
                 )
             }
 
@@ -158,8 +162,8 @@ fun NavGraph() {
                         }
                     },
                     onViewHistory = { navController.navigate(Screen.History.route) },
-                    onRecordBarPath = { setLogId, weightKg ->
-                        navController.navigate(Screen.BarPathCapture.createRoute(setLogId, weightKg))
+                    onRecordBarPath = { exerciseId, setLogId, weightKg ->
+                        navController.navigate(Screen.BarPathCapture.createRoute(exerciseId, setLogId, weightKg))
                     }
                 )
             }
@@ -167,8 +171,9 @@ fun NavGraph() {
             composable(
                 route = Screen.BarPathCapture.route,
                 arguments = listOf(
-                    navArgument("setLogId") { type = NavType.LongType },
-                    navArgument("weightKg") { type = NavType.FloatType }
+                    navArgument("exerciseId") { type = NavType.IntType },
+                    navArgument("setLogId") { type = NavType.LongType; defaultValue = -1L },
+                    navArgument("weightKg") { type = NavType.FloatType; defaultValue = -1f }
                 )
             ) {
                 BarPathCaptureScreen(onDone = { navController.popBackStack() })
