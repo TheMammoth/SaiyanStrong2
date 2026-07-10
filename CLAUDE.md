@@ -1404,6 +1404,45 @@ _(Claude Code appends here after each completed task)_
   Also not built: any UI listing past freestanding analyses directly (they surface only via the
   ExerciseDetailScreen velocity chart, per spec — no dedicated history list this sprint).
   versionCode 38, versionName 0.25.0.
+- [x] First real-footage test + marker-tracking fix (v0.25.1): this is the milestone the VBT
+  feature has been waiting on since Sprint 26 — a real recorded lift, run end to end through
+  record → calibrate → track → analyze. It "worked" in the sense of not crashing, but the
+  numbers were nonsense: peak velocity 13.34 m/s (world-class bar speed tops out ~2 m/s), peak
+  power 916,357 W (human peak output tops out a few thousand watts), mean concentric velocity
+  0.00 m/s despite a nonzero peak, bar path deviation 33.7cm (very jittery). That exact
+  signature — huge peak, ~zero mean, high deviation — means the tracked centroid jumped to a
+  false-positive match somewhere else in frame for one instant and then returned close to
+  where it started.
+  Root cause, found by inspection (not yet re-verified on device): `BarPathFrameTracker.
+  findMarkerCentroid` averaged *every* pixel in the frame matching the color threshold into
+  one centroid, regardless of whether they were spatially contiguous. The test video's
+  background had other pink/magenta-ish objects (a bucket, a towel) in frame — if any of them
+  passed `MarkerColorMatcher`'s threshold even briefly, the averaged centroid snapped toward
+  it, producing exactly this kind of spurious one-frame velocity spike.
+  Fix: connected-component blob detection (`findBlobs`, 4-connected BFS flood fill over the
+  match mask) replaces the naive whole-frame average, and `chooseTrackedBlob` picks whichever
+  blob is nearest to the previous frame's tracked position once tracking has started (falling
+  back to the largest blob to seed the very first frame) — a real marker can't teleport across
+  a room in 33ms, so nearest-neighbor tracking rejects most false positives for free. Both
+  functions are pure top-level `internal fun`s (no `Bitmap`/Android dependency) specifically so
+  this exact failure mode is unit-testable going forward — 6 new tests in
+  `BarPathFrameTrackerTest.kt`, including one that directly encodes the bug ("a small nearby
+  blob wins over a large but distant one").
+  Also fixed a real UX gap flagged in the same test: gallery import + first-frame extraction
+  had no loading indicator, so the screen looked frozen for several seconds. `BarPathCaptureUiState`
+  gained `isPreparingVideo`; `BarPathCaptureScreen` shows a dimmed overlay + spinner during that
+  window (the existing PROCESSING step's spinner already covered the tracking/analysis phase).
+  **Not built**: real-time/live tracking during recording (analyzing camera preview frames as
+  they're captured, rather than post-processing the saved clip) — this was suggested by the
+  user as a way to avoid the wait entirely, but it's a materially different architecture
+  (CameraX `ImageAnalysis` use case + on-frame processing + a live overlay) from the current
+  record-then-post-process pipeline, and wasn't built this pass. Worth scoping as its own
+  spec if the post-processing wait remains a problem after this fix.
+  KNOWN GAP: the blob/nearest-neighbor fix is unit-tested on synthetic data but **not yet
+  re-verified against a real recorded lift** — it should meaningfully improve tracking
+  robustness against background clutter, but whether it produces genuinely plausible velocity
+  numbers this time still needs a real device retest.
+  versionCode 39, versionName 0.25.1.
 
 ## Release rules
 

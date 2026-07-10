@@ -34,7 +34,10 @@ data class BarPathCaptureUiState(
     val weightKgInput: String = "",
     val errorMessage: String? = null,
     val analysis: BarPathAnalysis? = null,
-    val isSaved: Boolean = false
+    val isSaved: Boolean = false,
+    /** True while importing/reading the video before the calibration frame is ready — the
+     * recording/picker UI otherwise gives no feedback during this gap. */
+    val isPreparingVideo: Boolean = false
 )
 
 /**
@@ -70,10 +73,13 @@ class BarPathCaptureViewModel @Inject constructor(
     }
 
     fun onGalleryVideoPicked(uri: Uri) {
+        _uiState.update { it.copy(isPreparingVideo = true) }
         viewModelScope.launch(Dispatchers.Default) {
             val path = barPathVideoImporter.importFromGallery(uri)
             if (path == null) {
-                _uiState.update { it.copy(step = CaptureStep.ERROR, errorMessage = "Couldn't import that video — try again.") }
+                _uiState.update {
+                    it.copy(step = CaptureStep.ERROR, isPreparingVideo = false, errorMessage = "Couldn't import that video — try again.")
+                }
             } else {
                 loadCalibrationFrame(path, failureMessage = "Couldn't read the imported video.")
             }
@@ -81,13 +87,14 @@ class BarPathCaptureViewModel @Inject constructor(
     }
 
     private fun loadCalibrationFrame(path: String, failureMessage: String) {
+        _uiState.update { it.copy(isPreparingVideo = true) }
         viewModelScope.launch(Dispatchers.Default) {
             val frame = runCatching { barPathFrameTracker.extractFirstFrame(path) }.getOrNull()
             _uiState.update {
                 if (frame != null) {
-                    it.copy(step = CaptureStep.CALIBRATING, videoPath = path, calibrationFrame = frame)
+                    it.copy(step = CaptureStep.CALIBRATING, videoPath = path, calibrationFrame = frame, isPreparingVideo = false)
                 } else {
-                    it.copy(step = CaptureStep.ERROR, errorMessage = failureMessage)
+                    it.copy(step = CaptureStep.ERROR, isPreparingVideo = false, errorMessage = failureMessage)
                 }
             }
         }

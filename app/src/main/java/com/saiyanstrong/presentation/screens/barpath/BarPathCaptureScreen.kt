@@ -72,30 +72,45 @@ fun BarPathCaptureScreen(
 
     LaunchedEffect(uiState.isSaved) { if (uiState.isSaved) onDone() }
 
-    Column(Modifier.fillMaxSize().background(MatteBlack)) {
-        Text(
-            "BAR PATH — SET ANALYSIS",
-            color = PowerAmber, fontSize = 15.sp, fontWeight = FontWeight.Black,
-            letterSpacing = 1.5.sp, modifier = Modifier.fillMaxWidth().padding(16.dp)
-        )
-        when (uiState.step) {
-            CaptureStep.RECORDING -> RecordingStep(
-                isStandalone = viewModel.isStandalone,
-                onFinished = viewModel::onRecordingFinished,
-                onGalleryVideoPicked = viewModel::onGalleryVideoPicked
+    Box(Modifier.fillMaxSize().background(MatteBlack)) {
+        Column(Modifier.fillMaxSize()) {
+            Text(
+                "BAR PATH — SET ANALYSIS",
+                color = PowerAmber, fontSize = 15.sp, fontWeight = FontWeight.Black,
+                letterSpacing = 1.5.sp, modifier = Modifier.fillMaxWidth().padding(16.dp)
             )
-            CaptureStep.CALIBRATING -> CalibrationStep(
-                uiState = uiState,
-                isStandalone = viewModel.isStandalone,
-                onTap = viewModel::onCalibrationTap,
-                onResetPoints = viewModel::onResetCalibrationPoints,
-                onReferenceLengthChanged = viewModel::onReferenceLengthChanged,
-                onWeightKgChanged = viewModel::onWeightKgChanged,
-                onConfirm = viewModel::onConfirmCalibration
-            )
-            CaptureStep.PROCESSING -> ProcessingStep()
-            CaptureStep.RESULTS -> ResultsStep(analysis = uiState.analysis, onSave = viewModel::onSave)
-            CaptureStep.ERROR -> ErrorStep(message = uiState.errorMessage, onRetry = viewModel::onRetry)
+            when (uiState.step) {
+                CaptureStep.RECORDING -> RecordingStep(
+                    isStandalone = viewModel.isStandalone,
+                    onFinished = viewModel::onRecordingFinished,
+                    onGalleryVideoPicked = viewModel::onGalleryVideoPicked
+                )
+                CaptureStep.CALIBRATING -> CalibrationStep(
+                    uiState = uiState,
+                    isStandalone = viewModel.isStandalone,
+                    onTap = viewModel::onCalibrationTap,
+                    onResetPoints = viewModel::onResetCalibrationPoints,
+                    onReferenceLengthChanged = viewModel::onReferenceLengthChanged,
+                    onWeightKgChanged = viewModel::onWeightKgChanged,
+                    onConfirm = viewModel::onConfirmCalibration
+                )
+                CaptureStep.PROCESSING -> ProcessingStep()
+                CaptureStep.RESULTS -> ResultsStep(analysis = uiState.analysis, onSave = viewModel::onSave)
+                CaptureStep.ERROR -> ErrorStep(message = uiState.errorMessage, onRetry = viewModel::onRetry)
+            }
+        }
+
+        if (uiState.isPreparingVideo) {
+            Box(
+                Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.75f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    CircularProgressIndicator(color = NeonGreen)
+                    Spacer(Modifier.height(16.dp))
+                    Text("Preparing video…", color = Color.White.copy(alpha = 0.7f), fontSize = 13.sp)
+                }
+            }
         }
     }
 }
