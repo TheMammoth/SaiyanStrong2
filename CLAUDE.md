@@ -1143,6 +1143,43 @@ _(Claude Code appends here after each completed task)_
   itself still shows "POWER:9001" as a baked-in scouter aesthetic graphic (Sprint 8) — that
   is static image asset text, unrelated to this runtime constant, and was left untouched.
   versionCode 32, versionName 0.19.1.
+- [x] Sprint 23 — rest timer sound cues + RPE entry (v0.20.0), per SPEC.md (both features
+  approved via clarifying questions before building — synthesized sounds, bottom-sheet RPE
+  picker, active-workout-only scope, RPE editable on both pending and already-logged rows).
+  (1) `util/RestTimerSoundPlayer.kt` (new, `@Singleton`): `playTick()` via
+  `ToneGenerator(STREAM_MUSIC, TONE_PROP_BEEP2)`; `playGong()` via a hand-rolled `AudioTrack`
+  playing a procedurally generated ~900ms PCM buffer (two detuned low sine partials + an
+  exponential-decay envelope) — no bundled audio assets, no licensing/sourcing question, no new
+  permissions. Both use `STREAM_MUSIC` deliberately (not `STREAM_ALARM`) so a silenced/media-muted
+  phone stays silent.
+  (2) `ActiveWorkoutViewModel.startRestTimerFrom` — the existing countdown coroutine — now calls
+  `playTick()` when `secondsLeft == 3` and `playGong()` right after the `downTo 1` loop completes
+  naturally; cancellation (SKIP, or restarting via `onAdjustRestTimer`) throws
+  `CancellationException` mid-`delay`, so an interrupted countdown never fires the gong — no
+  extra guard needed, it fell out of the existing coroutine shape for free.
+  (3) Mute toggle: `UserPreferencesDataStore.restTimerSoundsEnabled` (boolean key, default true) +
+  `UserRepository`/`Impl` get/set, following the exact `useFemaleDotsFormula`/`defaultRestSeconds`
+  precedent. Settings TRAINING section gains a tap-to-toggle "Rest timer sounds" ON/OFF row,
+  same interaction language as the existing DOTS-formula row right above it.
+  (4) `presentation/components/RpeBottomSheet.kt` (new): `ModalBottomSheet` with the reference
+  screenshot's explanatory line + a 5-column chip grid (6, 6.5, 7, 7.5, 8, 8.5, 9, 9.5, 10) plus
+  a "NO RPE" clear row. `SetLog.rpe`/`set_logs.rpe` already existed end-to-end since Phase 1 —
+  this was purely a UI gap; `PendingSetRow.logSet()` was hardcoding `onLogSet(kg, r, null,
+  isFailure)`, now passes the picked value.
+  (5) Both `PendingSetRow` and `CompletedSetRow` (ActiveWorkoutScreen.kt) gain a small "+ RPE" /
+  "RPE 8.5" chip below the SET/KG/REPS row, tapping it opens `RpeBottomSheet`; selecting a value
+  updates local state immediately for pending rows, and calls `onEdit(...)` immediately for
+  completed rows (same "commit on change" behavior the failure-toggle and steppers already use).
+  `CompletedSetRow.onEdit` and `ActiveWorkoutViewModel.onEditSet` both extended with an `rpe:
+  Float?` parameter threaded alongside the existing weight/reps/failure fields.
+  KNOWN GAP: not device/emulator-tested this session — verified via `assembleGithubDebug`
+  compiling clean only. The gong/tick tone character (frequencies, envelope, duration) is a
+  first-pass guess with no way to preview audio without a real device this session — flagged in
+  SPEC.md as something to tune after hearing it once. Test the full flow (timer running to
+  completion, SKIP suppressing the gong, mute toggle, RPE picker on both pending and completed
+  rows, RPE surviving through to the exercise detail HISTORY tab) on a real device before fully
+  trusting it.
+  versionCode 33, versionName 0.20.0.
 
 ## Release rules
 

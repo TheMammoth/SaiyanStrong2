@@ -66,6 +66,7 @@ fun SettingsScreen(
     val downloadState by viewModel.downloadState.collectAsStateWithLifecycle()
     val useFemaleDots by viewModel.useFemaleDotsFormula.collectAsStateWithLifecycle()
     val defaultRestSeconds by viewModel.defaultRestSeconds.collectAsStateWithLifecycle()
+    val restTimerSoundsEnabled by viewModel.restTimerSoundsEnabled.collectAsStateWithLifecycle()
     val authUser by viewModel.authUser.collectAsStateWithLifecycle()
     val backupInfo by viewModel.backupInfo.collectAsStateWithLifecycle()
     val isSigningIn by viewModel.isSigningIn.collectAsStateWithLifecycle()
@@ -291,6 +292,25 @@ fun SettingsScreen(
                 }
                 Text(
                     "Tap to switch. DOTS scores your squat + bench + deadlift total relative to bodyweight.",
+                    color = Color.White.copy(alpha = 0.35f), fontSize = 11.sp
+                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(SaiyanGray, androidx.compose.foundation.shape.RoundedCornerShape(6.dp))
+                        .clickable { viewModel.onToggleRestTimerSounds(!restTimerSoundsEnabled) }
+                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Rest timer sounds", color = Color.White.copy(alpha = 0.55f), fontSize = 13.sp)
+                    Text(
+                        if (restTimerSoundsEnabled) "ON" else "OFF",
+                        color = NeonGreen, fontSize = 13.sp, fontWeight = FontWeight.Bold
+                    )
+                }
+                Text(
+                    "Tap to switch. Plays a tick at 3s left and a gong when the rest timer hits 0.",
                     color = Color.White.copy(alpha = 0.35f), fontSize = 11.sp
                 )
 

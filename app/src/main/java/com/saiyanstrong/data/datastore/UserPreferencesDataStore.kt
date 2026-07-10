@@ -22,6 +22,7 @@ private val DEFAULT_REST_SECONDS            = intPreferencesKey("default_rest_se
 private val LAST_BACKUP_AT_MS               = longPreferencesKey("last_backup_at_ms")
 private val LAST_BACKUP_VERSION_CODE        = intPreferencesKey("last_backup_version_code")
 private val ONBOARDING_COMPLETE             = booleanPreferencesKey("onboarding_complete")
+private val REST_TIMER_SOUNDS_ENABLED       = booleanPreferencesKey("rest_timer_sounds_enabled")
 
 @Singleton
 class UserPreferencesDataStore @Inject constructor(
@@ -89,6 +90,15 @@ class UserPreferencesDataStore @Inject constructor(
     suspend fun setOnboardingComplete(complete: Boolean) {
         context.userPreferencesDataStore.edit { preferences ->
             preferences[ONBOARDING_COMPLETE] = complete
+        }
+    }
+
+    val restTimerSoundsEnabled: Flow<Boolean> = context.userPreferencesDataStore.data
+        .map { preferences -> preferences[REST_TIMER_SOUNDS_ENABLED] ?: true }
+
+    suspend fun setRestTimerSoundsEnabled(enabled: Boolean) {
+        context.userPreferencesDataStore.edit { preferences ->
+            preferences[REST_TIMER_SOUNDS_ENABLED] = enabled
         }
     }
 }

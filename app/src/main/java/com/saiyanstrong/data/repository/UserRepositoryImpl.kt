@@ -65,4 +65,11 @@ class UserRepositoryImpl @Inject constructor(
     override suspend fun setOnboardingComplete(complete: Boolean) {
         userPreferencesDataStore.setOnboardingComplete(complete)
     }
+
+    override fun getRestTimerSoundsEnabled(): Flow<Boolean> =
+        userPreferencesDataStore.restTimerSoundsEnabled
+
+    override suspend fun setRestTimerSoundsEnabled(enabled: Boolean) {
+        userPreferencesDataStore.setRestTimerSoundsEnabled(enabled)
+    }
 }

@@ -21,4 +21,7 @@ interface UserRepository {
 
     fun getOnboardingComplete(): Flow<Boolean>
     suspend fun setOnboardingComplete(complete: Boolean)
+
+    fun getRestTimerSoundsEnabled(): Flow<Boolean>
+    suspend fun setRestTimerSoundsEnabled(enabled: Boolean)
 }

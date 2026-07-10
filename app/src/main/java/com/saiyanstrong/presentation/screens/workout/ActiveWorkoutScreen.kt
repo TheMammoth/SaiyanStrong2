@@ -66,6 +66,7 @@ import com.saiyanstrong.domain.model.ExerciseLog
 import com.saiyanstrong.domain.model.MuscleGroup
 import com.saiyanstrong.domain.model.SetLog
 import com.saiyanstrong.presentation.components.ConfirmDialog
+import com.saiyanstrong.presentation.components.RpeBottomSheet
 import com.saiyanstrong.presentation.components.SetCell
 import com.saiyanstrong.presentation.components.StepperRow
 import com.saiyanstrong.presentation.components.scanlineTexture
@@ -128,7 +129,7 @@ internal fun ActiveWorkoutContent(
     onExercisePickerDismissed: () -> Unit,
     onAddSetClicked: (Int) -> Unit,
     onLogSet: (Int, Double, Int, Float?, Boolean) -> Unit,
-    onEditSet: (Int, Int, Double, Int, Boolean) -> Unit = { _, _, _, _, _ -> },
+    onEditSet: (Int, Int, Double, Int, Float?, Boolean) -> Unit = { _, _, _, _, _, _ -> },
     onDeleteSet: (Int, Int) -> Unit,
     onSkipRest: () -> Unit,
     onAdjustRest: (Int) -> Unit,
@@ -189,7 +190,7 @@ internal fun ActiveWorkoutContent(
                         defaultRestSeconds = restDurationSeconds,
                         onAddSetClicked = { onAddSetClicked(log.exercise.id) },
                         onLogSet = { kg, reps, rpe, fail -> onLogSet(log.exercise.id, kg, reps, rpe, fail) },
-                        onEditSet = { idx, kg, reps, fail -> onEditSet(log.exercise.id, idx, kg, reps, fail) },
+                        onEditSet = { idx, kg, reps, rpe, fail -> onEditSet(log.exercise.id, idx, kg, reps, rpe, fail) },
                         onDeleteSet = { idx -> onDeleteSet(log.exercise.id, idx) },
                         onSkipRest = onSkipRest,
                         onAdjustRest = onAdjustRest,
@@ -238,7 +239,7 @@ internal fun ExerciseLogCard(
     defaultRestSeconds: Int = 90,
     onAddSetClicked: () -> Unit = {},
     onLogSet: (Double, Int, Float?, Boolean) -> Unit = { _, _, _, _ -> },
-    onEditSet: (Int, Double, Int, Boolean) -> Unit = { _, _, _, _ -> },
+    onEditSet: (Int, Double, Int, Float?, Boolean) -> Unit = { _, _, _, _, _ -> },
     onDeleteSet: (Int) -> Unit = {},
     onSkipRest: () -> Unit = {},
     onAdjustRest: (Int) -> Unit = {},
@@ -320,7 +321,7 @@ internal fun ExerciseLogCard(
                 set = set, setIndex = idx,
                 previousSet = previousSets.getOrNull(idx),
                 stepKg = stepKg,
-                onEdit = { kg, reps, fail -> onEditSet(idx, kg, reps, fail) },
+                onEdit = { kg, reps, rpe, fail -> onEditSet(idx, kg, reps, rpe, fail) },
                 onDelete = { onDeleteSet(idx) },
                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 1.dp)
             )
@@ -366,15 +367,17 @@ private fun CompletedSetRow(
     setIndex: Int,
     previousSet: SetLog?,
     stepKg: Double = 2.5,
-    onEdit: (Double, Int, Boolean) -> Unit,
+    onEdit: (Double, Int, Float?, Boolean) -> Unit,
     onDelete: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     var kgTfv    by remember(set.id, setIndex) { mutableStateOf(TextFieldValue(set.weightKg.fmtKg())) }
     var repsTfv  by remember(set.id, setIndex) { mutableStateOf(TextFieldValue("${set.reps}")) }
     var editFail by remember(set.id, setIndex) { mutableStateOf(set.isFailure) }
+    var editRpe  by remember(set.id, setIndex) { mutableStateOf(set.rpe) }
     var focusedCell by remember { mutableStateOf<String?>(null) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
+    var showRpeSheet by remember { mutableStateOf(false) }
     val kgFocus   = remember { FocusRequester() }
     val repsFocus = remember { FocusRequester() }
     val focusMgr  = LocalFocusManager.current
@@ -386,7 +389,7 @@ private fun CompletedSetRow(
     fun confirm() {
         val kg = kgTfv.text.toDoubleOrNull() ?: set.weightKg
         val r  = repsTfv.text.toIntOrNull()  ?: set.reps
-        onEdit(kg, r, editFail)
+        onEdit(kg, r, editRpe, editFail)
         focusMgr.clearFocus()
     }
 
@@ -396,6 +399,18 @@ private fun CompletedSetRow(
             message = "${set.weightKg.fmtKg()} kg × ${set.reps} will be removed.",
             onConfirm = onDelete,
             onDismiss = { showDeleteConfirm = false }
+        )
+    }
+
+    if (showRpeSheet) {
+        RpeBottomSheet(
+            currentRpe = editRpe,
+            onSelect = { value ->
+                editRpe = value
+                onEdit(kgTfv.text.toDoubleOrNull() ?: set.weightKg, repsTfv.text.toIntOrNull() ?: set.reps, value, editFail)
+                showRpeSheet = false
+            },
+            onDismiss = { showRpeSheet = false }
         )
     }
 
@@ -414,7 +429,7 @@ private fun CompletedSetRow(
                 fontSize = 13.sp, fontWeight = FontWeight.Bold,
                 modifier = Modifier.width(28.dp).clickable {
                     val f = !editFail; editFail = f
-                    onEdit(kgTfv.text.toDoubleOrNull() ?: set.weightKg, repsTfv.text.toIntOrNull() ?: set.reps, f)
+                    onEdit(kgTfv.text.toDoubleOrNull() ?: set.weightKg, repsTfv.text.toIntOrNull() ?: set.reps, editRpe, f)
                 }
             )
             Text(prevText, color = Color.White.copy(alpha = 0.45f), fontSize = 11.sp, modifier = Modifier.weight(1.2f))
@@ -441,16 +456,18 @@ private fun CompletedSetRow(
             ) { Text("✓", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Black) }
         }
 
+        RpeChip(rpe = editRpe, onClick = { showRpeSheet = true })
+
         when (focusedCell) {
             "kg" -> StepperRow(stepLabel = stepKg.fmtKg(), onStep = { direction ->
                 val kg = ((kgTfv.text.toDoubleOrNull() ?: set.weightKg) + direction * stepKg).coerceAtLeast(0.0)
                 kgTfv = TextFieldValue(kg.fmtKg())
-                onEdit(kg, repsTfv.text.toIntOrNull() ?: set.reps, editFail)
+                onEdit(kg, repsTfv.text.toIntOrNull() ?: set.reps, editRpe, editFail)
             })
             "reps" -> StepperRow(stepLabel = "1", onStep = { direction ->
                 val reps = ((repsTfv.text.toIntOrNull() ?: set.reps) + direction).coerceAtLeast(1)
                 repsTfv = TextFieldValue("$reps")
-                onEdit(kgTfv.text.toDoubleOrNull() ?: set.weightKg, reps, editFail)
+                onEdit(kgTfv.text.toDoubleOrNull() ?: set.weightKg, reps, editRpe, editFail)
             })
         }
     }
@@ -471,7 +488,9 @@ private fun PendingSetRow(
     var kgTfv     by remember { mutableStateOf(TextFieldValue(initialWeightKg.fmtKg())) }
     var repsTfv   by remember { mutableStateOf(TextFieldValue("$initialReps")) }
     var isFailure by remember { mutableStateOf(false) }
+    var rpe       by remember { mutableStateOf<Float?>(null) }
     var focusedCell by remember { mutableStateOf<String?>(null) }
+    var showRpeSheet by remember { mutableStateOf(false) }
     val kgFocus   = remember { FocusRequester() }
     val repsFocus = remember { FocusRequester() }
     val focusMgr  = LocalFocusManager.current
@@ -481,8 +500,16 @@ private fun PendingSetRow(
     fun logSet() {
         val kg = (kgTfv.text.toDoubleOrNull() ?: initialWeightKg).coerceAtLeast(0.0)
         val r  = (repsTfv.text.toIntOrNull()  ?: initialReps).coerceAtLeast(1)
-        onLogSet(kg, r, null, isFailure)
+        onLogSet(kg, r, rpe, isFailure)
         focusMgr.clearFocus()
+    }
+
+    if (showRpeSheet) {
+        RpeBottomSheet(
+            currentRpe = rpe,
+            onSelect = { value -> rpe = value; showRpeSheet = false },
+            onDismiss = { showRpeSheet = false }
+        )
     }
 
     Column(modifier = modifier.fillMaxWidth()) {
@@ -528,6 +555,8 @@ private fun PendingSetRow(
             ) { Text("✓", color = NeonGreen, fontSize = 16.sp, fontWeight = FontWeight.Black) }
         }
 
+        RpeChip(rpe = rpe, onClick = { showRpeSheet = true })
+
         when (focusedCell) {
             "kg" -> StepperRow(stepLabel = stepKg.fmtKg(), onStep = { direction ->
                 val kg = ((kgTfv.text.toDoubleOrNull() ?: initialWeightKg) + direction * stepKg).coerceAtLeast(0.0)
@@ -539,6 +568,19 @@ private fun PendingSetRow(
             })
         }
     }
+}
+
+// ── RPE chip (tap to open RpeBottomSheet) ────────────────────────────────────
+
+@Composable
+private fun RpeChip(rpe: Float?, onClick: () -> Unit) {
+    val label = rpe?.let { if (it == it.toInt().toFloat()) "RPE ${it.toInt()}" else "RPE $it" } ?: "+ RPE"
+    Text(
+        label,
+        color = if (rpe != null) NeonGreen else Color.White.copy(alpha = 0.35f),
+        fontSize = 11.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace,
+        modifier = Modifier.padding(top = 2.dp, start = 30.dp).clickable(onClick = onClick)
+    )
 }
 
 // ── Rest timer bar ────────────────────────────────────────────────────────────

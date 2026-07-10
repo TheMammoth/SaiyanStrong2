@@ -172,6 +172,13 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
+    val restTimerSoundsEnabled: StateFlow<Boolean> = userRepository.getRestTimerSoundsEnabled()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), true)
+
+    fun onToggleRestTimerSounds(enabled: Boolean) {
+        viewModelScope.launch { userRepository.setRestTimerSoundsEnabled(enabled) }
+    }
+
     private val _checkState = MutableStateFlow<UpdateCheckState>(UpdateCheckState.Idle)
     val checkState: StateFlow<UpdateCheckState> = _checkState.asStateFlow()
 

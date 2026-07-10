@@ -13,6 +13,7 @@ import com.saiyanstrong.domain.repository.UserRepository
 import com.saiyanstrong.domain.usecase.CompleteSessionUseCase
 import com.saiyanstrong.domain.usecase.GetLastSessionSetsUseCase
 import com.saiyanstrong.domain.usecase.LogSetUseCase
+import com.saiyanstrong.util.RestTimerSoundPlayer
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -51,6 +52,7 @@ class ActiveWorkoutViewModel @Inject constructor(
     private val getLastSessionSetsUseCase: GetLastSessionSetsUseCase,
     private val templateRepository: TemplateRepository,
     private val sessionRepository: SessionRepository,
+    private val restTimerSoundPlayer: RestTimerSoundPlayer,
     userRepository: UserRepository
 ) : ViewModel() {
 
@@ -66,6 +68,8 @@ class ActiveWorkoutViewModel @Inject constructor(
     private val _defaultRestSeconds = MutableStateFlow(REST_DURATION_SECONDS)
     val defaultRestSeconds: StateFlow<Int> = _defaultRestSeconds.asStateFlow()
 
+    private val _restTimerSoundsEnabled = MutableStateFlow(true)
+
     init {
         combine(
             exerciseRepository.getAllExercises(),
@@ -76,6 +80,10 @@ class ActiveWorkoutViewModel @Inject constructor(
 
         userRepository.getDefaultRestSeconds()
             .onEach { _defaultRestSeconds.value = it }
+            .launchIn(viewModelScope)
+
+        userRepository.getRestTimerSoundsEnabled()
+            .onEach { _restTimerSoundsEnabled.value = it }
             .launchIn(viewModelScope)
 
         // Preload exercises when launched from the workout landing screen
@@ -212,13 +220,13 @@ class ActiveWorkoutViewModel @Inject constructor(
         }
     }
 
-    fun onEditSet(exerciseId: Int, setIndex: Int, weightKg: Double, reps: Int, isFailure: Boolean) {
+    fun onEditSet(exerciseId: Int, setIndex: Int, weightKg: Double, reps: Int, rpe: Float?, isFailure: Boolean) {
         _uiState.update { state ->
             val exerciseLogs = state.exerciseLogs.map { log ->
                 if (log.exercise.id != exerciseId) log
                 else {
                     val updated = log.sets.mapIndexed { i, s ->
-                        if (i == setIndex) s.copy(weightKg = weightKg, reps = reps, isFailure = isFailure, volumeKg = weightKg * reps)
+                        if (i == setIndex) s.copy(weightKg = weightKg, reps = reps, rpe = rpe, isFailure = isFailure, volumeKg = weightKg * reps)
                         else s
                     }
                     log.copy(sets = updated)
@@ -259,8 +267,10 @@ class ActiveWorkoutViewModel @Inject constructor(
         restTimerJob = viewModelScope.launch {
             for (secondsLeft in seconds downTo 1) {
                 _uiState.update { it.copy(restTimerSecondsRemaining = secondsLeft) }
+                if (secondsLeft == 3) restTimerSoundPlayer.playTick(_restTimerSoundsEnabled.value)
                 delay(1_000)
             }
+            restTimerSoundPlayer.playGong(_restTimerSoundsEnabled.value)
             _uiState.update { it.copy(restTimerSecondsRemaining = null, restTimerForExerciseId = null) }
         }
     }
