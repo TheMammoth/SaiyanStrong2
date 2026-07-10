@@ -24,4 +24,7 @@ interface UserRepository {
 
     fun getRestTimerSoundsEnabled(): Flow<Boolean>
     suspend fun setRestTimerSoundsEnabled(enabled: Boolean)
+
+    fun getBarPathTipsDismissed(): Flow<Boolean>
+    suspend fun setBarPathTipsDismissed(dismissed: Boolean)
 }

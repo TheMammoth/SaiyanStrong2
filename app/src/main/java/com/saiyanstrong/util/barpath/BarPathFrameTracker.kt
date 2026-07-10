@@ -65,12 +65,13 @@ internal fun chooseTrackedBlob(blobs: List<Blob>, previousCentroid: Pair<Double,
 }
 
 /**
- * Extracts frames from a recorded video and tracks the marker's centroid per frame via
- * [MarkerColorMatcher]. First real-footage test (Sprint 28 follow-up) surfaced the expected
- * failure mode: a naive centroid of every matching pixel in the frame snaps toward any other
- * object in the room that happens to match the color threshold (a pink bucket, a lavender
- * towel), producing one huge spurious frame-to-frame jump. Fixed with connected-component blob
- * detection ([findBlobs]) + nearest-neighbor tracking across frames ([chooseTrackedBlob]).
+ * Extracts frames from a recorded video and tracks the marker's centroid per frame against a
+ * [MarkerColorProfile] sampled from the user's actual marker (not a fixed guessed threshold —
+ * see the "tap-to-calibrate color" follow-up). First real-footage test (Sprint 28) surfaced the
+ * expected failure mode: a naive centroid of every matching pixel in the frame snaps toward any
+ * other object in the room that happens to match the color threshold, producing one huge
+ * spurious frame-to-frame jump. Fixed with connected-component blob detection ([findBlobs]) +
+ * nearest-neighbor tracking across frames ([chooseTrackedBlob]).
  */
 class BarPathFrameTracker @Inject constructor() {
 
@@ -94,6 +95,7 @@ class BarPathFrameTracker @Inject constructor() {
      */
     fun trackMarker(
         videoPath: String,
+        colorProfile: MarkerColorProfile,
         sampleIntervalMs: Long = 33,
         downscaleFactor: Double = 0.25
     ): List<BarPathSample> {
@@ -110,7 +112,7 @@ class BarPathFrameTracker @Inject constructor() {
             while (timestampMs <= durationMs) {
                 val frame = retriever.getFrameAtTime(timestampMs * 1000, MediaMetadataRetriever.OPTION_CLOSEST)
                 if (frame != null) {
-                    findMarkerCentroid(frame, downscaleFactor, previousCentroid)?.let { (x, y) ->
+                    findMarkerCentroid(frame, colorProfile, downscaleFactor, previousCentroid)?.let { (x, y) ->
                         samples += BarPathSample(timestampMs, x, y)
                         previousCentroid = x to y
                     }
@@ -130,6 +132,7 @@ class BarPathFrameTracker @Inject constructor() {
      */
     private fun findMarkerCentroid(
         frame: Bitmap,
+        colorProfile: MarkerColorProfile,
         downscaleFactor: Double,
         previousCentroidPx: Pair<Double, Double>?
     ): Pair<Double, Double>? {
@@ -142,7 +145,7 @@ class BarPathFrameTracker @Inject constructor() {
             for (x in 0 until scaledWidth) {
                 val pixel = scaled.getPixel(x, y)
                 mask[y * scaledWidth + x] =
-                    MarkerColorMatcher.matchesRgb(Color.red(pixel), Color.green(pixel), Color.blue(pixel))
+                    colorProfile.matches(Color.red(pixel), Color.green(pixel), Color.blue(pixel))
             }
         }
         scaled.recycle()

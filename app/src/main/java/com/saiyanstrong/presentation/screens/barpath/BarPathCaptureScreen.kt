@@ -2,6 +2,7 @@ package com.saiyanstrong.presentation.screens.barpath
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -53,6 +54,7 @@ import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.saiyanstrong.domain.model.BarPathAnalysis
+import com.saiyanstrong.domain.model.BarPathSample
 import com.saiyanstrong.presentation.components.SaiyanButton
 import com.saiyanstrong.presentation.theme.DangerRed
 import com.saiyanstrong.presentation.theme.MatteBlack
@@ -69,6 +71,7 @@ fun BarPathCaptureScreen(
     viewModel: BarPathCaptureViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val tipsDismissed by viewModel.tipsDismissed.collectAsStateWithLifecycle()
 
     LaunchedEffect(uiState.isSaved) { if (uiState.isSaved) onDone() }
 
@@ -82,6 +85,8 @@ fun BarPathCaptureScreen(
             when (uiState.step) {
                 CaptureStep.RECORDING -> RecordingStep(
                     isStandalone = viewModel.isStandalone,
+                    tipsDismissed = tipsDismissed,
+                    onDismissTips = viewModel::onDismissTips,
                     onFinished = viewModel::onRecordingFinished,
                     onGalleryVideoPicked = viewModel::onGalleryVideoPicked
                 )
@@ -95,7 +100,12 @@ fun BarPathCaptureScreen(
                     onConfirm = viewModel::onConfirmCalibration
                 )
                 CaptureStep.PROCESSING -> ProcessingStep()
-                CaptureStep.RESULTS -> ResultsStep(analysis = uiState.analysis, onSave = viewModel::onSave)
+                CaptureStep.RESULTS -> ResultsStep(
+                    analysis = uiState.analysis,
+                    calibrationFrame = uiState.calibrationFrame,
+                    trackedSamples = uiState.trackedSamples,
+                    onSave = viewModel::onSave
+                )
                 CaptureStep.ERROR -> ErrorStep(message = uiState.errorMessage, onRetry = viewModel::onRetry)
             }
         }
@@ -118,6 +128,8 @@ fun BarPathCaptureScreen(
 @Composable
 private fun RecordingStep(
     isStandalone: Boolean,
+    tipsDismissed: Boolean,
+    onDismissTips: () -> Unit,
     onFinished: (String?) -> Unit,
     onGalleryVideoPicked: (android.net.Uri) -> Unit = {}
 ) {
@@ -145,10 +157,13 @@ private fun RecordingStep(
 
     Column(Modifier.fillMaxSize().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         Text(
-            "Attach a bright pink/magenta marker to the bar. Point the camera so the full range of motion stays in frame.",
+            "Attach a bright, distinctly-colored marker to the bar. Point the camera so the full range of motion stays in frame.",
             color = Color.White.copy(alpha = 0.6f), fontSize = 12.sp,
             modifier = Modifier.padding(bottom = 12.dp)
         )
+        if (!tipsDismissed) {
+            BarPathTipsCard(onDismiss = onDismissTips, modifier = Modifier.padding(bottom = 12.dp))
+        }
         if (isStandalone) {
             Row(Modifier.fillMaxWidth().padding(bottom = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(
@@ -208,6 +223,40 @@ private fun RecordingStep(
 }
 
 @Composable
+private fun BarPathTipsCard(onDismiss: () -> Unit, modifier: Modifier = Modifier) {
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .background(SaiyanGray, androidx.compose.foundation.shape.RoundedCornerShape(6.dp))
+            .padding(horizontal = 12.dp, vertical = 10.dp)
+    ) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                "TIPS FOR AN ACCURATE READING", color = PowerAmber, fontSize = 11.sp,
+                fontWeight = FontWeight.Black, letterSpacing = 1.sp, modifier = Modifier.weight(1f)
+            )
+            Text(
+                "✕", color = Color.White.copy(alpha = 0.5f), fontSize = 14.sp,
+                modifier = Modifier.padding(4.dp).pointerInput(Unit) {
+                    detectTapGestures { onDismiss() }
+                }
+            )
+        }
+        Spacer(Modifier.height(6.dp))
+        listOf(
+            "Marker color should stand out from everything else in frame — avoid backgrounds with similar colors.",
+            "Calibrate against something rigid, in the same plane as the bar's travel (a plate diameter or bar sleeve).",
+            "Keep the camera still, perpendicular to the bar's path, with the full range of motion in frame."
+        ).forEach { tip ->
+            Text(
+                "•  $tip", color = Color.White.copy(alpha = 0.7f), fontSize = 11.sp,
+                modifier = Modifier.padding(top = 3.dp)
+            )
+        }
+    }
+}
+
+@Composable
 private fun CalibrationStep(
     uiState: BarPathCaptureUiState,
     isStandalone: Boolean,
@@ -221,9 +270,16 @@ private fun CalibrationStep(
     var boxWidthPx by remember { mutableStateOf(1f) }
     var boxHeightPx by remember { mutableStateOf(1f) }
 
+    val instruction = when {
+        uiState.markerSamplePoint == null -> "Tap the marker on the bar in this frame."
+        uiState.calibrationPoint1 == null || uiState.calibrationPoint2 == null ->
+            "Now tap two points of known length (a plate diameter, the bar sleeve)."
+        else -> "Ready — RESET POINTS to redo, or ANALYZE to continue."
+    }
+
     Column(Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState())) {
         Text(
-            "Tap two points on something of known length (a plate diameter, the bar sleeve) in this frame.",
+            instruction,
             color = Color.White.copy(alpha = 0.6f), fontSize = 12.sp, modifier = Modifier.padding(bottom = 10.dp)
         )
         if (frame != null) {
@@ -245,6 +301,9 @@ private fun CalibrationStep(
                 Canvas(Modifier.fillMaxSize()) {
                     val scaleX = boxWidthPx / frame.width
                     val scaleY = boxHeightPx / frame.height
+                    uiState.markerSamplePoint?.let {
+                        drawCircle(color = PowerAmber, radius = 14f, center = Offset(it.xPx * scaleX, it.yPx * scaleY))
+                    }
                     uiState.calibrationPoint1?.let {
                         drawCircle(color = MarkerGreen, radius = 12f, center = Offset(it.xPx * scaleX, it.yPx * scaleY))
                     }
@@ -319,9 +378,26 @@ private fun ProcessingStep() {
 }
 
 @Composable
-private fun ResultsStep(analysis: BarPathAnalysis?, onSave: () -> Unit) {
+private fun ResultsStep(
+    analysis: BarPathAnalysis?,
+    calibrationFrame: Bitmap? = null,
+    trackedSamples: List<BarPathSample> = emptyList(),
+    onSave: () -> Unit
+) {
     if (analysis == null) return
-    Column(Modifier.fillMaxSize().padding(16.dp)) {
+    Column(Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState())) {
+        if (calibrationFrame != null && trackedSamples.size >= 2) {
+            Text(
+                "TRACKED PATH", color = PowerAmber, fontSize = 11.sp,
+                fontWeight = FontWeight.Black, letterSpacing = 1.sp, modifier = Modifier.padding(bottom = 6.dp)
+            )
+            TrackedPathPreview(
+                frame = calibrationFrame,
+                samples = trackedSamples,
+                modifier = Modifier.fillMaxWidth().heightIn(max = 280.dp)
+            )
+            Spacer(Modifier.height(16.dp))
+        }
         ResultRow("Peak velocity", "%.2f m/s".format(analysis.peakVelocityMs))
         ResultRow("Mean concentric velocity", "%.2f m/s".format(analysis.meanConcentricVelocityMs))
         ResultRow("Zone", analysis.velocityZone.label)
@@ -333,6 +409,35 @@ private fun ResultsStep(analysis: BarPathAnalysis?, onSave: () -> Unit) {
         Spacer(Modifier.height(20.dp))
         SaiyanButton(onClick = onSave, modifier = Modifier.fillMaxWidth()) {
             Text("SAVE TO SET  >>>", fontWeight = FontWeight.Black)
+        }
+    }
+}
+
+@Composable
+private fun TrackedPathPreview(frame: Bitmap, samples: List<BarPathSample>, modifier: Modifier = Modifier) {
+    var boxWidthPx by remember { mutableStateOf(1f) }
+    var boxHeightPx by remember { mutableStateOf(1f) }
+
+    Box(
+        modifier
+            .aspectRatio(frame.width.toFloat() / frame.height.toFloat())
+            .onSizeChanged { size -> boxWidthPx = size.width.toFloat(); boxHeightPx = size.height.toFloat() }
+    ) {
+        Image(bitmap = frame.asImageBitmap(), contentDescription = null, modifier = Modifier.fillMaxSize())
+        Canvas(Modifier.fillMaxSize()) {
+            val scaleX = boxWidthPx / frame.width
+            val scaleY = boxHeightPx / frame.height
+            val points = samples.map { Offset(it.xPx.toFloat() * scaleX, it.yPx.toFloat() * scaleY) }
+
+            for (i in 0 until points.size - 1) {
+                drawLine(
+                    color = NeonGreen.copy(alpha = 0.75f),
+                    start = points[i], end = points[i + 1],
+                    strokeWidth = 4f
+                )
+            }
+            points.firstOrNull()?.let { drawCircle(color = NeonGreen, radius = 8f, center = it) }
+            points.lastOrNull()?.let { drawCircle(color = DangerRed, radius = 8f, center = it) }
         }
     }
 }

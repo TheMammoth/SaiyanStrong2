@@ -1443,6 +1443,50 @@ _(Claude Code appends here after each completed task)_
   robustness against background clutter, but whether it produces genuinely plausible velocity
   numbers this time still needs a real device retest.
   versionCode 39, versionName 0.25.1.
+- [x] Sprint 29 — best-effort VBT: tap-to-calibrate color, tracked-path preview, usage tips
+  (v0.26.0): user asked "build me the best VBT option possible" after the first real-footage
+  test. Also answered a real technical question in the same session: NFC/AirTags are not viable
+  for this — NFC is proximity-only with no positional tracking, and AirTags' UWB ranging data
+  isn't exposed to third-party apps via any public API even in principle, so camera + colored
+  marker remains the correct (not just cheapest) approach; a physical linear position
+  transducer or wearable IMU would work but requires the user to buy separate hardware, out of
+  scope for an app feature.
+  (1) **Tap-to-calibrate marker color** — the single highest-leverage fix available without new
+  hardware, targeting the exact failure mode from the first real test (a fixed guessed
+  hue/saturation/value threshold matched a background object). New `util/barpath/
+  MarkerColorProfile.kt` (pure, no Android dependency): `sample(r,g,b)` builds a profile
+  centered on a real sampled color (saturation/value floors set below the sample — an explicit,
+  documented approximation for lighting variation across a clip, same style as `RpeChart`);
+  `matches(r,g,b)` uses circular hue distance (hue wraps at 360°, so 350° and 10° are 20° apart,
+  not 340° — directly unit-tested); `default()` is a defensive-only fallback matching the old
+  fixed range. Calibration is now a 3-tap sequence: tap the marker itself first (averaged over a
+  small pixel neighborhood around the tap to reduce single-pixel noise — new
+  `BarPathCaptureViewModel.sampleMarkerColor`), then the existing two reference-length taps;
+  dynamic instruction text tracks which tap is next, and the marker-sample dot renders in
+  `PowerAmber` distinct from the green reference-point dots. `BarPathFrameTracker.trackMarker`/
+  `findMarkerCentroid` now take a `MarkerColorProfile` parameter instead of the hardcoded
+  `MarkerColorMatcher.matchesRgb` call — Sprint 28's blob-detection + nearest-neighbor tracking
+  fix is unchanged, only *what counts as a match* changed. 6 new unit tests
+  (`MarkerColorProfileTest.kt`).
+  (2) **Tracked path preview** — turns "trust the number" into "see the tracking worked."
+  `BarPathCaptureUiState` gained `trackedSamples: List<BarPathSample>`, populated from the same
+  samples already used to compute `BarPathAnalysis` (no extra tracking pass). New
+  `TrackedPathPreview` composable on the RESULTS screen draws the tracked path as a polyline
+  over the calibration frame (reusing `CalibrationStep`'s existing frame-to-box scaling
+  approach), green dot at the start, red dot at the end — a jagged or jumping line makes bad
+  tracking visually obvious before the user taps SAVE TO SET, rather than presenting an opaque
+  number as gospel.
+  (3) **Dismissible usage tips** — `UserPreferencesDataStore`/`UserRepository`/`Impl` gained
+  `barPathTipsDismissed` (same dismiss-and-remember pattern as `lastDismissedUpdateVersion`).
+  `RecordingStep` shows a small card (marker-vs-background contrast, calibration object choice,
+  camera placement) until dismissed once, then never again — same UX language as the existing
+  update banner's dismiss.
+  KNOWN GAP unchanged: none of this has been re-tested against real footage yet this session —
+  the tap-to-calibrate color sampling and path preview are new surface area that should help,
+  but "should help" isn't "verified." Real-time/live tracking during recording remains
+  explicitly out of scope (different architecture, noted again per the user's original
+  question) — worth its own spec if the post-record wait is still a problem after this.
+  versionCode 40, versionName 0.26.0.
 
 ## Release rules
 

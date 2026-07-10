@@ -1,195 +1,111 @@
-# SaiyanStrong — Standalone Bar Path Analysis (Free-Tier Gated)
+# SaiyanStrong — Best-Effort VBT: Tap-to-Calibrate Color + Path Preview + Tips
 
-## Status: SPEC — not yet built.
+## Status: BUILT (v0.26.0) — see CLAUDE.md "Sprint 29".
 
-(Replaces the previous "VBT Results UI" spec in this file — that shipped as v0.24.0; see
-CLAUDE.md "Sprint 27". This spec covers the actual production-grade release of VBT: a
-first-class entry point instead of a buried ⋮ menu item, gallery-video import, and the
-free/Coach monetization gate.)
+(Replaces the previous "Standalone Bar Path Analysis" spec in this file — that shipped as
+v0.25.0/v0.25.1; see CLAUDE.md "Sprint 28" and the marker-tracking fix entry. This spec is the
+answer to "build me the best VBT option possible" — the highest-leverage improvements available
+to the existing camera + colored-marker approach, no new hardware.)
 
 ---
 
 ## 0. Decisions locked in via clarifying questions
 
-- **Entry point**: a card on `HomeScreen` (below `BodyWeightCard`, above the pinned CTA),
-  not a new bottom-nav tab. Directly fixes yesterday's real user confusion (couldn't find
-  the recording entry point).
-- **Freestanding, not set-linked**: user picks *which exercise* the video is for, not a
-  specific logged set. No workout session required. `bar_path_metrics` becomes exercise-
-  scoped with an optional set link, not exclusively set-scoped.
-- **Free limit**: 5 analyses per **calendar month** for non-Coach users, derived live from
-  data — not a separately maintained counter (same fix pattern as the Power Level bug,
-  CLAUDE.md v0.18.1: counters drift, live queries don't).
-- **Unlocked by**: existing Coach entitlement (`IsCoachUseCase` / `is_coach()`), reused
-  as-is. No new Paddle product, no new Supabase column. Coach effectively becomes a
-  general "Pro" tier for this feature — that's an intentional repositioning, not scope
-  creep, since it's the same billing surface already built and live.
-- **Video source**: both in-app record (reuse existing `BarPathVideoRecorder`) and gallery
-  import (Android Photo Picker, no storage permission) — scoped to *this* standalone flow
-  only. The existing set-linked capture flow from the ⋮ menu (Sprint 26, still unverified
-  on real footage) is left exactly as-is; not touched by this sprint beyond the shared
-  calibration/tracking/results steps it already uses.
-- **Weight input**: standalone flow has no set to pull `weightKg` from, so the calibration
-  screen gains a plain "weight lifted (kg)" field, same validation pattern as the existing
-  reference-length field.
-- **Schema**: `bar_path_metrics.set_log_id` becomes nullable (same table, not a parallel
-  one) so the existing per-exercise velocity chart in `ExerciseDetailScreen` picks up
-  freestanding rows for free, no second query path needed anywhere data is displayed.
+- **Tap-to-calibrate marker color**: yes. Replaces `MarkerColorMatcher`'s fixed, guessed
+  hue/saturation/value thresholds with a color sampled from the user's actual marker in their
+  actual lighting/background, every time they record. This is the single highest-leverage fix
+  available without new hardware — it directly targets the exact failure mode that broke the
+  first real test (background objects sharing the fixed threshold's hue range).
+- **Path preview**: yes. After tracking, draw the tracked path as a line over the first frame
+  so the user can visually confirm tracking followed the real bar before trusting the numbers,
+  rather than being asked to trust an opaque number.
+- **Tips**: a small, dismissible card on the `RECORDING` step (marker color, calibration
+  object, camera placement) — dismissal persists via DataStore (same pattern as the existing
+  update-banner dismiss), so it stays out of the way once acknowledged but isn't buried behind
+  a tap the first several times.
 
 ---
 
 ## 1. Objective
 
-Two real problems from yesterday's device test, fixed together because they're the same
-underlying gap:
-1. **Discoverability** — bar path capture was 3+ steps deep in an active workout, hidden
-   in a ⋮ menu, with zero entry point on Home/Settings. A user actively trying to test it
-   couldn't find it.
-2. **No way to analyze a video not tied to a live logged set** — e.g. a lift recorded
-   earlier, or recorded with the phone's native camera app rather than in-app.
-
-This also introduces the feature's monetization gate: unlimited use requires the existing
-Coach entitlement; free users get 5 standalone analyses/month.
+The marker-tracking pipeline works end-to-end now (Sprint 28's blob-detection fix), but a fixed
+guessed color threshold and "trust the numbers with no way to verify" are the two biggest
+remaining trust gaps. Close both, plus reduce the "why is this pink and not that pink" learning
+curve with in-app guidance — all within the existing record/import → calibrate → analyze
+architecture, no new hardware, no live/real-time tracking (that's a different architecture,
+explicitly out of scope here, same as noted in the prior sprint's KNOWN GAP).
 
 ---
 
 ## 2. Core features & acceptance criteria
 
-### 2.1 Real plumbing change this needs first: `bar_path_metrics` is no longer 1:1 with a set
-Today: `set_log_id` is `NOT NULL` + unique-indexed, because only the workout ⋮-menu flow
-ever wrote to this table. A freestanding analysis has no set. Schema change (Room v8→9,
-**table-recreate migration** — SQLite can't alter a column's `NOT NULL`/index in place):
+### 2.1 Tap-to-calibrate marker color
+- New `domain` (well, `util/barpath`) type `MarkerColorProfile(hueCenter: Double, hueTolerance:
+  Double, minSaturation: Double, minValue: Double)` with `fun matches(r: Int, g: Int, b: Int):
+  Boolean` — reuses `MarkerColorMatcher.rgbToHsv` (unchanged, still pure/tested) for the
+  conversion. Hue comparison is circular (`min(|a-b|, 360-|a-b|)`) since hue wraps at 360°.
+- `MarkerColorProfile.sample(r, g, b)`: builds a profile centered on the sampled hue, with
+  saturation/value floors set *below* the sample (documented approximation: sample −0.25,
+  floored at 0.2) so real-world lighting variation across the clip doesn't fall outside the
+  matched range — same "explicit approximation, not silent" style as `RpeChart`.
+  `MarkerColorProfile.default()` keeps the old fixed magenta range as a fallback constant (used
+  only if sampling somehow fails — the flow always requires a real tap, this is defensive, not
+  a normal path).
+- Calibration screen becomes a 3-tap sequence, not 2: **first tap = the marker itself** (sampled
+  as the average RGB of a small pixel neighborhood around the tap, not a single noisy pixel),
+  then the existing two reference-length taps. Dynamic instruction text tracks which tap is
+  next. The marker-sample dot renders in `PowerAmber` (distinct from the existing `MarkerGreen`
+  reference-point dots). The existing "RESET POINTS" button clears all three taps together —
+  one "start over on this frame" action, not three separate resets.
+- `BarPathCaptureViewModel.onConfirmCalibration` requires a non-null color profile (sampled from
+  the marker tap) in addition to the two reference points before proceeding; error message
+  mirrors the existing "tap two points" one.
+- `BarPathFrameTracker.trackMarker`/`findMarkerCentroid` take a `MarkerColorProfile` parameter
+  and call `profile.matches(...)` instead of the old hardcoded `MarkerColorMatcher.matchesRgb`.
+  Blob detection + nearest-neighbor tracking (Sprint 28 fix) is unchanged — this only changes
+  *what counts as a match*, not how matches are grouped/tracked.
+- **Acceptance**: recording the same clip with a marker color the fixed threshold used to miss
+  or a background color it used to falsely match should track correctly once the real color is
+  sampled, because the match range is now centered on reality instead of a guess.
 
-```
-CREATE TABLE bar_path_metrics_new (
-  id                          INTEGER PRIMARY KEY AUTOINCREMENT,
-  set_log_id                  INTEGER,              -- now nullable
-  exercise_id                 INTEGER NOT NULL,      -- new
-  created_at_ms                INTEGER NOT NULL,      -- new (was implicit via the set's timestamp)
-  peak_velocity_ms             REAL NOT NULL,
-  mean_concentric_velocity_ms  REAL NOT NULL,
-  peak_power_watts             REAL NOT NULL,
-  mean_power_watts             REAL NOT NULL,
-  range_of_motion_cm           REAL NOT NULL,
-  bar_path_deviation_cm        REAL NOT NULL,
-  velocity_zone                TEXT NOT NULL,
-  FOREIGN KEY(set_log_id) REFERENCES set_logs(id) ON DELETE CASCADE,
-  FOREIGN KEY(exercise_id) REFERENCES exercises(id)
-)
-```
-Backfill for existing rows: `exercise_id` via `set_logs → exercise_logs → exercise_id`
-join; `created_at_ms` via the set's `timestamp_ms` (best-effort — it's the moment the set
-was logged, close enough for existing rows). Then copy, drop old table, rename, recreate
-a **non-unique** index on `set_log_id` and an index on `exercise_id` and `created_at_ms`
-(the last one for the monthly-quota range scan).
+### 2.2 Tracked path preview
+- `BarPathCaptureUiState` gains `trackedSamples: List<BarPathSample> = emptyList()`, populated
+  in `onConfirmCalibration` right after `barPathFrameTracker.trackMarker(...)` succeeds (the
+  same samples already used to compute `BarPathAnalysis` — no extra tracking pass).
+- `ResultsStep` gains a "TRACKED PATH" section above the stat rows: the stored
+  `calibrationFrame` bitmap with a `Canvas` polyline overlay connecting `trackedSamples` in
+  pixel order (same box-sizing/scale pattern `CalibrationStep`'s tap-point dots already use —
+  `onSizeChanged` + a scale factor from frame space to displayed box space). Start point marked
+  distinctly (small green dot) from the end point (small red dot) so direction is visible at a
+  glance; the line itself in a semi-transparent `NeonGreen`.
+- **Acceptance**: a clean track (Sprint 28's fixed footage, hopefully) shows a smooth line
+  roughly following the bar's real path. A noisy/bad track visibly shows a jagged or jumping
+  line — the point is exactly to make bad tracking visually obvious before the user trusts the
+  numbers or taps SAVE TO SET.
 
-The old unique index on `set_log_id` is dropped on purpose: "one bar-path row per set" is
-now an **app-layer invariant**, not a DB one — `BarPathRepositoryImpl.saveBarPathMetrics`
-(the existing set-linked path) does a delete-then-insert inside one call instead of
-relying on `OnConflictStrategy.REPLACE` + a unique index. This is a real, deliberate
-simplification, not an oversight — SQLite partial unique indexes aren't expressible via
-Room's `@Index` annotation, and inventing a workaround there is worse than just enforcing
-it in the one place that writes set-linked rows.
-
-`BarPathMetricsEntity` gains `exerciseId: Long` (was implicit) and `createdAtMs: Long`;
-`setLogId` becomes `Long?`.
-
-### 2.2 Repository/DAO additions
-```kotlin
-// BarPathMetricsDao
-@Query("SELECT * FROM bar_path_metrics WHERE exercise_id = :exerciseId AND set_log_id IS NULL ORDER BY created_at_ms DESC")
-fun getFreestandingForExercise(exerciseId: Int): Flow<List<BarPathMetricsEntity>>
-
-@Query("SELECT COUNT(*) FROM bar_path_metrics WHERE set_log_id IS NULL AND created_at_ms >= :monthStartMs")
-fun countFreestandingSince(monthStartMs: Long): Flow<Int>
-```
-```kotlin
-// BarPathRepository — additive, existing set-linked methods unchanged
-suspend fun saveFreestandingBarPathMetrics(exerciseId: Int, weightKg: Double, analysis: BarPathAnalysis)
-fun getFreestandingAnalysesForExercise(exerciseId: Int): Flow<List<BarPathAnalysis>>
-fun getFreestandingCountThisMonth(): Flow<Int>
-```
-New `domain/usecase/GetBarPathQuotaUseCase.kt` (mirrors `IsCoachUseCase`'s "one shared
-check" precedent):
-```kotlin
-data class BarPathQuota(val usedThisMonth: Int, val limit: Int = 5, val isUnlimited: Boolean)
-class GetBarPathQuotaUseCase @Inject constructor(
-    private val barPathRepository: BarPathRepository,
-    private val isCoachUseCase: IsCoachUseCase
-) {
-    fun execute(): Flow<BarPathQuota> = combine(
-        barPathRepository.getFreestandingCountThisMonth(),
-        flow { emit(isCoachUseCase.execute()) }
-    ) { count, isCoach -> BarPathQuota(count, isUnlimited = isCoach) }
-}
-```
-
-### 2.3 Home card
-New `HomeScreen` composable `BarPathCard`, placed after `BodyWeightCard`:
-- Title "BAR PATH ANALYSIS", subtitle either "X/5 analyses this month" (free) or
-  "UNLIMITED · COACH" (entitled) — amber for the free count when `used >= limit`, neon
-  green otherwise, matching existing token usage elsewhere on this screen.
-- "NEW ANALYSIS" button:
-  - Quota available → opens the existing `ExercisePickerSheet` (already used by
-    `ActiveWorkoutScreen`/`ExercisePickerSheet.kt`, reused verbatim) to pick which
-    exercise the video is for, then navigates to `BarPathCapture` in standalone mode.
-  - Quota exhausted, not Coach → `ConfirmDialog`-style upsell ("Free limit reached — 5/5
-    this month. Coach unlocks unlimited analyses.") with an UPGRADE button that opens the
-    same Paddle web-checkout URL `CoachSettingsScreen` already opens (reuse, no new
-    checkout surface).
-- `HomeViewModel` gains `barPathQuota: StateFlow<BarPathQuota>` from
-  `GetBarPathQuotaUseCase` — same pattern as the existing `dotsScore`/`bodyWeightLogs`
-  StateFlows already on this ViewModel.
-
-### 2.4 Capture flow — standalone mode
-`Screen.BarPathCapture` route changes from `bar_path_capture/{setLogId}/{weightKg}` to
-`bar_path_capture?exerciseId={exerciseId}&setLogId={setLogId}&weightKg={weightKg}`:
-- From the workout ⋮ menu (existing, unchanged behavior): `exerciseId` + real `setLogId`
-  + real `weightKg` — calibration screen behaves exactly as it does today, no weight
-  field shown.
-- From the Home card (new): `exerciseId` + `setLogId=-1` (sentinel, matches the existing
-  `templateId=-1`/`repeatLast` convention already used by `ActiveWorkout`'s route) +
-  `weightKg=-1`. `BarPathCaptureViewModel` treats `setLogId <= 0` as "standalone."
-
-`RecordingStep` gains a source choice **only when standalone** (`isStandalone` from the
-ViewModel): a small row above the existing RECORD button — "RECORD" (unchanged, existing
-`BarPathVideoRecorder`) or "IMPORT FROM GALLERY" (new). Gallery import uses
-`ActivityResultContracts.PickVisualMedia` filtered to `VisualMediaType.VideoOnly` (Android
-Photo Picker — no `READ_MEDIA_VIDEO`/storage permission needed on API 33+, and it's
-supported via Google Play Services back to API 26 through the same contract). The picked
-`content://` Uri is copied to `cacheDir/bar_path/` via a new small
-`util/barpath/BarPathVideoImporter.kt` (mirrors `SessionShareImageSaver`'s existing
-cache-copy pattern) so it becomes a real file path for `MediaMetadataRetriever`/
-`BarPathFrameTracker`, which both already expect a path, not a Uri.
-
-`CalibrationStep` gains a "Weight lifted (kg)" `OutlinedTextField`, shown only when
-`isStandalone` — reuses the exact validation shape `referenceLengthCm` already has
-(`toDoubleOrNull()`, must be > 0, inline error message).
-
-`onConfirmCalibration`/`onSave` in the ViewModel branch on `isStandalone`:
-- standalone → `barPathRepository.saveFreestandingBarPathMetrics(exerciseId, weightKg, analysis)`
-- set-linked (existing) → `barPathRepository.saveBarPathMetrics(setLogId, analysis)` (unchanged)
-
-### 2.5 ExerciseDetailScreen velocity chart picks up freestanding rows for free
-`ExerciseDetailViewModel`'s existing `buildVelocityChart` (Sprint 27) combines session
-history + set-linked bar-path metrics. Extend the same `combine` block to also collect
-`barPathRepository.getFreestandingAnalysesForExercise(exerciseId)` and merge those in as
-additional `ChartPoint`s (`dateMs = createdAtMs`), then sort the merged list by date. No
-new chart component, no new screen — the "BAR SPEED" card just has more points on it once
-freestanding data exists for that exercise.
-
-**Acceptance**: an exercise with only freestanding (no set-linked) tracked analyses still
-shows the chart once it has ≥2 points total, matching the existing `size >= 2` gate.
+### 2.3 Dismissible usage tips
+- `UserPreferencesDataStore` gains `barPathTipsDismissed` (boolean key, default `false`) +
+  get/set, same pattern as `restTimerSoundsEnabled`/`lastDismissedUpdateVersion`.
+  `UserRepository`/`UserRepositoryImpl` expose `getBarPathTipsDismissed()`/
+  `setBarPathTipsDismissed(Boolean)`.
+- `BarPathCaptureViewModel` exposes `tipsDismissed: StateFlow<Boolean>` and `onDismissTips()`.
+- `RecordingStep` shows a small dismissible card (when `!tipsDismissed`) above the
+  record/import controls: marker color vs. background contrast, calibration object choice
+  (rigid, same plane as bar travel), camera placement (stationary, perpendicular, full ROM in
+  frame, no backlight). An "✕" dismiss button calls `onDismissTips()` — persists via DataStore,
+  so once dismissed it stays dismissed across future recordings (same UX language as the
+  existing update banner's dismiss).
+- **Acceptance**: first time on the RECORDING step, the tips card shows. After dismissing once,
+  it never reappears (until/unless a future "reset tips" affordance is added — not in scope
+  here, no such affordance exists for the update banner either).
 
 ---
 
 ## 3. Tech stack additions
 
-None. `PickVisualMedia` is part of `androidx.activity` (already a dependency, ships
-`ActivityResultContracts`). Reuses `BarPathVideoRecorder`, `BarPathFrameTracker`,
-`MarkerColorMatcher`, `AnalyzeBarPathUseCase`, `ExercisePickerSheet`, `ConfirmDialog`,
-`IsCoachUseCase`, and the Paddle checkout URL logic from `CoachSettingsScreen`, all
-verbatim.
+None. Pure Kotlin (`MarkerColorProfile`, matching `MarkerColorMatcher`'s existing style) +
+existing Canvas/Compose patterns already used for the calibration tap-point overlay + existing
+DataStore dismiss-flag pattern. No new dependencies.
 
 ---
 
@@ -197,96 +113,74 @@ verbatim.
 
 ```
 app/src/main/java/com/saiyanstrong/
-├── data/local/
-│   ├── AppDatabase.kt                    ← v8→9, MIGRATION_8_9 (table recreate)
-│   ├── entity/BarPathMetricsEntity.kt    ← + exerciseId, createdAtMs; setLogId nullable
-│   └── dao/BarPathMetricsDao.kt          ← + getFreestandingForExercise, countFreestandingSince
-├── domain/
-│   ├── usecase/GetBarPathQuotaUseCase.kt ← new
-│   └── repository/BarPathRepository.kt   ← + saveFreestanding.../getFreestanding...
-├── data/repository/BarPathRepositoryImpl.kt  ← delete-then-insert for set-linked save;
-│                                                new freestanding methods
-├── util/barpath/BarPathVideoImporter.kt  ← new, content:// → cache file copy
-│
-└── presentation/
-    ├── screens/home/
-    │   ├── HomeScreen.kt                 ← + BarPathCard
-    │   └── HomeViewModel.kt              ← + barPathQuota StateFlow
-    ├── screens/barpath/
-    │   ├── BarPathCaptureScreen.kt       ← RecordingStep source choice, weight field
-    │   └── BarPathCaptureViewModel.kt    ← isStandalone branch, nav args change
-    ├── screens/exercises/ExerciseDetailViewModel.kt ← buildVelocityChart merges freestanding
-    └── navigation/
-        ├── Screen.kt                     ← BarPathCapture route gains exerciseId + optional args
-        └── NavGraph.kt                   ← wires new nav args; Home → ExercisePickerSheet → capture
-
-data/backup/BackupPayload.kt / BackupSerializer.kt ← BarPathMetricsDto: setLogId nullable,
-                                                       + exerciseId, createdAtMs (versioned,
-                                                       old backups still decode via defaults)
+├── data/datastore/UserPreferencesDataStore.kt   ← + barPathTipsDismissed
+├── data/repository/UserRepositoryImpl.kt        ← + get/setBarPathTipsDismissed
+├── domain/repository/UserRepository.kt          ← + get/setBarPathTipsDismissed
+├── util/barpath/
+│   ├── MarkerColorMatcher.kt                    ← unchanged (rgbToHsv still reused)
+│   ├── MarkerColorProfile.kt                    ← new: sample(), default(), matches()
+│   └── BarPathFrameTracker.kt                   ← trackMarker/findMarkerCentroid take a profile
+└── presentation/screens/barpath/
+    ├── BarPathCaptureViewModel.kt                ← markerSamplePoint/colorProfile state,
+    │                                                trackedSamples, tips dismiss wiring
+    └── BarPathCaptureScreen.kt                   ← 3-tap CalibrationStep, TRACKED PATH section
+                                                     in ResultsStep, tips card in RecordingStep
 ```
+
+No Room schema change, no navigation change.
 
 ---
 
 ## 5. Code style (extends existing CLAUDE.md rules)
 
-- "One shared check" precedent (`IsCoachUseCase`) extends into `GetBarPathQuotaUseCase` —
-  quota/entitlement logic lives in exactly one place, never re-implemented inline in
-  `HomeViewModel` or the capture flow.
-- Derive-live-not-maintain-a-counter precedent (Power Level v0.18.1 fix) applies directly
-  to the monthly quota: `COUNT(*) WHERE created_at_ms >= monthStart`, not a DataStore
-  counter that could drift from deleted/edited rows.
-- Reuse over duplication: `ExercisePickerSheet`, `ConfirmDialog`, the Paddle checkout URL,
-  `BarPathVideoRecorder`, `BarPathFrameTracker`, `AnalyzeBarPathUseCase` are all reused
-  as-is — this sprint is new wiring around existing, already-built pieces.
+- `MarkerColorProfile` follows `RpeChart`'s "explicit, documented approximation" precedent for
+  the sample→tolerance conversion — the −0.25/floor-0.2 numbers are a stated first pass, not
+  hidden magic constants.
+- Dismiss-and-remember follows the exact existing `lastDismissedUpdateVersion` precedent — no
+  new dismiss-flag pattern invented.
+- The path-preview overlay reuses `CalibrationStep`'s existing frame-to-box scaling approach
+  verbatim rather than introducing a second coordinate-mapping implementation.
 
 ---
 
 ## 6. Testing strategy
 
-- `GetBarPathQuotaUseCase`: pure combine logic, unit-testable with a fake
-  `BarPathRepository`/`IsCoachUseCase` — 2-3 tests (under limit, at limit, coach override).
-- `BarPathVideoImporter`'s file-copy is Android-dependent (Uri/ContentResolver) — no unit
-  test, same category as `BarPathFrameTracker`/`BarPathVideoRecorder` from Sprint 26.
-- Migration 8→9 correctness (backfill join) is the highest-risk pure-logic piece here —
-  worth a Room migration test (`MigrationTestHelper`) if time allows, otherwise verify by
-  hand: install a pre-migration debug build with real logged bar-path data, upgrade, and
-  confirm `exercise_id`/`created_at_ms` backfilled correctly via a DB inspector.
-- Everything else: same as prior VBT sprints — `assembleGithubDebug` compiling clean,
-  manual reasoning pass. **Real device test still required and still owed** from
-  yesterday: confirm the fixed calibration-screen scroll bug actually resolves, then test
-  gallery import + standalone flow end to end before trusting any of this in production.
+- `MarkerColorProfile`: pure, no Android dependency — unit tests for `sample()` building a
+  sensible profile from a known RGB, `matches()` accepting the sampled color and a close
+  variant, rejecting a clearly different hue, and the circular hue-distance wraparound (e.g.
+  hue 350° vs 10° should be "close", not "340° apart"). `findBlobs`/`chooseTrackedBlob` from
+  Sprint 28 are already pure and stay that way — this only changes what `Boolean` gets passed in.
+- Path preview and tips card are UI-only, verified the same way the rest of this screen has
+  been (`assembleGithubDebug` compiling clean, manual reasoning) — no device this session either
+  unless the user tests again.
 
 ---
 
 ## 7. Boundaries
 
 **Always do:**
-- Leave the existing set-linked ⋮-menu capture flow's behavior unchanged for a user who
-  enters it that way — this sprint only adds a second entry path and extends storage.
-- Keep the quota check server-of-truth-free (derived from local Room data + the existing
-  `is_coach()` entitlement check) — no new backend surface for this specific feature.
+- Keep `MarkerColorMatcher.rgbToHsv` and `MarkerColorMatcher.default()`-equivalent fallback
+  intact — nothing about the existing pure color-math gets removed, only extended.
+- Keep the Sprint 28 blob-detection + nearest-neighbor tracking fix completely unchanged; this
+  spec only changes the match predicate fed into it.
 
 **Ask first about:**
-- Whether the free-tier count should also count set-linked (⋮-menu) analyses toward the
-  monthly 5, or only freestanding ones as currently scoped. Current spec: **freestanding
-  only** — the ⋮-menu flow predates monetization and gating it retroactively would be a
-  surprising behavior change for existing users. Flag if this should be revisited.
+- Nothing anticipated — this is an accuracy/trust improvement on already-built, already-tested
+  infrastructure, not new algorithmic risk.
 
 **Never do:**
-- Never let the quota check block the app when offline/query-fails — default to allowing
-  the analysis (fail open) rather than fail closed on a local Room read, since this is a
-  local quota, not a payment gate.
-- Never duplicate the Coach entitlement check outside `GetBarPathQuotaUseCase` /
-  `IsCoachUseCase`.
+- Never silently fall back to the old fixed threshold without telling the user — if marker
+  sampling somehow fails (e.g., `calibrationFrame` null), show an error, don't silently degrade
+  to guessed thresholds and produce numbers the user has no reason to distrust.
 
 ---
 
 ## 8. Notes
 
-This closes the loop the user hit directly: "I don't see where the option to upload the
-video is." After this ships, Home has a visible, always-there entry point, and video
-doesn't have to come from the in-app camera. The underlying marker-tracking pipeline
-itself is **still unverified against real footage** (Sprint 26's open item) — this sprint
-doesn't change that risk, it changes how many ways there are to trigger the same
-unverified pipeline. Real-device testing (now unblocked by today's scroll-bug fix) is
-still the next real milestone, independent of this sprint's scope.
+This is the "make the free option as good as it can be" pass, not a pivot to different hardware
+— NFC and AirTags were ruled out as technically infeasible for this (no public API for
+high-frequency positional data), and a physical linear position transducer / wearable IMU are
+real alternatives but require the user to buy separate hardware, which is out of scope for an
+app feature. Real-time/live tracking during recording remains explicitly out of scope, same as
+the prior sprint's note — this spec targets accuracy and trust of the existing
+record-then-analyze pipeline, not a different pipeline.

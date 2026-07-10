@@ -72,4 +72,11 @@ class UserRepositoryImpl @Inject constructor(
     override suspend fun setRestTimerSoundsEnabled(enabled: Boolean) {
         userPreferencesDataStore.setRestTimerSoundsEnabled(enabled)
     }
+
+    override fun getBarPathTipsDismissed(): Flow<Boolean> =
+        userPreferencesDataStore.barPathTipsDismissed
+
+    override suspend fun setBarPathTipsDismissed(dismissed: Boolean) {
+        userPreferencesDataStore.setBarPathTipsDismissed(dismissed)
+    }
 }
