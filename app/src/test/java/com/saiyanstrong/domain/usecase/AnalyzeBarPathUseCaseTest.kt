@@ -110,6 +110,29 @@ class AnalyzeBarPathUseCaseTest {
     }
 
     @Test
+    fun `SG smoothing tames a one-frame tracking-jitter spike that raw finite differences would not`() {
+        // Constant 0.8 m/s trend (yPx decreasing 80 per 100ms), except sample 4 is jittered
+        // 50px off-trend (simulated tracking noise) then sample 5 returns to the TRUE trend
+        // value rather than compounding the error — exactly what one noisy tracked frame looks
+        // like. A raw forward-difference would spike to 1.3 m/s on that single bad frame; with
+        // enough samples for a real SG window (>=7), the local quadratic fit shouldn't chase it.
+        val samples = listOf(
+            BarPathSample(0, 300.0, 1000.0),
+            BarPathSample(100, 300.0, 920.0),
+            BarPathSample(200, 300.0, 840.0),
+            BarPathSample(300, 300.0, 760.0),
+            BarPathSample(400, 300.0, 630.0), // jitter: should be 680 on-trend
+            BarPathSample(500, 300.0, 600.0), // back to the true trend value
+            BarPathSample(600, 300.0, 520.0),
+            BarPathSample(700, 300.0, 440.0),
+            BarPathSample(800, 300.0, 360.0)
+        )
+        val result = useCase.execute(samples, pixelsPerMeter = 1000.0, massKg = 100.0, 0, 800)
+        assertTrue("SG should meaningfully tame the raw 1.3 m/s spike, got ${result.peakVelocityMs}", result.peakVelocityMs < 1.1)
+        assertTrue("smoothed peak should still be a sane, non-degenerate velocity, got ${result.peakVelocityMs}", result.peakVelocityMs > 0.7)
+    }
+
+    @Test
     fun `samples outside the concentric window are excluded`() {
         val result = useCase.execute(constantVelocitySamples, pixelsPerMeter = 1000.0, massKg = 100.0, concentricStartMs = 0, concentricEndMs = 200)
         // Only the first 3 samples (0, 100, 200ms) fall in the window — still constant velocity, same answer.

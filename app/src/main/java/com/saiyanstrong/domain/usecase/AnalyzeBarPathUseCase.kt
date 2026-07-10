@@ -3,6 +3,7 @@ package com.saiyanstrong.domain.usecase
 import com.saiyanstrong.domain.model.BarPathAnalysis
 import com.saiyanstrong.domain.model.BarPathSample
 import com.saiyanstrong.domain.model.VelocityZone
+import com.saiyanstrong.domain.util.SavitzkyGolayFilter
 import javax.inject.Inject
 
 private const val GRAVITY_MS2 = 9.81
@@ -36,14 +37,18 @@ class AnalyzeBarPathUseCase @Inject constructor() {
         // Image Y increases downward; negate so "up" is positive in real-world meters.
         val heightsMeters = window.map { -it.yPx / pixelsPerMeter }
 
-        val velocities = (1 until window.size).map { i ->
-            val dtSeconds = (window[i].timestampMs - window[i - 1].timestampMs) / 1000.0
-            (heightsMeters[i] - heightsMeters[i - 1]) / dtSeconds
-        }
+        // Savitzky-Golay: local quadratic fit against real (possibly unevenly-spaced) frame
+        // timestamps, analytically differentiated — a materially smoother velocity estimate
+        // than differencing raw, jittery tracked positions frame to frame. One velocity per
+        // sample (index-aligned to `window`), not one per gap.
+        val velocities = SavitzkyGolayFilter.differentiate(
+            positions = heightsMeters,
+            timestamps = window.map { it.timestampMs.toDouble() }
+        )
 
-        val powers = (1 until velocities.size).map { i ->
-            val dtSeconds = (window[i + 1].timestampMs - window[i].timestampMs) / 1000.0
-            val acceleration = (velocities[i] - velocities[i - 1]) / dtSeconds
+        val powers = (1 until window.size).map { i ->
+            val dtSeconds = (window[i].timestampMs - window[i - 1].timestampMs) / 1000.0
+            val acceleration = if (dtSeconds > 0.0) (velocities[i] - velocities[i - 1]) / dtSeconds else 0.0
             val force = massKg * (GRAVITY_MS2 + acceleration)
             force * velocities[i]
         }

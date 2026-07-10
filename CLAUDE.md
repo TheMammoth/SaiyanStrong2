@@ -1487,6 +1487,44 @@ _(Claude Code appends here after each completed task)_
   explicitly out of scope (different architecture, noted again per the user's original
   question) — worth its own spec if the post-record wait is still a problem after this.
   versionCode 40, versionName 0.26.0.
+- [x] Sprint 30 — Savitzky-Golay velocity smoothing (v0.27.0): replaces frame-to-frame finite
+  differences (spiky, chases single-frame tracking jitter) with a proper local-quadratic
+  smoothing filter, the standard fix for exactly this class of noise in motion-tracking data.
+  New `domain/util/SavitzkyGolayFilter.kt` (pure Kotlin `object`, no Android dependency, same
+  home as `RpeChart` — not `domain/analysis/` as originally requested, since that package
+  doesn't exist in this project and this is the established location for stateless
+  computational utilities): `smooth(positions, windowSize=7)` fits a local quadratic over
+  integer index offsets; `differentiate(positions, timestamps, windowSize=7)` fits a local
+  quadratic against each window's REAL timestamps (not assumed evenly-spaced — genuine frame
+  extraction timestamps aren't perfectly uniform) and returns the analytical derivative at the
+  center, which is what actually feeds `AnalyzeBarPathUseCase` now. Both the smoothing and
+  differentiation math go through one shared `fitLocalQuadratic` (Gaussian elimination with
+  partial pivoting on the 3x3 normal-equations system) rather than hand-derived closed-form
+  coefficient formulas — fewer places for an algebra mistake to hide, and it naturally handles
+  non-uniform timestamps for free. Edge handling: the first/last `windowSize/2` points (not
+  enough neighbors for a full symmetric window) fall back to finite differences per-point;
+  fewer than `windowSize` samples total falls back to finite differences for the whole series.
+  `AnalyzeBarPathUseCase.execute` swaps its inline finite-difference velocity loop for
+  `SavitzkyGolayFilter.differentiate(heightsMeters, timestamps)` — clean replacement, no
+  commented-out "legacy" implementation kept alongside it (that was explicitly requested but
+  conflicts with this project's own no-dead-code rule; git history is the real A/B mechanism —
+  `git show <previous-commit>:app/src/.../AnalyzeBarPathUseCase.kt` recovers the old version
+  if a side-by-side numeric comparison is ever actually needed).
+  Verified the swap doesn't silently break the physics: every existing
+  `AnalyzeBarPathUseCaseTest` fixture has fewer than 7 samples in its window, so with the
+  default `windowSize=7` every existing test hits the finite-difference fallback path and
+  produces byte-identical output to before — confirmed by hand-tracing the math, not assumed,
+  before touching the file. Added one new integration test with 9 samples (enough to actually
+  exercise the real SG-fit code path) simulating a single jittered tracked frame — asserts the
+  smoothed peak velocity stays well below what a raw one-sided finite difference would report
+  for that spike, while staying non-degenerate. 7 new unit tests in
+  `SavitzkyGolayFilterTest.kt`, including a sine-wave-vs-analytical-cosine-derivative check
+  (within 5%) and a too-short-series-doesn't-throw check.
+  KNOWN GAP unchanged: this improves velocity/power *precision* for a given (already tracked)
+  position series — it does nothing for the underlying marker-tracking accuracy itself (still
+  the Sprint 28/29 territory: blob detection, tap-to-calibrate color, perpendicularity). Not
+  yet re-verified against real footage this session.
+  versionCode 41, versionName 0.27.0.
 
 ## Release rules
 
