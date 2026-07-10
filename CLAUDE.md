@@ -1703,6 +1703,42 @@ _(Claude Code appends here after each completed task)_
   whether users can realistically place and track two distinguishable-colored markers on a
   barbell sleeve are all real open questions a real device session needs to answer.
   versionCode 45, versionName 0.31.0.
+- [x] Sprint 35 — Kalman filter foundation for live velocity smoothing (v0.32.0), scoped down
+  from the request via a clarifying question: the request asked to build a 2D Kalman filter AND
+  wire it into "the live capture loop" to smooth a "real-time velocity number that updates each
+  frame." **That live loop does not exist** — grep-confirmed no `ImageAnalysis`, no live
+  per-frame analysis, no live velocity anywhere; the pipeline records to a file and analyzes it
+  afterward (`BarPathFrameTracker` via `MediaMetadataRetriever`). So the ViewModel injection +
+  live-loop wiring + "don't feed Kalman into SG" tasks all referenced infrastructure that isn't
+  there (and "don't feed Kalman into SG" is already true by construction). Asked how to proceed;
+  user chose "build the Kalman class + constants only, as an unwired foundation."
+  (1) `domain/util/KalmanTracker2D.kt` (pure Kotlin, no Android dependency — `domain/util/` not
+  the requested `domain/analysis/`, which doesn't exist here): constant-acceleration 6-state
+  filter `[x,y,vx,vy,ax,ay]`, `predict(dt)`/`update(x,y)`/`reset(x,y)`, `smoothedPosition`
+  (returns a pure `Point2D`, substituted for the requested `android.graphics.PointF` to honor
+  "no Android dependencies"), `smoothedVelocityMps` and `accelerationMagnitudeMps2` properties.
+  Physical sanity clamp on predicted acceleration at 15 m/s² (≈1.5g) — a magnitude above that is
+  a tracking error, not real barbell motion; the clamp needs a pixels-per-meter scale to convert
+  m/s²↔pixel-space, supplied via a `pixelsPerMeter` field the caller sets each frame (can vary
+  per frame in dual-marker mode), which also keeps `predict(dt)` at its requested signature and
+  makes `smoothedVelocityMps` a real property rather than a contradictory parameterized one.
+  Matrix math via minimal dense helpers + a closed-form 2×2 innovation-covariance inverse; the
+  process-noise covariance is the standard σ²·G·Gᵀ constant-acceleration form (noise-gain
+  G=[½dt²,dt,1] per axis, independent x/y blocks). Stateful, so when eventually wired it must be
+  instantiated per rep/session, never injected as a singleton — documented in the class.
+  (2) `domain/util/VbtConstants.kt`: `KALMAN_MEASUREMENT_NOISE = 2.0`, `KALMAN_PROCESS_NOISE =
+  50.0`, wired as the filter's constructor defaults (an `object` for greppable namespacing rather
+  than bare top-level `const val`s).
+  (3) 6 unit tests (`KalmanTracker2DTest.kt`): constant-velocity convergence, missed-frame
+  coasting on momentum, reset zeroing, the acceleration clamp holding its physical bound,
+  stationary→~zero velocity, and defaults-wire-through-from-VbtConstants.
+  KNOWN GAP: this is a deliberately unwired building block — nothing in the app calls it, because
+  there's no live-analysis loop to call it from. It does nothing user-visible; it's the correct
+  foundation IF a live velocity display is ever built (which would be a materially new subsystem:
+  a CameraX `ImageAnalysis` use case + on-device live blob detection, explicitly out of scope).
+  The final build/test verification for this was interrupted last session by a transient platform
+  outage; verified green (all 6 tests pass) at the start of the following session before release.
+  versionCode 46, versionName 0.32.0.
 
 ## Release rules
 
