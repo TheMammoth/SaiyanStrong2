@@ -1,197 +1,271 @@
-# SaiyanStrong — RPE-Based Progression Hints Spec
+# SaiyanStrong — Velocity-Based Training (Bar Path + Bar Speed) Spec
 
-## Status: BUILT (v0.21.0) — all 3 slices shipped + unit tests added, see CLAUDE.md "Sprint 24"
+## Status: FOUNDATION BUILT (v0.22.0) — physics + schema shipped, §8 (camera/tracking) not started.
+See CLAUDE.md "Sprint 25".
 
-(Replaces the previous "Rest Timer Sounds + RPE Entry" spec in this file — that feature shipped
-in full as v0.20.0; see `CLAUDE.md` progress log, "Sprint 23".)
+(Replaces the previous "RPE-Based Progression Hints" spec in this file — that feature shipped in
+full as v0.21.0; see `CLAUDE.md` progress log, "Sprint 24".)
+
+This is the biggest, most technically ambitious thing in this app so far — genuinely a
+multi-session effort, not a sprint. This spec deliberately covers **only the first half**: the
+physics/math and the place to store results. The camera capture screen and the actual
+color-marker tracking algorithm are **out of scope for this spec** — see §0 for why, and §8 for
+where they pick up.
 
 ---
 
 ## 0. Decisions locked in via clarifying questions
 
-- **Placement**: active workout only, appended to the existing PREVIOUS column
-  (`PendingSetRow`/`CompletedSetRow` in `ActiveWorkoutScreen.kt`) — exactly where a lifter looks
-  right before logging the next set. Not added to the exercise detail RECORDS/CHARTS tabs.
-- **Calculation basis**: a real %1RM-by-RPE lookup table (the widely published
-  Tuchscherer/RTS-style RPE chart used across powerlifting autoregulation — public training
-  methodology, not proprietary code or copyrighted text), not an ad-hoc threshold table. This
-  estimates a "true" 1RM from *any* logged (reps, weight, RPE) triple, not just AMRAP sets like
-  the existing Epley formula assumes.
-- **Suggestion type**: weight **or** reps, whichever the RPE data implies is the gentler/safer
-  next step (a real coach doesn't always say "add weight" — sometimes "one more rep" is the
-  correct call).
+- **Record-then-analyze, not live.** CameraX records the set; analysis happens after, on the
+  recorded clip. Far more tractable than real-time tracking, and matches how real camera-based VBT
+  products (not accelerometer-based ones) already work.
+- **Tracking method: a single colored marker on the bar, classic computer vision** — HSV
+  color-blob detection frame-to-frame, no ML model, no training data. No MediaPipe Pose /
+  joint-tag tracking for now (may come later — see §8).
+- **Persist the results.** New Room table for per-set velocity/bar-path metrics, not a
+  view-once-and-discard feature — matches how everything else in this app is tracked historically.
+- **Build the math/physics layer first; hold the camera + tracking algorithm for a session where
+  you have a real device to test against.** Reasoning: everything in this spec (§2.1–2.3) is pure
+  Kotlin math with zero Android dependencies — fully unit-testable right now, the same way the RPE
+  chart was in the previous sprint. The camera capture UI and the actual HSV marker-tracking
+  algorithm are a completely different kind of risk: color thresholds, lighting, and marker
+  visibility only mean anything against **real recorded footage**, which doesn't exist in this
+  session. Building that blind and calling it "done" would be dishonest — it would compile, but
+  nobody could tell you whether it actually tracks a barbell. This spec explicitly does not build
+  that part yet.
+
+**What ships if you approve this spec**: the physics engine that turns *(pixel position, timestamp)
+samples of a marker + a real-world scale factor + the set's logged weight* into real velocity/
+power/range-of-motion numbers and a training-zone classification, plus a place in the database to
+store that per set. **What does not ship yet**: any way to actually produce those pixel samples
+from a real video. That's the natural next slice, once you're on a device.
 
 ---
 
 ## 1. Objective
 
-Today, `PendingSetRow`/`CompletedSetRow` show a plain "PREVIOUS" readout (last time's weight ×
-reps) with no interpretation. Since RPE entry now exists (v0.20.0) but nothing reads it back, this
-closes that loop: use last session's logged RPE for the same exercise/set-slot to give a short,
-concrete autoregulation hint — "you had room, push a bit more" vs "you were maxed out, hold or
-ease off" — the way an experienced lifter or coach reads their own RPE log.
+Give SaiyanStrong a real velocity-based-training (VBT) capability: from a barbell marker's tracked
+position over time, compute actual physics — displacement, instantaneous velocity, instantaneous
+acceleration, instantaneous force (`F = m·(g + a)`, using the set's already-logged `weightKg` as
+mass), instantaneous power (`P = F·v`), and classify the rep into a training zone (Speed /
+Speed-Strength / Strength-Speed / Strength / Absolute Strength) the way real strength & conditioning
+coaches read bar speed — not just RPE or 1RM percentage.
 
-**Target users**: existing users who've started logging RPE (opt-in from v0.20.0) — no hint shows
-for sets logged without an RPE, since there's no basis for one.
-
-**Worked example (from your prompt)**: last week, set 1 of Bench Press was `100kg × 5 @ RPE 9`
-(1 rep in reserve). This week, PREVIOUS for that same set slot should read something like:
-
-```
-PREVIOUS
-100kg × 5 @9
-→ try 6 reps
-```
-
-— because at RPE 9 for 5 reps, the chart says there's exactly one more rep available before
-true failure; the smallest safe progression is "the same weight, one more rep," not necessarily
-more weight.
+**Target users**: you, specifically — this is explicitly the feature you've wanted for years,
+aimed at applying real applied mechanics to training data instead of just subjective RPE.
 
 ---
 
 ## 2. Core features & acceptance criteria
 
-### 2.1 RPE → %1RM chart (`domain/util/RpeChart.kt` or similar — pure, no dependencies)
-- A 12×9 lookup table: reps 1–12 (rows) × RPE 10.0 down to 6.0 in 0.5 steps (9 columns) → % of
-  1RM. Values match the standard published RTS/Tuchscherer chart (e.g. 5 reps @ RPE9 ≈ 83.7%,
-  5 reps @ RPE10 ≈ 86.3%).
-- `fun percentOf1Rm(reps: Int, rpe: Float): Double` — reps clamped to `1..12` (beyond 12 the
-  chart's accuracy craters for a compound barbell lift; clamping to 12 is an explicit, documented
-  approximation, not silently wrong), RPE clamped to `6f..10f` and snapped to the nearest 0.5
-  (matches the RPE bottom sheet's own granularity exactly, so no interpolation is needed for
-  values the picker can actually produce).
-- `fun estimateTrue1Rm(weightKg: Double, reps: Int, rpe: Float): Double = weightKg /
-  percentOf1Rm(reps, rpe)`.
-- **Acceptance**: `estimateTrue1Rm(100.0, 5, 9f)` ≈ `119.5` (100 / 0.837); feeding that back —
-  `100.0 * percentOf1Rm(5, 9f)` — round-trips to ≈100.0.
+### 2.1 Domain models
+```kotlin
+// domain/model/BarPathSample.kt
+data class BarPathSample(val timestampMs: Long, val xPx: Double, val yPx: Double)
 
-### 2.2 Suggestion rule (`domain/usecase/SuggestNextLoadUseCase.kt`)
-Given the previous set's `(weightKg, reps, rpe)` for the same exercise/set-slot:
+// domain/model/VelocityZone.kt — Bryan Mann VBT zone table (widely taught in S&C, generic —
+// not lift-specific; documented as an approximation, see §8 for the real long-term answer)
+enum class VelocityZone(val label: String, val minMs: Double, val maxMs: Double) {
+    ABSOLUTE_STRENGTH("Absolute Strength", 0.0, 0.50),
+    STRENGTH_SPEED("Strength-Speed", 0.50, 0.75),
+    SPEED_STRENGTH("Speed-Strength", 0.75, 1.00),
+    SPEED_ACCEL("Speed (Accelerative)", 1.00, 1.30),
+    SPEED_MAX("Speed (Max)", 1.30, Double.MAX_VALUE)
+}
 
-| Last RPE | Reps-in-reserve implied | Suggestion |
-|---|---|---|
-| ≤ 8.0 | ≥ 2 | **More weight, same reps.** Target a new weight so the *same reps* land at RPE 9 next time: `targetWeight = round(estimate1Rm × percentOf1Rm(reps, 9.0), toNearestStep)`. |
-| 8.5 or 9.0 | 1–1.5 | **Depends on rep count.** If `reps ≤ 6`: **one more rep, same weight** (the gentler progression at lower rep counts). If `reps > 6`: **a small weight bump** toward RPE 9.5 at the same reps (adding a whole rep at already-high rep counts is the bigger relative jump, not the safer one). |
-| 9.5 | 0.5 | **Hold.** Same weight, same reps — you were right at the edge, repeat it to confirm before pushing further. |
-| 10.0 | 0 | **Ease off.** Suggest the same weight for one fewer rep, or note it plainly as a max-effort set — no "push more" hint at true failure. |
+// domain/model/BarPathAnalysis.kt
+data class BarPathAnalysis(
+    val peakVelocityMs: Double,
+    val meanConcentricVelocityMs: Double,   // total displacement / total time — the standard MCV metric
+    val peakPowerWatts: Double,
+    val meanPowerWatts: Double,
+    val rangeOfMotionCm: Double,            // top-to-bottom vertical travel
+    val barPathDeviationCm: Double,         // horizontal drift, left-right — a real coaching cue
+    val velocityZone: VelocityZone
+)
+```
 
-- No previous RPE recorded for that set slot (pre-v0.20.0 history, or user skipped RPE) →
-  no hint, falls back to today's plain PREVIOUS text exactly as it is now.
-- Weight is rounded to the exercise's existing step convention (`2.0kg` for
-  Dumbbell/Kettlebell exercises, `2.5kg` otherwise — the same `stepKg` logic
-  `ExerciseLogCard`/`ActiveWorkoutScreen` already compute from the exercise name).
-- **Acceptance**: the worked example in §1 (`100kg×5 @9`) produces "try 6 reps," not a weight
-  change, since reps(5) ≤ 6. A set logged `100kg×8 @9` produces a small weight-bump suggestion
-  instead, since reps(8) > 6.
+### 2.2 Physics use case (`domain/usecase/AnalyzeBarPathUseCase.kt`)
+Pure function, no Android/DI dependencies beyond `@Inject constructor()`:
 
-### 2.3 UI — PREVIOUS column gets a second line
-- `ActiveWorkoutScreen.kt`: both `PendingSetRow` and `CompletedSetRow` already receive
-  `previousSet: SetLog?` for their slot. Compute the suggestion (pure function call, no new
-  ViewModel state needed — it's a deterministic function of `previousSet` alone) and, when present,
-  render it as a small second line under the existing "100kg × 5 @9" text — `NeonGreen`,
-  `→ try 6 reps` / `→ try 102.5kg` / `→ hold` / `→ ease off` — reusing the exact visual weight
-  the app already gives to "this is actionable" text (matches how `RpeChip`'s set state reads).
-- No change to `ExerciseDetailScreen`, `HistoryScreen`, `SessionCompleteScreen`, or any existing
-  e1RM/DOTS calculation — those keep using the existing Epley-based `EstimateOneRepMaxUseCase`
-  untouched; this is a new, additive, active-workout-only signal.
-- **Acceptance**: an exercise with no logged history (first time ever) shows the existing "—"
-  PREVIOUS text, unchanged. An exercise with history but no RPE on the relevant set shows the
-  existing plain weight×reps text, unchanged. Only a set with a previous RPE gains the second line.
+```
+execute(
+    samples: List<BarPathSample>,     // one per tracked video frame, chronological
+    pixelsPerMeter: Double,           // calibration scale — how it's derived is out of scope here
+    massKg: Double,                   // from SetLog.weightKg
+    concentricStartMs: Long,          // window bounds — how these get set is out of scope here
+    concentricEndMs: Long
+): BarPathAnalysis
+```
+
+- Converts each sample's `yPx` to a vertical position in meters, oriented so **up is positive**
+  (image Y increases downward — this gets inverted, and the inversion is the kind of subtle bug
+  this needs a unit test for specifically).
+- Filters samples to `[concentricStartMs, concentricEndMs]`.
+- Between each consecutive pair: `Δt` (seconds), `Δy` (meters) → instantaneous velocity.
+  Between each consecutive velocity pair: instantaneous acceleration → instantaneous force
+  (`massKg × (9.81 + a)`) → instantaneous power (`force × velocity`).
+- `meanConcentricVelocityMs` = total vertical displacement ÷ total elapsed time (not an average of
+  the instantaneous velocities — that's a different, wrong number; this distinction is exactly
+  what real VBT devices report and needs to be right).
+- `rangeOfMotionCm` = (max height − min height) × 100.
+- `barPathDeviationCm` = (max `xPx` − min `xPx`) ÷ `pixelsPerMeter` × 100.
+- `velocityZone` = whichever `VelocityZone` band `meanConcentricVelocityMs` falls into.
+- **Acceptance** (unit-testable without any camera): feed a synthetic sample list representing a
+  bar moving up 0.4m over 0.5s at constant velocity → `meanConcentricVelocityMs` ≈ 0.8 m/s,
+  zone = `SPEED_STRENGTH`; a near-zero-velocity synthetic set → `ABSOLUTE_STRENGTH`. Feed a
+  sample list with a mid-rep sticking point (deceleration then re-acceleration) → peak velocity
+  correctly reflects the fastest instant, not the average.
+
+### 2.3 Persistence (new Room table, DB v7→8)
+```
+bar_path_metrics : id(PK autoGen), set_log_id(FK→set_logs CASCADE, unique),
+                   peak_velocity_ms, mean_concentric_velocity_ms,
+                   peak_power_watts, mean_power_watts,
+                   range_of_motion_cm, bar_path_deviation_cm,
+                   velocity_zone(TEXT)
+```
+- A **separate table**, not new nullable columns bolted onto `set_logs` — this is a distinct,
+  optional, richer bundle of data that will only exist for sets actually recorded with the future
+  camera flow; keeping it separate avoids cluttering the hot-path `set_logs` table with columns
+  that are `NULL` for nearly every historical row.
+- New `BarPathMetricsEntity`/`BarPathMetricsDao` (`insert`, `getForSetLog(setLogId): Flow<BarPathMetricsEntity?>`,
+  `deleteForSetLog` — cascades automatically via the FK anyway, listed for symmetry with existing DAOs).
+- New `domain/repository/BarPathRepository.kt` + `BarPathRepositoryImpl` — its own repository
+  (matching the existing one-repository-per-concern pattern: `TemplateRepository`,
+  `ExerciseMediaRepository`, etc.), not bolted onto `SessionRepository`.
+- **Acceptance**: inserting a `BarPathMetrics` row for a set, then querying it back, round-trips
+  exactly; deleting the parent `SetLog` cascades and removes the `bar_path_metrics` row too
+  (same `ForeignKey.CASCADE` pattern already used everywhere else in this schema).
 
 ---
 
 ## 3. Tech stack additions
 
-None — pure Kotlin math + existing Compose UI. No new dependencies, no schema changes (this
-reads `SetLog.rpe`, which already exists and is already populated since v0.20.0).
+| Addition | Purpose |
+|---|---|
+| None this slice | Everything in §2.1–2.3 is pure Kotlin + Room, already-used dependencies |
+
+**Deliberately not added yet** (belongs to the camera/tracking slice, see §8):
+CameraX (`androidx.camera.*`) for recording, and either a hand-rolled HSV blob tracker (pure
+Kotlin, works on extracted `Bitmap` frames via `MediaMetadataRetriever`/`MediaCodec`, no native
+dependency) or OpenCV for Android (mature, proven, but a large new native/JNI dependency — the
+first one in this project). That choice needs a real test video to evaluate honestly, not a guess.
 
 ---
 
-## 4. Project structure (new/changed)
+## 4. Project structure (new/changed, this slice only)
 
 ```
 app/src/main/java/com/saiyanstrong/
 ├── domain/
-│   ├── util/
-│   │   └── RpeChart.kt                 ← new — pure lookup table + percentOf1Rm()/estimateTrue1Rm()
 │   ├── model/
-│   │   └── LoadSuggestion.kt           ← new — sealed class: MoreWeight(kg), MoreReps(reps), Hold, EaseOff
-│   └── usecase/
-│       └── SuggestNextLoadUseCase.kt   ← new — pure function: (previousSet: SetLog, stepKg: Double)
-│                                          -> LoadSuggestion?
+│   │   ├── BarPathSample.kt            ← new
+│   │   ├── VelocityZone.kt             ← new
+│   │   └── BarPathAnalysis.kt          ← new
+│   ├── usecase/
+│   │   └── AnalyzeBarPathUseCase.kt    ← new — pure physics, no dependencies
+│   └── repository/
+│       └── BarPathRepository.kt        ← new
 │
-└── presentation/screens/workout/
-    └── ActiveWorkoutScreen.kt          ← PendingSetRow/CompletedSetRow call SuggestNextLoadUseCase.
-                                          (or a small local composable helper, since it's a pure
-                                          function with no DI needs) and render the second line
+└── data/
+    ├── local/
+    │   ├── entity/BarPathMetricsEntity.kt   ← new
+    │   ├── dao/BarPathMetricsDao.kt          ← new
+    │   └── AppDatabase.kt                    ← version 7→8, MIGRATION_7_8 (CREATE TABLE only,
+    │                                            no data migration needed — brand new table)
+    └── repository/
+        └── BarPathRepositoryImpl.kt      ← new
+
+app/src/test/java/com/saiyanstrong/domain/usecase/
+└── AnalyzeBarPathUseCaseTest.kt         ← new — synthetic sample lists, no Android/camera needed
 ```
 
-`SuggestNextLoadUseCase` deliberately takes no repository/DI dependencies (pure function of its
-arguments) — Hilt-injectable per convention, but trivially unit-testable without a container if a
-test source set is ever added.
+No screens, no ViewModel wiring, no navigation changes this slice — there is nothing to show yet
+without a way to produce real `BarPathSample` data.
 
 ---
 
 ## 5. Code style (extends existing CLAUDE.md rules)
 
-- `RpeChart`/`SuggestNextLoadUseCase` are pure functions — no side effects, no `Flow`, no
-  suspend — consistent with how `CalculatePowerLevelUseCase`/`EstimateOneRepMaxUseCase` are
-  already written.
-- `LoadSuggestion` as a `sealed class` (`data class`/`data object` variants), matching the
-  project's stated style preference for `when` over `if/else` chains when the UI renders it.
-- No hardcoded colors — the suggestion line reuses `NeonGreen`/`Color.White.copy(alpha=...)`.
-- Reuses the exact existing `stepKg` derivation (`Dumbbell`/`Kettlebell` → 2.0, else 2.5) already
-  duplicated in `ExerciseLogCard` — no new constant introduced.
+- `AnalyzeBarPathUseCase` pure/no-dependency, same convention as `CalculatePowerLevelUseCase`/
+  `SuggestNextLoadUseCase`.
+- `VelocityZone` as an `enum class` carrying its own band bounds — same `SaiyanStage`-style pattern
+  already used for Power Level stages (threshold data living on the enum itself, not a separate
+  lookup).
+- Migration is additive-only (`CREATE TABLE`, no `ALTER`/data backfill) — never
+  `fallbackToDestructiveMigration()`, consistent with every prior migration in this project.
+- `BarPathRepository` follows the exact existing repository-interface-in-domain /
+  impl-in-data pattern, never imported directly by a ViewModel (there isn't one yet).
 
 ---
 
 ## 6. Testing strategy
 
-No `app/src/test` source set exists in this project (same reality as every prior sprint) — this
-would be an unusually good candidate for one, since `RpeChart`/`SuggestNextLoadUseCase` are pure
-functions with no Android dependencies, but adding a test source set is out of scope unless you
-want it added as part of this slice. Flagging as a question below rather than assuming either way.
+This is the second slice in the project with real unit tests (after the RPE chart/suggestion
+logic). Since there's no camera output to feed it yet, tests use **hand-constructed synthetic
+`BarPathSample` lists** with known ground-truth physics (e.g. "10 samples, evenly spaced 33ms
+apart, moving up exactly 0.04m per sample" → known velocity), verifying:
+1. Constant-velocity synthetic rep → correct `meanConcentricVelocityMs` and matching `velocityZone`.
+2. A synthetic sticking point (deceleration mid-rep, re-acceleration) → `peakVelocityMs` reflects
+   the fastest instant, not an average.
+3. Image-coordinate inversion is correct (Y increasing downward in pixel space → position
+   increasing *upward* in real-world meters) — this is exactly the kind of sign-flip bug that's
+   invisible until you stare at a real video and wonder why the numbers are backwards.
+4. `rangeOfMotionCm`/`barPathDeviationCm` match hand-computed values for a known sample set.
+5. FK cascade: deleting a `SetLog` with `bar_path_metrics` attached removes the metrics row (Room
+   in-memory or instrumented DB test — flagged as needing a device/emulator if it ends up
+   requiring `AndroidJUnit4`; if it can be done as a plain Robolectric-free logic check instead,
+   prefer that to stay in the no-device-needed test tier).
 
-Manual verification (build + by-hand table checks, no device needed for the math itself):
-1. Compute `estimateTrue1Rm`/`percentOf1Rm` for a handful of known chart values by hand, confirm
-   they match §2.1.
-2. Walk through §2's rule table for each RPE band (≤8, 8.5–9 at low/high reps, 9.5, 10) and
-   confirm the exact hint text matches the table.
-3. `assembleGithubDebug` build check (same as every prior sprint this session).
-
-Device-needed manual QA (flagged, not assumed done): log a set with RPE, finish the workout,
-start a new workout with the same exercise, confirm the second PREVIOUS line appears with the
-expected suggestion.
+No device/emulator needed for items 1–4. Item 5 may need one depending on how Room's in-memory
+test database behaves in this environment — flagged honestly rather than assumed.
 
 ---
 
 ## 7. Boundaries
 
 **Always do:**
-- Only ever suggest based on an actual logged RPE — never fabricate or assume one.
-- Keep the existing plain PREVIOUS text as a fallback in every case where no suggestion applies —
-  never regress the current behavior for RPE-less history.
-- Round suggested weights to the exercise's existing step convention, never a raw unrounded float.
+- Keep `AnalyzeBarPathUseCase` a pure function — no camera, no I/O, no Android imports.
+- Use `meanConcentricVelocityMs` as *total displacement ÷ total time*, never as an average of
+  instantaneous velocities — these produce different numbers and only one is the real MCV metric
+  coaches expect.
+- Additive-only migration — never destructive, matching every migration so far in this project.
 
 **Ask first about:**
-- Whether to add an `app/src/test` source set for this (see §6) — it's the first genuinely
-  test-friendly pure-function code in the project, but introducing a test source set is a small
-  standing infrastructure decision beyond this one feature.
-- Exact wording/tone for the four hint variants (`try 102.5kg`, `try 6 reps`, `hold`, `ease off`)
-  — happy to adjust once you see them rendered.
+- Whether the FK-cascade test (§6 item 5) needs an instrumented/device-backed test — will report
+  back honestly once I try to write it, rather than guessing now.
+- The generic `VelocityZone` table (§2.1) is population-level, not personalized or lift-specific —
+  real load-velocity relationships differ meaningfully between squat/bench/deadlift. Flagging this
+  now, not silently shipping a table that quietly under- or over-estimates zones for your specific
+  lifts (see §8 for the actual fix).
 
 **Never do:**
-- Never suggest a weight/rep jump that ignores the exercise's rounding step.
-- Never touch the existing Epley-based e1RM calculations used elsewhere (History, Exercise
-  Records, Home DOTS/big-three) — this is additive, not a replacement.
+- Never fake or interpolate camera/tracking data to make this slice "look done" — if there's no
+  real video, there's no real `BarPathSample` list, and nothing here pretends otherwise.
+- Never build the camera/CV slice (§8) blind and claim it's verified — that needs your real device
+  and a real recorded lift, explicitly deferred per your own choice in §0.
 
 ---
 
-## 8. Suggested incremental slices
+## 8. Where this picks up next (out of scope for this spec, listed so nothing gets lost)
 
-1. `RpeChart.kt` (table + lookup functions) — verifiable by hand against known values, no UI yet.
-2. `LoadSuggestion.kt` + `SuggestNextLoadUseCase.kt` — the rule table from §2.2, unit-testable in
-   isolation if a test source set is added (see Boundaries).
-3. `ActiveWorkoutScreen.kt` wiring — second PREVIOUS line in `PendingSetRow`/`CompletedSetRow`.
-
-Each independently buildable/verifiable, own commit, per your established convention.
+1. **Calibration UI**: user taps two points on a known-length reference (bar sleeve, a plate of
+   known diameter) in the first video frame → `pixelsPerMeter`. A one-time-per-recording step.
+2. **CameraX recording screen**: record the set, save the clip.
+3. **Marker tracking**: extract frames (`MediaMetadataRetriever` or `MediaCodec`) → HSV
+   color-blob detection per frame → a `List<BarPathSample>`. This is the part that genuinely needs
+   a real device + real footage to tune (marker color choice, lighting robustness, frame sampling
+   rate) — the actual R&D of this feature.
+4. **Rep-window detection**: automatically or manually mark `concentricStartMs`/`concentricEndMs`
+   per rep within a set (multi-rep sets need per-rep windows, not one analysis for the whole clip).
+5. **UI to show results**: a velocity/power graph + numbers per set, wired into
+   `SessionCompleteScreen`/`ExerciseDetailScreen` alongside existing e1RM/RPE data.
+6. **The real long-term upgrade over §2.1's generic zone table**: once enough velocity-tagged sets
+   exist for a given exercise, fit a **personal load-velocity profile** (linear regression of
+   velocity vs. %1RM across the user's own logged sets) instead of relying on population-level
+   Bryan Mann bands — this would let the app estimate e1RM from bar speed alone, a genuinely
+   different and arguably more accurate method than the existing Epley formula, and personalized to
+   the individual lifter rather than a generic chart. Real VBT research direction, not fantasy —
+   just meaningfully more work than this slice, and needs a real velocity dataset to fit against
+   first.

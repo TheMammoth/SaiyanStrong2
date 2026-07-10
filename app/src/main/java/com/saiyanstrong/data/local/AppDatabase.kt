@@ -4,12 +4,14 @@ import androidx.room.Database
 import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
+import com.saiyanstrong.data.local.dao.BarPathMetricsDao
 import com.saiyanstrong.data.local.dao.BodyWeightDao
 import com.saiyanstrong.data.local.dao.ExerciseDao
 import com.saiyanstrong.data.local.dao.ExerciseLogDao
 import com.saiyanstrong.data.local.dao.SessionDao
 import com.saiyanstrong.data.local.dao.SetLogDao
 import com.saiyanstrong.data.local.dao.TemplateDao
+import com.saiyanstrong.data.local.entity.BarPathMetricsEntity
 import com.saiyanstrong.data.local.entity.BodyWeightEntity
 import com.saiyanstrong.data.local.entity.ExerciseEntity
 import com.saiyanstrong.data.local.entity.ExerciseLogEntity
@@ -65,6 +67,25 @@ val MIGRATION_6_7 = object : Migration(6, 7) {
     }
 }
 
+val MIGRATION_7_8 = object : Migration(7, 8) {
+    override fun migrate(database: SupportSQLiteDatabase) {
+        database.execSQL(
+            "CREATE TABLE IF NOT EXISTS `bar_path_metrics` (" +
+                "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                "`set_log_id` INTEGER NOT NULL, " +
+                "`peak_velocity_ms` REAL NOT NULL, " +
+                "`mean_concentric_velocity_ms` REAL NOT NULL, " +
+                "`peak_power_watts` REAL NOT NULL, " +
+                "`mean_power_watts` REAL NOT NULL, " +
+                "`range_of_motion_cm` REAL NOT NULL, " +
+                "`bar_path_deviation_cm` REAL NOT NULL, " +
+                "`velocity_zone` TEXT NOT NULL, " +
+                "FOREIGN KEY(`set_log_id`) REFERENCES `set_logs`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE)"
+        )
+        database.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_bar_path_metrics_set_log_id` ON `bar_path_metrics` (`set_log_id`)")
+    }
+}
+
 @Database(
     entities = [
         ExerciseEntity::class,
@@ -73,9 +94,10 @@ val MIGRATION_6_7 = object : Migration(6, 7) {
         SetLogEntity::class,
         TemplateEntity::class,
         TemplateExerciseEntity::class,
-        BodyWeightEntity::class
+        BodyWeightEntity::class,
+        BarPathMetricsEntity::class
     ],
-    version = 7,
+    version = 8,
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -85,4 +107,5 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun setLogDao(): SetLogDao
     abstract fun templateDao(): TemplateDao
     abstract fun bodyWeightDao(): BodyWeightDao
+    abstract fun barPathMetricsDao(): BarPathMetricsDao
 }

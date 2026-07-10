@@ -297,11 +297,17 @@ template_exercises : id(PK autoGen), template_id(FK→templates CASCADE),
                      exercise_id(FK→exercises), order_index
 
 body_weight_logs   : id(PK autoGen), date_ms, weight_kg
+
+bar_path_metrics   : id(PK autoGen), set_log_id(FK→set_logs CASCADE, unique),
+                     peak_velocity_ms, mean_concentric_velocity_ms, peak_power_watts,
+                     mean_power_watts, range_of_motion_cm, bar_path_deviation_cm,
+                     velocity_zone(TEXT)
 ```
 
-Room DB version: **5**. Migrations: 1→2 sessions.title, 2→3 set_logs.is_failure,
+Room DB version: **8**. Migrations: 1→2 sessions.title, 2→3 set_logs.is_failure,
 3→4 exercise re-seed (DELETE FROM exercises), 4→5 templates/template_exercises/
-body_weight_logs. Any future schema change requires a Migration, never
+body_weight_logs, 5→6 exercises.rest_timer_sec, 6→7 templates.is_from_coach,
+7→8 bar_path_metrics. Any future schema change requires a Migration, never
 `fallbackToDestructiveMigration()` in production.
 
 ---
@@ -1218,6 +1224,45 @@ _(Claude Code appends here after each completed task)_
   history feeding it) has not been eyeballed on a device. Hint wording is a first pass per
   SPEC.md, adjustable once seen.
   versionCode 34, versionName 0.21.0.
+- [x] Sprint 25 — velocity-based training (VBT) foundation, per SPEC.md (v0.22.0): this is
+  deliberately **half a feature**, per your own choice when scoping it — the physics engine and
+  a place to store results, not a working camera feature yet. Nothing changed visibly in the app.
+  Real bar-marker tracking and the camera recording screen need a real device/real footage to
+  build honestly and are explicitly deferred (see SPEC.md §8 for exactly where this picks up).
+  (1) `domain/model/BarPathSample.kt` (tracked marker position + timestamp), `VelocityZone.kt`
+  (the Bryan Mann VBT zone table — Absolute Strength/Strength-Speed/Speed-Strength/Speed
+  Accelerative/Speed Max, population-level and explicitly documented as an approximation, not
+  lift-specific), `BarPathAnalysis.kt` (the computed result: peak/mean velocity, peak/mean power,
+  range of motion, bar-path deviation, zone).
+  (2) `domain/usecase/AnalyzeBarPathUseCase.kt`: pure physics, zero Android dependencies. Converts
+  pixel positions to real-world meters (with the up/down image-coordinate inversion handled and
+  specifically unit-tested, since it's exactly the kind of sign-flip bug that's invisible without
+  a test), computes instantaneous velocity/acceleration/force (`F = m·(g+a)`, mass from the
+  set's logged `weightKg`)/power per frame pair, and reports `meanConcentricVelocityMs` as total
+  displacement ÷ total time (the actual VBT "MCV" metric — not an average of instantaneous
+  velocities, a different and wrong number). Fixed a real alignment bug during development: an
+  early version silently dropped zero-`Δt` frame pairs mid-loop, which would have desynced the
+  velocity/power arrays from the sample window by index on any duplicate-timestamp frame; fixed
+  by deduplicating timestamps up front so every consecutive pair is guaranteed `Δt > 0`, removing
+  the skip-logic (and the bug) entirely.
+  (3) Room v7→8 (`MIGRATION_7_8`): new `bar_path_metrics` table (own table, not nullable columns
+  bolted onto `set_logs`, since this data only exists for sets recorded with the not-yet-built
+  camera flow), FK CASCADE to `set_logs`, unique index on `set_log_id`. New
+  `BarPathMetricsEntity`/`BarPathMetricsDao`, `domain/repository/BarPathRepository.kt` +
+  `BarPathRepositoryImpl` (its own repository, matching the one-repository-per-concern pattern
+  already used for `TemplateRepository`/`ExerciseMediaRepository`), bound in `RepositoryModule`.
+  (4) 11 new unit tests (`AnalyzeBarPathUseCaseTest.kt`, alongside the RPE tests from Sprint 24) —
+  hand-computed synthetic sample lists: constant-velocity rep, a sticking-point profile (verifying
+  peak velocity reflects the fastest instant, not an average), coordinate-inversion sign checks,
+  range-of-motion/bar-path-deviation against known values, and the &lt;2-sample degenerate case.
+  Brought the "Room schema (source of truth)" reference section in CLAUDE.md up to date while
+  touching schema — it had drifted stale since v0.13.0 (still said "Room DB version: 5").
+  KNOWN GAPS, explicitly deferred, not forgotten (SPEC.md §8 has the full list): no calibration
+  UI, no CameraX recording screen, no actual marker-tracking algorithm, no rep-window detection,
+  no UI anywhere showing this data, and `BackupSerializer`/`BackupPayload` do not yet include
+  `bar_path_metrics` — harmless today since nothing populates the table yet, but must be added
+  before this feature goes live or a backup/restore would silently drop real velocity data.
+  versionCode 35, versionName 0.22.0.
 
 ## Release rules
 

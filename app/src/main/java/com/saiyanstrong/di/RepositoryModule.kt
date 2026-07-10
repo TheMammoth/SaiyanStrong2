@@ -1,6 +1,7 @@
 package com.saiyanstrong.di
 
 import com.saiyanstrong.data.repository.BackupRepositoryImpl
+import com.saiyanstrong.data.repository.BarPathRepositoryImpl
 import com.saiyanstrong.data.repository.CoachRepositoryImpl
 import com.saiyanstrong.data.repository.ExerciseMediaRepositoryImpl
 import com.saiyanstrong.data.repository.ExerciseRepositoryImpl
@@ -8,6 +9,7 @@ import com.saiyanstrong.data.repository.SessionRepositoryImpl
 import com.saiyanstrong.data.repository.TemplateRepositoryImpl
 import com.saiyanstrong.data.repository.UserRepositoryImpl
 import com.saiyanstrong.domain.repository.BackupRepository
+import com.saiyanstrong.domain.repository.BarPathRepository
 import com.saiyanstrong.domain.repository.CoachRepository
 import com.saiyanstrong.domain.repository.ExerciseMediaRepository
 import com.saiyanstrong.domain.repository.ExerciseRepository
@@ -43,4 +45,7 @@ abstract class RepositoryModule {
 
     @Binds
     abstract fun bindCoachRepository(impl: CoachRepositoryImpl): CoachRepository
+
+    @Binds
+    abstract fun bindBarPathRepository(impl: BarPathRepositoryImpl): BarPathRepository
 }
