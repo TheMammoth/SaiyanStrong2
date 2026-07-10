@@ -7,6 +7,7 @@ import android.util.Range
 import androidx.camera.camera2.interop.Camera2Interop
 import androidx.camera.camera2.interop.ExperimentalCamera2Interop
 import androidx.camera.core.CameraSelector
+import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.video.FileOutputOptions
@@ -20,6 +21,8 @@ import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleOwner
 import java.io.File
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
 
 /**
  * Thin CameraX wrapper: bind preview + video capture to a [PreviewView], record silently (no
@@ -40,14 +43,25 @@ class BarPathVideoRecorder {
 
     private var videoCapture: VideoCapture<Recorder>? = null
     private var activeRecording: Recording? = null
+    private var analyzerExecutor: ExecutorService? = null
+    private var liveAnalyzer: BarPathLiveAnalyzer? = null
 
+    /**
+     * @param onLiveResult when non-null, binds a live [ImageAnalysis] loop ([BarPathLiveAnalyzer])
+     * alongside preview + video and reports per-frame marker tracking. This is best-effort and
+     * fully guarded: on some devices binding a third camera stream (preview + video + analysis)
+     * exceeds the supported combination, so if that bind fails it falls back to preview + video
+     * only — recording always survives, the live loop is what degrades. Null (the default) leaves
+     * the recording path exactly as it was, with no live analysis.
+     */
     @OptIn(ExperimentalCamera2Interop::class)
     fun bindCamera(
         context: Context,
         lifecycleOwner: LifecycleOwner,
         previewView: PreviewView,
         highSpeedEnabled: Boolean = false,
-        onHighSpeedUnavailable: () -> Unit = {}
+        onHighSpeedUnavailable: () -> Unit = {},
+        onLiveResult: ((LiveFrameResult) -> Unit)? = null
     ) {
         val providerFuture = ProcessCameraProvider.getInstance(context)
         providerFuture.addListener({
@@ -72,19 +86,45 @@ class BarPathVideoRecorder {
             videoCapture = capture
 
             provider.unbindAll()
-            runCatching {
-                provider.bindToLifecycle(lifecycleOwner, CameraSelector.DEFAULT_BACK_CAMERA, preview, capture)
-            }.onFailure { e ->
-                Log.e("BarPathVideoRecorder", "Camera bind failed", e)
-                if (tier != HighSpeedTier.STANDARD_30) {
-                    onHighSpeedUnavailable()
-                    bindCamera(context, lifecycleOwner, previewView, highSpeedEnabled = false)
+            analyzerExecutor?.shutdown()
+            analyzerExecutor = null
+            liveAnalyzer = null
+
+            val imageAnalysis = onLiveResult?.let { callback ->
+                val executor = Executors.newSingleThreadExecutor().also { analyzerExecutor = it }
+                val analyzer = BarPathLiveAnalyzer(callback).also { liveAnalyzer = it }
+                ImageAnalysis.Builder()
+                    .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                    .build()
+                    .also { it.setAnalyzer(executor, analyzer) }
+            }
+
+            val boundWithAnalysis = imageAnalysis != null && runCatching {
+                provider.bindToLifecycle(
+                    lifecycleOwner, CameraSelector.DEFAULT_BACK_CAMERA, preview, capture, imageAnalysis
+                )
+            }.onFailure { Log.w("BarPathVideoRecorder", "Live analysis bind failed; recording without it", it) }
+                .isSuccess
+
+            if (!boundWithAnalysis) {
+                analyzerExecutor?.shutdown()
+                analyzerExecutor = null
+                liveAnalyzer = null
+                runCatching {
+                    provider.bindToLifecycle(lifecycleOwner, CameraSelector.DEFAULT_BACK_CAMERA, preview, capture)
+                }.onFailure { e ->
+                    Log.e("BarPathVideoRecorder", "Camera bind failed", e)
+                    if (tier != HighSpeedTier.STANDARD_30) {
+                        onHighSpeedUnavailable()
+                        bindCamera(context, lifecycleOwner, previewView, highSpeedEnabled = false, onLiveResult = onLiveResult)
+                    }
                 }
             }
         }, ContextCompat.getMainExecutor(context))
     }
 
     fun startRecording(context: Context, onFinalized: (path: String?) -> Unit) {
+        liveAnalyzer?.reset() // fresh trail/velocity for this rep
         val capture = videoCapture ?: run { onFinalized(null); return }
         val outputDir = File(context.cacheDir, "bar_path").apply { mkdirs() }
         val outputFile = File(outputDir, "recording_${System.currentTimeMillis()}.mp4")

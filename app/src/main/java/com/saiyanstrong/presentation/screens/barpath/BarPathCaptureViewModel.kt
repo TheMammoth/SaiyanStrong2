@@ -12,6 +12,7 @@ import com.saiyanstrong.domain.repository.UserRepository
 import com.saiyanstrong.domain.usecase.AnalyzeBarPathUseCase
 import com.saiyanstrong.util.barpath.BarPathFrameTracker
 import com.saiyanstrong.util.barpath.BarPathVideoImporter
+import com.saiyanstrong.util.barpath.LiveFrameResult
 import com.saiyanstrong.util.barpath.MarkerColorProfile
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
@@ -93,6 +94,21 @@ class BarPathCaptureViewModel @Inject constructor(
 
     fun onHighSpeedModeChanged(enabled: Boolean) {
         viewModelScope.launch { userRepository.setHighSpeedModeEnabled(enabled) }
+    }
+
+    // ── Live analysis loop (slice 1) ────────────────────────────────────────────
+    // Fed per-frame from BarPathLiveAnalyzer during recording. The velocity is uncalibrated
+    // (no pixels-per-meter until post-record calibration) — a relative speed, not true m/s.
+    private val _liveTracking = MutableStateFlow(false)
+    val liveTracking: StateFlow<Boolean> = _liveTracking.asStateFlow()
+
+    private val _liveVelocity = MutableStateFlow(0f)
+    val liveVelocity: StateFlow<Float> = _liveVelocity.asStateFlow()
+
+    /** Called on the analyzer's background thread — MutableStateFlow.value is safe cross-thread. */
+    fun onLiveResult(result: LiveFrameResult) {
+        _liveTracking.value = result.markerDetected
+        _liveVelocity.value = result.smoothedVelocityMps
     }
 
     fun onRecordingFinished(path: String?) {

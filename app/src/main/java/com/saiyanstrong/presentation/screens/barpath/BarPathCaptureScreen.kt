@@ -69,6 +69,7 @@ import com.saiyanstrong.presentation.theme.SaiyanGray
 import com.saiyanstrong.util.barpath.BarPathVideoRecorder
 import com.saiyanstrong.util.barpath.HighSpeedCapabilityChecker
 import com.saiyanstrong.util.barpath.HighSpeedTier
+import com.saiyanstrong.util.barpath.LiveFrameResult
 
 private val MarkerGreen = Color(0xFF39FF14)
 private val MarkerBlue = Color(0xFF2E9EFF)
@@ -81,6 +82,8 @@ fun BarPathCaptureScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val tipsDismissed by viewModel.tipsDismissed.collectAsStateWithLifecycle()
     val highSpeedPreference by viewModel.highSpeedModeEnabled.collectAsStateWithLifecycle()
+    val liveTracking by viewModel.liveTracking.collectAsStateWithLifecycle()
+    val liveVelocity by viewModel.liveVelocity.collectAsStateWithLifecycle()
 
     LaunchedEffect(uiState.isSaved) { if (uiState.isSaved) onDone() }
 
@@ -98,6 +101,9 @@ fun BarPathCaptureScreen(
                     onDismissTips = viewModel::onDismissTips,
                     highSpeedPreference = highSpeedPreference,
                     onHighSpeedPreferenceChanged = viewModel::onHighSpeedModeChanged,
+                    liveTracking = liveTracking,
+                    liveVelocity = liveVelocity,
+                    onLiveResult = viewModel::onLiveResult,
                     onFinished = viewModel::onRecordingFinished,
                     onGalleryVideoPicked = viewModel::onGalleryVideoPicked
                 )
@@ -145,6 +151,9 @@ private fun RecordingStep(
     onDismissTips: () -> Unit,
     highSpeedPreference: Boolean?,
     onHighSpeedPreferenceChanged: (Boolean) -> Unit,
+    liveTracking: Boolean = false,
+    liveVelocity: Float = 0f,
+    onLiveResult: (LiveFrameResult) -> Unit = {},
     onFinished: (String?) -> Unit,
     onGalleryVideoPicked: (android.net.Uri) -> Unit = {}
 ) {
@@ -233,20 +242,28 @@ private fun RecordingStep(
         }
 
         if (hasPermission) {
-            AndroidView(
-                factory = { ctx ->
-                    PreviewView(ctx).also { previewView ->
-                        recorder.bindCamera(
-                            ctx, lifecycleOwner, previewView,
-                            highSpeedEnabled = effectiveHighSpeedEnabled,
-                            onHighSpeedUnavailable = {
-                                snackbarMessage = "High-speed mode unavailable on this device, using 30fps"
-                            }
-                        )
-                    }
-                },
-                modifier = Modifier.fillMaxWidth().height(360.dp)
-            )
+            Box(Modifier.fillMaxWidth().height(360.dp)) {
+                AndroidView(
+                    factory = { ctx ->
+                        PreviewView(ctx).also { previewView ->
+                            recorder.bindCamera(
+                                ctx, lifecycleOwner, previewView,
+                                highSpeedEnabled = effectiveHighSpeedEnabled,
+                                onHighSpeedUnavailable = {
+                                    snackbarMessage = "High-speed mode unavailable on this device, using 30fps"
+                                },
+                                onLiveResult = onLiveResult
+                            )
+                        }
+                    },
+                    modifier = Modifier.fillMaxSize()
+                )
+                LiveTrackingReadout(
+                    tracking = liveTracking,
+                    velocity = liveVelocity,
+                    modifier = Modifier.align(Alignment.TopStart).padding(8.dp)
+                )
+            }
         } else {
             Box(
                 Modifier.fillMaxWidth().height(360.dp).background(SaiyanGray),
@@ -278,6 +295,31 @@ private fun RecordingStep(
     }
 
         SnackbarHost(hostState = snackbarHostState, modifier = Modifier.align(Alignment.BottomCenter))
+    }
+}
+
+/**
+ * Live analysis readout during recording (slice 1 of the live loop). Shows whether the marker is
+ * being tracked frame-to-frame and its smoothed speed. The speed is UNCALIBRATED — a relative
+ * value, not true m/s, until pre-record scale calibration exists — so it's labelled "~" and
+ * "rel", not "m/s", to avoid implying a real physical reading.
+ */
+@Composable
+private fun LiveTrackingReadout(tracking: Boolean, velocity: Float, modifier: Modifier = Modifier) {
+    Column(
+        modifier = modifier
+            .background(Color.Black.copy(alpha = 0.55f), androidx.compose.foundation.shape.RoundedCornerShape(6.dp))
+            .padding(horizontal = 10.dp, vertical = 6.dp)
+    ) {
+        Text(
+            if (tracking) "● TRACKING" else "○ SEARCHING",
+            color = if (tracking) NeonGreen else Color.White.copy(alpha = 0.6f),
+            fontSize = 11.sp, fontWeight = FontWeight.Black, letterSpacing = 1.sp
+        )
+        Text(
+            "~%.2f (rel. speed)".format(velocity),
+            color = Color.White.copy(alpha = 0.85f), fontSize = 11.sp, fontFamily = FontFamily.Monospace
+        )
     }
 }
 

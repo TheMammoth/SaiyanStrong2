@@ -1776,6 +1776,47 @@ _(Claude Code appends here after each completed task)_
   strides, and actual decode performance all vary by device and are unknown until run against
   real footage. This adds a *ready* faster path, not a *proven* one.
   versionCode 47, versionName 0.33.0.
+- [x] Sprint 37 — live analysis loop, slice 1 (v0.34.0): the subsystem that did NOT exist and was
+  the shared blocker behind two earlier requests (the Kalman filter, Sprint 35; a live motion-trail
+  overlay, declined). Both depended on a live per-frame centroid+velocity stream during recording;
+  the pipeline only ever recorded-to-file-then-analyzed. The trail-overlay request also assumed a
+  `VbtSessionViewModel`, a camera Fragment, a `TextureView`/`SurfaceView`, and XML/FrameLayout —
+  none of which exist (Compose-only, no fragments, `PreviewView` in an `AndroidView`). Flagged all
+  that; user chose "build the live analysis loop first."
+  (1) `util/barpath/BarPathLiveAnalyzer.kt` — a CameraX `ImageAnalysis.Analyzer`: per frame it
+  converts the YUV_420_888 `ImageProxy` to a downsampled ARGB grid (reusing the tested `yuvToRgb`),
+  runs marker detection, feeds the centroid through a `KalmanTracker2D` (the filter's FIRST real
+  consumer — Sprint 35's foundation finally wired up), and emits a `LiveFrameResult(detected, x, y,
+  smoothedVelocity)`. The detection core is a pure top-level `detectMarkerCentroidInPixels()`
+  (reuses `findBlobs`/`chooseTrackedBlob`/`MarkerColorProfile`), unit-tested with synthetic pixel
+  grids (4 tests: centroid, no-match, below-min-pixels, nearest-neighbor of two blobs).
+  (2) `BarPathVideoRecorder.bindCamera` gains an optional `onLiveResult` callback: when non-null it
+  binds `ImageAnalysis` alongside preview+video and reports per-frame tracking. **Fully guarded** —
+  binding a third camera stream (preview+video+analysis) exceeds some devices' supported
+  combination, so if that bind fails it falls back to preview+video only; recording always
+  survives, only the live loop degrades. Null (the prior signature's behavior) leaves recording
+  untouched. Analyzer runs on a dedicated executor (shut down/recreated per bind); Kalman resets on
+  `startRecording` (rep start).
+  (3) `BarPathCaptureViewModel` exposes `liveTracking`/`liveVelocity` StateFlows fed from the
+  analyzer's background-thread callback (MutableStateFlow.value is thread-safe). `RecordingStep`
+  shows a small live readout over the preview: "● TRACKING"/"○ SEARCHING" + the smoothed speed.
+  DELIBERATE SLICE-1 LIMITS, all documented in code:
+  - Detection uses `MarkerColorProfile.default()` (magenta/pink) — the user's real marker color is
+    only sampled AFTER recording today, so arbitrary colors need a pre-record color-sampling step
+    (calibration-ordering rework, follow-up). The user's tested marker was pinkish, so default may
+    actually detect it.
+  - Velocity is UNCALIBRATED (relative, not true m/s) — real m/s needs a pixels-per-meter scale,
+    also only known post-record. Labelled "~X.XX (rel. speed)", not "m/s", to avoid implying a real
+    reading.
+  - Centroid is in downsampled analysis-image space, NOT mapped onto the preview — the positioned
+    motion-trail overlay (with the CameraX rotation/crop/mirror transform) is the next slice, now
+    unblocked by this centroid stream.
+  KNOWN GAP: the entire CameraX ImageAnalysis + YUV-plane + live-detection path is unverified on a
+  real device — only the pure pixel-grid detection is unit-tested. Whether the third stream binds,
+  whether detection keeps up at frame rate, and whether the default color profile actually finds the
+  user's marker are all unknown until run on a device. This establishes the loop; it does not prove
+  it works.
+  versionCode 48, versionName 0.34.0.
 
 ## Release rules
 
