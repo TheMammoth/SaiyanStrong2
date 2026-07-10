@@ -1525,6 +1525,37 @@ _(Claude Code appends here after each completed task)_
   the Sprint 28/29 territory: blob detection, tap-to-calibrate color, perpendicularity). Not
   yet re-verified against real footage this session.
   versionCode 41, versionName 0.27.0.
+- [x] Sprint 31 — weighted subpixel blob centroid (v0.28.0): every matching pixel in a blob was
+  previously weighted equally when computing its centroid; a pixel right at the edge of the
+  color-match tolerance pulled the centroid just as hard as one dead-center on the sample. This
+  swaps in a color-distance-weighted centroid so a poor-but-still-passing match barely moves it.
+  `MarkerColorProfile` gains `satCenter`/`satTolerance`/`valCenter`/`valTolerance` (previously
+  only asymmetric floors — `minSaturation`/`minValue` — existed, with no symmetric center/range
+  to measure distance from) and a new `matchScore(r,g,b): Double` — 1.0 for a pixel exactly on
+  the sample, trending toward 0 as hue/saturation/value distance from the sample approaches its
+  tolerance, **clamped at 0 rather than allowed negative**: a pixel can pass the asymmetric,
+  floor-based `matches()` test (e.g. a pixel brighter than the sample still clears the value
+  floor) while scoring poorly on this symmetric, distance-based scale — confirmed by a new test
+  (`a pixel brighter than the sample can still pass matches but score below the maximum`) rather
+  than assumed. `matches()` itself — the actual accept/reject gate — is completely unchanged;
+  `matchScore` is purely an additional weight for pixels that already passed it.
+  `findBlobs` (Sprint 28) now takes a parallel `weights: DoubleArray` alongside the existing
+  `mask: BooleanArray` — **connectivity is still driven entirely by `mask`, exactly as before**,
+  so blob shape/detection is unaffected; only the centroid within an unchanged blob shifts
+  toward higher-scoring pixels. A blob whose every pixel happens to score exactly 0 falls back
+  to the old unweighted (count-based) centroid rather than dividing by zero. `matchScore` is
+  floored at a small constant (`MIN_WEIGHT = 0.01`) before being written into the weights array
+  so a boundary-scoring pixel still contributes a token amount rather than literally vanishing
+  from the weighted average (its blob membership was already decided by `mask`, unaffected
+  either way — this only keeps the weighted-centroid math itself well-behaved).
+  4 new/updated tests in `BarPathFrameTrackerTest.kt` (heavily-weighted pixel pulls the
+  centroid, all-zero-weight blob falls back correctly) and 4 new in `MarkerColorProfileTest.kt`
+  (score at the sample ≈1.0, score decreases with distance, never goes negative, the
+  brighter-pixel edge case above).
+  KNOWN GAP unchanged: still no real-footage re-verification this session. This is a precision
+  refinement on top of Sprint 28's blob detection + Sprint 29's tap-to-calibrate color — it
+  doesn't change what counts as a match, only how confidently the centroid trusts each match.
+  versionCode 42, versionName 0.28.0.
 
 ## Release rules
 

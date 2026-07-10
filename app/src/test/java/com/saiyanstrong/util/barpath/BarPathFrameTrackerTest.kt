@@ -14,6 +14,8 @@ private fun grid(width: Int, rows: List<String>): BooleanArray {
     return mask
 }
 
+private fun uniformWeights(mask: BooleanArray): DoubleArray = DoubleArray(mask.size) { 1.0 }
+
 class BarPathFrameTrackerTest {
 
     @Test
@@ -27,14 +29,14 @@ class BarPathFrameTrackerTest {
                 "........##"
             )
         )
-        val blobs = findBlobs(mask, 10, 5)
+        val blobs = findBlobs(mask, uniformWeights(mask), 10, 5)
         assertEquals(2, blobs.size)
     }
 
     @Test
-    fun `a single contiguous blob reports the correct centroid and size`() {
+    fun `a single contiguous blob with uniform weight reports the plain centroid and size`() {
         val mask = grid(4, listOf("##", "##").map { it.padEnd(4, '.') })
-        val blobs = findBlobs(mask, 4, 2)
+        val blobs = findBlobs(mask, uniformWeights(mask), 4, 2)
         assertEquals(1, blobs.size)
         assertEquals(4, blobs.single().size)
         assertEquals(0.5, blobs.single().centroidX, 0.0001)
@@ -43,7 +45,25 @@ class BarPathFrameTrackerTest {
 
     @Test
     fun `no matches produce no blobs`() {
-        assertTrue(findBlobs(BooleanArray(100), 10, 10).isEmpty())
+        val mask = BooleanArray(100)
+        assertTrue(findBlobs(mask, uniformWeights(mask), 10, 10).isEmpty())
+    }
+
+    @Test
+    fun `a heavily-weighted pixel pulls the centroid toward itself`() {
+        // Two matching pixels side by side, x=0 and x=1 — uniform weight would centroid at 0.5.
+        val mask = grid(2, listOf("##"))
+        val weights = doubleArrayOf(0.01, 10.0) // pixel at x=1 scores far better than x=0
+        val blob = findBlobs(mask, weights, 2, 1).single()
+        assertTrue("expected centroid pulled toward x=1, got ${blob.centroidX}", blob.centroidX > 0.9)
+    }
+
+    @Test
+    fun `a blob where every pixel has zero weight falls back to the unweighted centroid`() {
+        val mask = grid(2, listOf("##"))
+        val weights = doubleArrayOf(0.0, 0.0)
+        val blob = findBlobs(mask, weights, 2, 1).single()
+        assertEquals(0.5, blob.centroidX, 0.0001) // unweighted fallback: (0+1)/2
     }
 
     @Test

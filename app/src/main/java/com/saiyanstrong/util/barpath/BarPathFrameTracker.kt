@@ -8,14 +8,25 @@ import javax.inject.Inject
 
 internal data class Blob(val centroidX: Double, val centroidY: Double, val size: Int)
 
-/** 4-connected BFS flood fill over a boolean match mask — separates distinct matched objects. */
-internal fun findBlobs(mask: BooleanArray, width: Int, height: Int): List<Blob> {
+/**
+ * 4-connected BFS flood fill over a boolean match mask — separates distinct matched objects.
+ * Connectivity (which pixels belong to a blob) is driven purely by [mask], exactly as before;
+ * [weights] (0.0 for non-matching pixels, [MarkerColorProfile.matchScore] for matching ones)
+ * only changes how a blob's CENTROID is computed within that unchanged shape — a pixel that
+ * matches but scores poorly still holds the blob together, it just barely pulls the centroid
+ * toward itself. Falls back to an unweighted (size-based) centroid if every pixel in a blob
+ * happens to score exactly 0, so a degenerate all-zero-weight blob never divides by zero.
+ */
+internal fun findBlobs(mask: BooleanArray, weights: DoubleArray, width: Int, height: Int): List<Blob> {
     val visited = BooleanArray(mask.size)
     val blobs = mutableListOf<Blob>()
     val queue = ArrayDeque<Int>()
 
     for (start in mask.indices) {
         if (!mask[start] || visited[start]) continue
+        var sumXWeighted = 0.0
+        var sumYWeighted = 0.0
+        var sumWeight = 0.0
         var sumX = 0.0
         var sumY = 0.0
         var size = 0
@@ -26,6 +37,10 @@ internal fun findBlobs(mask: BooleanArray, width: Int, height: Int): List<Blob> 
             val idx = queue.removeFirst()
             val x = idx % width
             val y = idx / width
+            val w = weights[idx]
+            sumXWeighted += x * w
+            sumYWeighted += y * w
+            sumWeight += w
             sumX += x
             sumY += y
             size++
@@ -39,7 +54,12 @@ internal fun findBlobs(mask: BooleanArray, width: Int, height: Int): List<Blob> 
                 }
             }
         }
-        blobs += Blob(sumX / size, sumY / size, size)
+        val (centroidX, centroidY) = if (sumWeight > 0.0) {
+            sumXWeighted / sumWeight to sumYWeighted / sumWeight
+        } else {
+            sumX / size to sumY / size
+        }
+        blobs += Blob(centroidX, centroidY, size)
     }
     return blobs
 }
@@ -141,16 +161,20 @@ class BarPathFrameTracker @Inject constructor() {
         val scaled = Bitmap.createScaledBitmap(frame, scaledWidth, scaledHeight, false)
 
         val mask = BooleanArray(scaledWidth * scaledHeight)
+        val weights = DoubleArray(scaledWidth * scaledHeight)
         for (y in 0 until scaledHeight) {
             for (x in 0 until scaledWidth) {
                 val pixel = scaled.getPixel(x, y)
-                mask[y * scaledWidth + x] =
-                    colorProfile.matches(Color.red(pixel), Color.green(pixel), Color.blue(pixel))
+                val r = Color.red(pixel); val g = Color.green(pixel); val b = Color.blue(pixel)
+                val idx = y * scaledWidth + x
+                val isMatch = colorProfile.matches(r, g, b)
+                mask[idx] = isMatch
+                if (isMatch) weights[idx] = colorProfile.matchScore(r, g, b).coerceAtLeast(MIN_WEIGHT)
             }
         }
         scaled.recycle()
 
-        val blobs = findBlobs(mask, scaledWidth, scaledHeight).filter { it.size >= MIN_MARKER_PIXELS }
+        val blobs = findBlobs(mask, weights, scaledWidth, scaledHeight).filter { it.size >= MIN_MARKER_PIXELS }
         val previousScaled = previousCentroidPx?.let { (it.first * downscaleFactor) to (it.second * downscaleFactor) }
         val chosen = chooseTrackedBlob(blobs, previousScaled) ?: return null
 
@@ -160,5 +184,11 @@ class BarPathFrameTracker @Inject constructor() {
 
     private companion object {
         const val MIN_MARKER_PIXELS = 10
+
+        // A matching pixel always contributes at least a little weight, even if matchScore()
+        // rounds to 0 at the tolerance boundary — keeps its contribution to the centroid
+        // proportionally tiny rather than letting a whole blob's weight vanish to 0 and force
+        // the unweighted fallback for what could otherwise be a legitimately weighted blob.
+        const val MIN_WEIGHT = 0.01
     }
 }
