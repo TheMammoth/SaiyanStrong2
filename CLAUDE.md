@@ -1096,6 +1096,39 @@ _(Claude Code appends here after each completed task)_
   `BackupPayload.lifetimePowerEarned` backup-format compatibility, no longer read for
   display — doesn't drift either, even though nothing authoritative depends on it anymore.
   versionCode 30, versionName 0.18.1.
+- [x] Sprint 22 — editable, fully-detailed session results (v0.19.0): user feedback was
+  that SessionCompleteScreen (also the read-only view opened from History) only showed a
+  best-set summary per exercise ("1 sets · 5 reps — BEST 60kg") with no way to see or
+  correct individual sets after the fact.
+  (1) Data layer: `SetLogDao.update`/`deleteById` + `SessionDao.updateTotals` added.
+  `SessionRepository`/`SessionRepositoryImpl` gain `updateSet`/`deleteSet`, both
+  transactional (`AppDatabase.withTransaction`) and both end by recomputing the parent
+  session's `total_volume_kg`/`power_earned` from every remaining set via
+  `CalculatePowerLevelUseCase.sessionPowerGained` — same pattern `CoachRepositoryImpl`
+  already used for deriving power from raw sets, so an edited/deleted set can never leave
+  the session's stored totals stale or double-counted.
+  (2) `ExerciseRow` (SessionCompleteViewModel) now carries the full `sets: List<SetLog>`
+  for its exercise, not just the aggregated best/e1RM numbers. New `onEditSet`/
+  `onDeleteSet` ViewModel functions call straight through to the repository (matching the
+  existing `onTitleChange`/`updateTitle` precedent of simple pass-through ops bypassing a
+  dedicated use case).
+  (3) UI: new `ExerciseResultCard`/`EditableResultSetRow` (session_complete/
+  SessionResultsSection.kt) render every logged set per exercise — SET/KG/REPS row,
+  inline-editable KG/REPS (BasicTextField, select-all-on-focus, ±step chips while
+  focused), tap SET number to toggle failure, long-press a row for a delete
+  ConfirmDialog — reusing the exact interaction language ActiveWorkoutScreen already
+  taught users during a live workout, just now also available after DONE and from
+  History (History → session card tap already routed here; no History changes needed).
+  (4) Extracted `SetCell`/`StepperRow` out of ActiveWorkoutScreen.kt into shared
+  `presentation/components/SetInputCell.kt` (identical behavior, now reused by both
+  screens instead of duplicated) — incidental cleanup, not a rewrite; trimmed
+  ActiveWorkoutScreen.kt from 792→707 lines in the process.
+  KNOWN GAP: not device/emulator-tested this session (no device available) — verified via
+  `assembleGithubDebug` compiling clean only. Test the edit/delete-set flow on a real
+  session before trusting it fully; also note repeated set edits on a very large session
+  are O(n) per edit (re-reads every set to recompute totals) — fine at real-world set
+  counts, would need a SUM query instead of the Kotlin-side fold if that ever mattered.
+  versionCode 31, versionName 0.19.0.
 
 ## Release rules
 

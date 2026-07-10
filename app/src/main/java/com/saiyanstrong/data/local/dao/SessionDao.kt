@@ -29,6 +29,9 @@ interface SessionDao {
     @Query("UPDATE sessions SET title = :title WHERE id = :id")
     suspend fun updateTitle(id: Long, title: String)
 
+    @Query("UPDATE sessions SET total_volume_kg = :totalVolumeKg, power_earned = :powerEarned WHERE id = :id")
+    suspend fun updateTotals(id: Long, totalVolumeKg: Double, powerEarned: Int)
+
     @Query("SELECT COALESCE(SUM(power_earned), 0) FROM sessions")
     fun getTotalPowerEarned(): Flow<Int>
 }

@@ -32,6 +32,12 @@ interface SetLogDao {
     @Query("DELETE FROM set_logs")
     suspend fun deleteAll()
 
+    @Query("UPDATE set_logs SET weight_kg = :weightKg, reps = :reps, is_failure = :isFailure, volume_kg = :volumeKg WHERE id = :id")
+    suspend fun update(id: Long, weightKg: Double, reps: Int, isFailure: Boolean, volumeKg: Double)
+
+    @Query("DELETE FROM set_logs WHERE id = :id")
+    suspend fun deleteById(id: Long)
+
     @Query("SELECT * FROM set_logs")
     fun getAll(): Flow<List<SetLogEntity>>
 

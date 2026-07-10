@@ -45,7 +45,6 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.IntSize
@@ -123,6 +122,8 @@ fun SessionCompleteScreen(
         onDone = viewModel::onDone,
         onDeleteSession = viewModel::onDeleteSession,
         onSaveAsTemplate = viewModel::onSaveAsTemplate,
+        onEditSet = viewModel::onEditSet,
+        onDeleteSet = viewModel::onDeleteSet,
         onShare = {
             scope.launch {
                 withFrameNanos {}
@@ -145,6 +146,8 @@ internal fun SessionCompleteContent(
     onDone: () -> Unit,
     onDeleteSession: () -> Unit,
     onSaveAsTemplate: () -> Unit = {},
+    onEditSet: (Long, Double, Int, Boolean) -> Unit = { _, _, _, _ -> },
+    onDeleteSet: (Long) -> Unit = {},
     onShare: () -> Unit = {}
 ) {
     Column(
@@ -256,36 +259,18 @@ internal fun SessionCompleteContent(
                     fontFamily = FontFamily.Monospace,
                     modifier = Modifier.padding(top = 14.dp, bottom = 6.dp)
                 )
+                Text(
+                    "tap a set to edit · long-press to delete",
+                    color = Color.White.copy(alpha = 0.35f), fontSize = 10.sp,
+                    fontFamily = FontFamily.Monospace,
+                    modifier = Modifier.padding(bottom = 6.dp)
+                )
                 Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(SaiyanGray, RoundedCornerShape(6.dp))
-                        .padding(vertical = 4.dp)
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     exerciseRows.forEach { row ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 14.dp, vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(Modifier.weight(1f)) {
-                                Text(row.name, color = Color.White, fontSize = 13.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                Text("${row.totalSets} sets · ${row.totalReps} reps",
-                                    color = Color.White.copy(alpha = 0.4f), fontSize = 10.sp,
-                                    fontFamily = FontFamily.Monospace)
-                            }
-                            Column(horizontalAlignment = Alignment.End) {
-                                Text("BEST ${WeightFormatter.format(row.bestWeightKg)}",
-                                    color = NeonGreen, fontSize = 12.sp, fontWeight = FontWeight.Black,
-                                    fontFamily = FontFamily.Monospace)
-                                Text("e1RM ${WeightFormatter.formatOneRm(row.estOneRmKg)}",
-                                    color = PowerAmber, fontSize = 10.sp,
-                                    fontFamily = FontFamily.Monospace)
-                            }
-                        }
+                        ExerciseResultCard(row = row, onEditSet = onEditSet, onDeleteSet = onDeleteSet)
                     }
                 }
             }

@@ -14,6 +14,7 @@ import com.saiyanstrong.domain.model.ExerciseSetHistory
 import com.saiyanstrong.domain.model.SetLog
 import com.saiyanstrong.domain.model.WorkoutSession
 import com.saiyanstrong.domain.repository.SessionRepository
+import com.saiyanstrong.domain.usecase.CalculatePowerLevelUseCase
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -26,7 +27,8 @@ class SessionRepositoryImpl @Inject constructor(
     private val sessionDao: SessionDao,
     private val exerciseLogDao: ExerciseLogDao,
     private val setLogDao: SetLogDao,
-    private val exerciseDao: ExerciseDao
+    private val exerciseDao: ExerciseDao,
+    private val calculatePowerLevelUseCase: CalculatePowerLevelUseCase
 ) : SessionRepository {
 
     override fun getAllSessions(): Flow<List<WorkoutSession>> =
@@ -58,6 +60,27 @@ class SessionRepositoryImpl @Inject constructor(
 
     override suspend fun updateTitle(sessionId: Long, title: String) =
         sessionDao.updateTitle(sessionId, title)
+
+    override suspend fun updateSet(sessionId: Long, setLogId: Long, weightKg: Double, reps: Int, isFailure: Boolean) =
+        appDatabase.withTransaction {
+            setLogDao.update(setLogId, weightKg, reps, isFailure, weightKg * reps)
+            recomputeSessionTotals(sessionId)
+        }
+
+    override suspend fun deleteSet(sessionId: Long, setLogId: Long) =
+        appDatabase.withTransaction {
+            setLogDao.deleteById(setLogId)
+            recomputeSessionTotals(sessionId)
+        }
+
+    private suspend fun recomputeSessionTotals(sessionId: Long) {
+        val allSets = exerciseLogDao.getForSession(sessionId).first()
+            .flatMap { setLogDao.getForExerciseLog(it.id).first() }
+            .map { it.toDomain() }
+        val totalVolumeKg = allSets.sumOf { it.volumeKg }
+        val powerEarned = calculatePowerLevelUseCase.sessionPowerGained(allSets)
+        sessionDao.updateTotals(sessionId, totalVolumeKg, powerEarned)
+    }
 
     override suspend fun getLastSetsForExercise(exerciseId: Int): List<SetLog> {
         val logId = exerciseLogDao.getMostRecentExerciseLogId(exerciseId) ?: return emptyList()

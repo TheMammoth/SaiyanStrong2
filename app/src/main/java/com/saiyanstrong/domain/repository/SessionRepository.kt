@@ -12,6 +12,8 @@ interface SessionRepository {
     suspend fun saveSession(session: WorkoutSession): Long
     suspend fun deleteSession(sessionId: Long)
     suspend fun updateTitle(sessionId: Long, title: String)
+    suspend fun updateSet(sessionId: Long, setLogId: Long, weightKg: Double, reps: Int, isFailure: Boolean)
+    suspend fun deleteSet(sessionId: Long, setLogId: Long)
     suspend fun getLastSetsForExercise(exerciseId: Int): List<SetLog>
     fun getExerciseHistory(exerciseId: Int): Flow<List<ExerciseSetHistory>>
 }

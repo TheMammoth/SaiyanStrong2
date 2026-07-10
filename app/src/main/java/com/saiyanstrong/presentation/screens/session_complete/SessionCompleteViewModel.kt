@@ -5,6 +5,7 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.saiyanstrong.domain.model.PowerLevel
+import com.saiyanstrong.domain.model.SetLog
 import com.saiyanstrong.domain.model.WorkoutSession
 import com.saiyanstrong.domain.repository.SessionRepository
 import com.saiyanstrong.domain.repository.TemplateRepository
@@ -41,7 +42,8 @@ data class ExerciseRow(
     val bestWeightKg: Double,
     val estOneRmKg: Double,
     val totalReps: Int,
-    val totalSets: Int
+    val totalSets: Int,
+    val sets: List<SetLog> = emptyList()
 )
 
 @HiltViewModel
@@ -71,7 +73,8 @@ class SessionCompleteViewModel @Inject constructor(
                     bestWeightKg = best?.weightKg ?: 0.0,
                     estOneRmKg = oneRm,
                     totalReps = log.sets.sumOf { it.reps },
-                    totalSets = log.sets.size
+                    totalSets = log.sets.size,
+                    sets = log.sets
                 )
             } ?: emptyList()
         }
@@ -130,6 +133,18 @@ class SessionCompleteViewModel @Inject constructor(
         viewModelScope.launch {
             deleteSessionUseCase.execute(sessionId)
             _uiState.update { it.copy(isDeleted = true) }
+        }
+    }
+
+    fun onEditSet(setLogId: Long, weightKg: Double, reps: Int, isFailure: Boolean) {
+        viewModelScope.launch {
+            sessionRepository.updateSet(sessionId, setLogId, weightKg, reps, isFailure)
+        }
+    }
+
+    fun onDeleteSet(setLogId: Long) {
+        viewModelScope.launch {
+            sessionRepository.deleteSet(sessionId, setLogId)
         }
     }
 }
