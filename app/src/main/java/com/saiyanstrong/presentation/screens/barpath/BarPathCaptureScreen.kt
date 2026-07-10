@@ -87,6 +87,18 @@ fun BarPathCaptureScreen(
 
     LaunchedEffect(uiState.isSaved) { if (uiState.isSaved) onDone() }
 
+    if (uiState.showReplay && uiState.videoPath != null) {
+        BarPathReplayContent(
+            videoPath = uiState.videoPath!!,
+            frames = uiState.trackedFrames,
+            videoWidthPx = uiState.videoWidthPx,
+            videoHeightPx = uiState.videoHeightPx,
+            analysis = uiState.analysis,
+            onBack = viewModel::onHideReplay
+        )
+        return
+    }
+
     Box(Modifier.fillMaxSize().background(MatteBlack)) {
         Column(Modifier.fillMaxSize()) {
             Text(
@@ -123,6 +135,9 @@ fun BarPathCaptureScreen(
                     analysis = uiState.analysis,
                     calibrationFrame = uiState.calibrationFrame,
                     trackedSamples = uiState.trackedSamples,
+                    canReplay = uiState.trackedFrames.size >= 2 && uiState.videoPath != null &&
+                        uiState.videoWidthPx > 0,
+                    onReplay = viewModel::onShowReplay,
                     onSave = viewModel::onSave
                 )
                 CaptureStep.ERROR -> ErrorStep(message = uiState.errorMessage, onRetry = viewModel::onRetry)
@@ -551,6 +566,8 @@ private fun ResultsStep(
     analysis: BarPathAnalysis?,
     calibrationFrame: Bitmap? = null,
     trackedSamples: List<BarPathSample> = emptyList(),
+    canReplay: Boolean = false,
+    onReplay: () -> Unit = {},
     onSave: () -> Unit
 ) {
     if (analysis == null) return
@@ -586,6 +603,12 @@ private fun ResultsStep(
         }
 
         Spacer(Modifier.height(20.dp))
+        if (canReplay) {
+            OutlinedButton(onClick = onReplay, modifier = Modifier.fillMaxWidth()) {
+                Text("▶ REPLAY WITH BAR PATH", fontWeight = FontWeight.Black, color = NeonGreen)
+            }
+            Spacer(Modifier.height(8.dp))
+        }
         SaiyanButton(onClick = onSave, modifier = Modifier.fillMaxWidth()) {
             Text("SAVE TO SET  >>>", fontWeight = FontWeight.Black)
         }

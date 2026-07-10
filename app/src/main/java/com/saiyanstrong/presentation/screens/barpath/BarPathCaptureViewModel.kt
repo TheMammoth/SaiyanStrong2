@@ -7,6 +7,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.saiyanstrong.domain.model.BarPathAnalysis
 import com.saiyanstrong.domain.model.BarPathSample
+import com.saiyanstrong.domain.model.TrackedFrame
 import com.saiyanstrong.domain.repository.BarPathRepository
 import com.saiyanstrong.domain.repository.UserRepository
 import com.saiyanstrong.domain.usecase.AnalyzeBarPathUseCase
@@ -50,6 +51,11 @@ data class BarPathCaptureUiState(
     val errorMessage: String? = null,
     val analysis: BarPathAnalysis? = null,
     val trackedSamples: List<BarPathSample> = emptyList(),
+    // Per-frame path + video dimensions for the (ephemeral, in-session) replay overlay.
+    val trackedFrames: List<TrackedFrame> = emptyList(),
+    val videoWidthPx: Int = 0,
+    val videoHeightPx: Int = 0,
+    val showReplay: Boolean = false,
     val isSaved: Boolean = false,
     /** True while importing/reading the video before the calibration frame is ready — the
      * recording/picker UI otherwise gives no feedback during this gap. */
@@ -279,7 +285,14 @@ class BarPathCaptureViewModel @Inject constructor(
                 concentricStartMs = samples.first().timestampMs,
                 concentricEndMs = samples.last().timestampMs
             )
-            _uiState.update { it.copy(step = CaptureStep.RESULTS, analysis = analysis, trackedSamples = samples) }
+            val frames = analyzeBarPathUseCase.trackFrames(samples, pixelsPerMeter, samples.first().timestampMs, samples.last().timestampMs)
+            val (vw, vh) = barPathFrameTracker.videoDimensions(videoPath)
+            _uiState.update {
+                it.copy(
+                    step = CaptureStep.RESULTS, analysis = analysis, trackedSamples = samples,
+                    trackedFrames = frames, videoWidthPx = vw, videoHeightPx = vh
+                )
+            }
         }
     }
 
@@ -334,9 +347,19 @@ class BarPathCaptureViewModel @Inject constructor(
                 concentricStartMs = samples.first().timestampMs,
                 concentricEndMs = samples.last().timestampMs
             )
-            _uiState.update { it.copy(step = CaptureStep.RESULTS, analysis = analysis, trackedSamples = samples) }
+            val frames = analyzeBarPathUseCase.trackFrames(samples, fallbackPixelsPerMeter, samples.first().timestampMs, samples.last().timestampMs)
+            val (vw, vh) = barPathFrameTracker.videoDimensions(videoPath)
+            _uiState.update {
+                it.copy(
+                    step = CaptureStep.RESULTS, analysis = analysis, trackedSamples = samples,
+                    trackedFrames = frames, videoWidthPx = vw, videoHeightPx = vh
+                )
+            }
         }
     }
+
+    fun onShowReplay() { _uiState.update { it.copy(showReplay = true) } }
+    fun onHideReplay() { _uiState.update { it.copy(showReplay = false) } }
 
     fun onSave() {
         val analysis = _uiState.value.analysis ?: return

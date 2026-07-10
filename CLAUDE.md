@@ -1817,6 +1817,42 @@ _(Claude Code appends here after each completed task)_
   user's marker are all unknown until run on a device. This establishes the loop; it does not prove
   it works.
   versionCode 48, versionName 0.34.0.
+- [x] Sprint 38 — post-rep video replay with synced bar-path overlay (v0.35.0): plays the recorded
+  lift back with the tracked path overlaid, velocity-colour-coded, synced to playback. Request
+  assumed a `VbtReplayFragment` + custom `View` + a persisted `List<TrackedFrame>`; none fit — this
+  app is Compose-only (no fragments/XML), and NO per-frame path is persisted (only the aggregate
+  `BarPathAnalysis` reaches the DB; per-frame velocities were computed-then-discarded inside
+  `AnalyzeBarPathUseCase`; the video lives only in cache). Flagged that replay is therefore
+  inherently EPHEMERAL — feasible only right after a rep from the cached video + in-memory path,
+  not from saved History. User chose the ephemeral in-session scope.
+  (1) Data: new `AnalyzeBarPathUseCase.trackFrames(...)` returns the per-frame `TrackedFrame`
+  (timestamp, x, y, SG-velocity) series — refactored the shared windowing/velocity math out of
+  `execute` into a private `computeSeries` so both paths use identical numbers (all 16 existing
+  analyzer tests still pass, confirming behavior-preserving). New `domain/model/TrackedFrame.kt`.
+  `BarPathFrameTracker.videoDimensions()` reads rotation-applied display W/H (so centroid coords,
+  which come from rotation-applied getFrameAtTime frames, map correctly onto playback).
+  (2) Dependency: added `androidx.media3:media3-exoplayer` + `media3-ui` 1.4.1 (first video-playback
+  lib; version-pinned in the catalog as always).
+  (3) `BarPathReplayContent.kt` — a Compose screen (NOT a Fragment/custom-View), hosting an
+  ExoPlayer `PlayerView` via `AndroidView` (paused-on-load, looping, muted) with a Compose `Canvas`
+  overlay: LAYER 1 full-path ghost + LAYER 3 peak(green)/sticking(red) markers + start/end triangles
+  are cached via `drawWithCache` (rebuilt only on frames/size change, honoring the O(n) perf note);
+  LAYER 2 velocity-coloured progressive path + LAYER 4 white cursor with velocity-coloured ring
+  redraw every frame; a top-end HUD (Mean/Peak/ROM/Current) and a Material3 scrub slider + play/pause
+  drive playback. 60fps position poll via a `LaunchedEffect` loop (Compose idiom, not a Handler).
+  The velocity→colour mapping (`velocityColorArgb`, smooth interpolation red→orange→yellow→green,
+  no Android `ArgbEvaluator` so it's pure) and the letterbox `computeFittedVideoRect` are pure
+  top-level `internal fun`s with 7 unit tests.
+  (4) Wired in-session: `BarPathCaptureViewModel` computes `trackedFrames` + video dims after
+  analysis and exposes a `showReplay` flag; the RESULTS screen gets a "▶ REPLAY WITH BAR PATH"
+  button (shown only when frames+video+dims are available); `BarPathCaptureScreen` renders the
+  replay over the results when toggled, with a BACK button.
+  KNOWN GAPS: ephemeral only (no History replay — would need persisting video + per-frame path,
+  the bigger option deliberately not taken). Entirely unverified on a real device — the ExoPlayer
+  playback, the overlay coordinate mapping (esp. the rotation assumption), and sync are all
+  untested. Coordinate mapping assumes both getFrameAtTime and PlayerView render in the same
+  rotation-applied display space — plausible but a real thing to verify on a device.
+  versionCode 49, versionName 0.35.0.
 
 ## Release rules
 

@@ -111,6 +111,24 @@ class BarPathFrameTracker @Inject constructor(
     private val barPathVideoDecoder: BarPathVideoDecoder
 ) {
 
+    /**
+     * The video's DISPLAY dimensions (width, height) — rotation-applied, so they match both the
+     * coordinate space of the tracked centroids (getFrameAtTime returns rotation-applied frames)
+     * and what a player renders. Needed to map centroids onto the replay video. (0,0) if unknown.
+     */
+    fun videoDimensions(videoPath: String): Pair<Int, Int> {
+        val retriever = MediaMetadataRetriever()
+        return try {
+            retriever.setDataSource(videoPath)
+            val w = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull() ?: 0
+            val h = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: 0
+            val rotation = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull() ?: 0
+            if (rotation == 90 || rotation == 270) h to w else w to h
+        } finally {
+            retriever.release()
+        }
+    }
+
     /** First frame of the video, for the calibration screen (tap two points of known distance). */
     fun extractFirstFrame(videoPath: String): Bitmap? {
         val retriever = MediaMetadataRetriever()

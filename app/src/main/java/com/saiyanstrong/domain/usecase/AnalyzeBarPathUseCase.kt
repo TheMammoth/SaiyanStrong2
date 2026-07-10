@@ -2,6 +2,7 @@ package com.saiyanstrong.domain.usecase
 
 import com.saiyanstrong.domain.model.BarPathAnalysis
 import com.saiyanstrong.domain.model.BarPathSample
+import com.saiyanstrong.domain.model.TrackedFrame
 import com.saiyanstrong.domain.model.VelocityZone
 import com.saiyanstrong.domain.util.SavitzkyGolayFilter
 import com.saiyanstrong.domain.util.ScaleCorrection
@@ -15,25 +16,27 @@ private const val GRAVITY_MS2 = 9.81
  */
 class AnalyzeBarPathUseCase @Inject constructor() {
 
-    fun execute(
+    /** window + corrected heights (m) + per-sample SG velocities, index-aligned to `window`. */
+    private class Series(
+        val window: List<BarPathSample>,
+        val heightsMeters: List<Double>,
+        val velocities: List<Double>
+    )
+
+    private fun computeSeries(
         samples: List<BarPathSample>,
         pixelsPerMeter: Double,
-        massKg: Double,
         concentricStartMs: Long,
         concentricEndMs: Long
-    ): BarPathAnalysis {
-        // Strictly increasing timestamps guarantee every consecutive pair has dt > 0, which in
-        // turn guarantees `velocities` always has exactly window.size - 1 entries — velocities[i]
-        // and powers[i] can then be trusted to line up with window[i+1] by index, with no
-        // skip-and-desync risk from a duplicate/out-of-order frame timestamp.
+    ): Series? {
+        // Strictly increasing timestamps guarantee every consecutive pair has dt > 0, so the
+        // SG velocity series stays index-aligned to `window` with no skip-and-desync risk.
         val window = samples
             .filter { it.timestampMs in concentricStartMs..concentricEndMs }
             .sortedBy { it.timestampMs }
             .distinctBy { it.timestampMs }
 
-        if (window.size < 2 || pixelsPerMeter <= 0.0) {
-            return BarPathAnalysis(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, VelocityZone.ABSOLUTE_STRENGTH)
-        }
+        if (window.size < 2 || pixelsPerMeter <= 0.0) return null
 
         // Depth-drift correction, two mutually exclusive mechanisms (never both — they'd
         // double-correct the same effect):
@@ -44,8 +47,7 @@ class AnalyzeBarPathUseCase @Inject constructor() {
         //    first successfully-tracked frame is the baseline every later frame's size is
         //    compared against. If the bar has moved farther from the camera, the marker looks
         //    smaller and its real displacement is under-represented in pixels — ScaleCorrection
-        //    scales it back up (and vice versa). Missing/unreliable diameters fall back to 1.0
-        //    (no correction).
+        //    scales it back up (and vice versa). Missing/unreliable diameters fall back to 1.0.
         // Either way, correction is applied to the frame-to-frame PIXEL DISPLACEMENT and the
         // corrected series rebuilt via cumulative sum — NOT by scaling the raw yPx value
         // directly, which has no true zero to scale from. Image Y increases downward; each
@@ -65,13 +67,27 @@ class AnalyzeBarPathUseCase @Inject constructor() {
         val heightsMeters = correctedHeights.toList()
 
         // Savitzky-Golay: local quadratic fit against real (possibly unevenly-spaced) frame
-        // timestamps, analytically differentiated — a materially smoother velocity estimate
-        // than differencing raw, jittery tracked positions frame to frame. One velocity per
-        // sample (index-aligned to `window`), not one per gap.
+        // timestamps, analytically differentiated — a materially smoother velocity estimate than
+        // differencing raw, jittery tracked positions. One velocity per sample (index-aligned).
         val velocities = SavitzkyGolayFilter.differentiate(
             positions = heightsMeters,
             timestamps = window.map { it.timestampMs.toDouble() }
         )
+        return Series(window, heightsMeters, velocities)
+    }
+
+    fun execute(
+        samples: List<BarPathSample>,
+        pixelsPerMeter: Double,
+        massKg: Double,
+        concentricStartMs: Long,
+        concentricEndMs: Long
+    ): BarPathAnalysis {
+        val series = computeSeries(samples, pixelsPerMeter, concentricStartMs, concentricEndMs)
+            ?: return BarPathAnalysis(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, VelocityZone.ABSOLUTE_STRENGTH)
+        val window = series.window
+        val heightsMeters = series.heightsMeters
+        val velocities = series.velocities
 
         val powers = (1 until window.size).map { i ->
             val dtSeconds = (window[i].timestampMs - window[i - 1].timestampMs) / 1000.0
@@ -95,5 +111,22 @@ class AnalyzeBarPathUseCase @Inject constructor() {
             barPathDeviationCm = (xPxValues.max() - xPxValues.min()) / pixelsPerMeter * 100.0,
             velocityZone = VelocityZone.fromVelocity(meanConcentricVelocityMs)
         )
+    }
+
+    /**
+     * The per-frame series behind [execute]'s aggregate — position + SG velocity per tracked
+     * frame — for the replay overlay. Same windowing/velocity math (shared [computeSeries]), so a
+     * frame's velocity here matches what the aggregate was derived from. Empty if degenerate.
+     */
+    fun trackFrames(
+        samples: List<BarPathSample>,
+        pixelsPerMeter: Double,
+        concentricStartMs: Long,
+        concentricEndMs: Long
+    ): List<TrackedFrame> {
+        val series = computeSeries(samples, pixelsPerMeter, concentricStartMs, concentricEndMs) ?: return emptyList()
+        return series.window.mapIndexed { i, sample ->
+            TrackedFrame(sample.timestampMs, sample.xPx, sample.yPx, series.velocities[i])
+        }
     }
 }
