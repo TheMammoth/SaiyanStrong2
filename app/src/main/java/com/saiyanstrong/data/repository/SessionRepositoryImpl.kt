@@ -91,6 +91,7 @@ class SessionRepositoryImpl @Inject constructor(
         setLogDao.getHistoryForExercise(exerciseId).map { sets ->
             sets.map {
                 ExerciseSetHistory(
+                    setLogId = it.id,
                     dateMs = it.dateMs,
                     sessionId = it.sessionId,
                     weightKg = it.weightKg,

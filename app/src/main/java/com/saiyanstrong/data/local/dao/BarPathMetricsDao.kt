@@ -18,6 +18,9 @@ interface BarPathMetricsDao {
     @Query("SELECT * FROM bar_path_metrics WHERE set_log_id = :setLogId")
     fun getForSetLog(setLogId: Long): Flow<BarPathMetricsEntity?>
 
+    @Query("SELECT * FROM bar_path_metrics WHERE set_log_id IN (:setLogIds)")
+    fun getForSetLogIds(setLogIds: List<Long>): Flow<List<BarPathMetricsEntity>>
+
     @Query("SELECT * FROM bar_path_metrics")
     fun getAll(): Flow<List<BarPathMetricsEntity>>
 

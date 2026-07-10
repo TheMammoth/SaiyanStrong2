@@ -6,6 +6,7 @@ import com.saiyanstrong.domain.model.BarPathAnalysis
 import com.saiyanstrong.domain.model.VelocityZone
 import com.saiyanstrong.domain.repository.BarPathRepository
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -31,21 +32,26 @@ class BarPathRepositoryImpl @Inject constructor(
     }
 
     override fun getBarPathMetrics(setLogId: Long): Flow<BarPathAnalysis?> =
-        barPathMetricsDao.getForSetLog(setLogId).map { entity ->
-            entity?.let {
-                BarPathAnalysis(
-                    peakVelocityMs = it.peakVelocityMs,
-                    meanConcentricVelocityMs = it.meanConcentricVelocityMs,
-                    peakPowerWatts = it.peakPowerWatts,
-                    meanPowerWatts = it.meanPowerWatts,
-                    rangeOfMotionCm = it.rangeOfMotionCm,
-                    barPathDeviationCm = it.barPathDeviationCm,
-                    velocityZone = VelocityZone.valueOf(it.velocityZone)
-                )
-            }
+        barPathMetricsDao.getForSetLog(setLogId).map { entity -> entity?.toDomain() }
+
+    override fun getBarPathMetricsForSets(setLogIds: List<Long>): Flow<Map<Long, BarPathAnalysis>> {
+        if (setLogIds.isEmpty()) return flowOf(emptyMap())
+        return barPathMetricsDao.getForSetLogIds(setLogIds).map { entities ->
+            entities.associate { it.setLogId to it.toDomain() }
         }
+    }
 
     override suspend fun deleteBarPathMetrics(setLogId: Long) {
         barPathMetricsDao.deleteForSetLog(setLogId)
     }
+
+    private fun BarPathMetricsEntity.toDomain() = BarPathAnalysis(
+        peakVelocityMs = peakVelocityMs,
+        meanConcentricVelocityMs = meanConcentricVelocityMs,
+        peakPowerWatts = peakPowerWatts,
+        meanPowerWatts = meanPowerWatts,
+        rangeOfMotionCm = rangeOfMotionCm,
+        barPathDeviationCm = barPathDeviationCm,
+        velocityZone = VelocityZone.valueOf(velocityZone)
+    )
 }

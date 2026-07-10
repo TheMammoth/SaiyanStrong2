@@ -4,20 +4,24 @@ import android.graphics.Bitmap
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.saiyanstrong.domain.model.BarPathAnalysis
 import com.saiyanstrong.domain.model.PowerLevel
 import com.saiyanstrong.domain.model.SetLog
 import com.saiyanstrong.domain.model.WorkoutSession
+import com.saiyanstrong.domain.repository.BarPathRepository
 import com.saiyanstrong.domain.repository.SessionRepository
 import com.saiyanstrong.domain.repository.TemplateRepository
 import com.saiyanstrong.domain.usecase.DeleteSessionUseCase
 import com.saiyanstrong.domain.usecase.GetEvolutionStageUseCase
 import com.saiyanstrong.util.SessionShareImageSaver
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
@@ -51,6 +55,7 @@ class SessionCompleteViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val sessionRepository: SessionRepository,
     private val templateRepository: TemplateRepository,
+    private val barPathRepository: BarPathRepository,
     private val sessionShareImageSaver: SessionShareImageSaver,
     private val deleteSessionUseCase: DeleteSessionUseCase,
     getEvolutionStageUseCase: GetEvolutionStageUseCase
@@ -79,6 +84,13 @@ class SessionCompleteViewModel @Inject constructor(
             } ?: emptyList()
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val barPathBySetId: StateFlow<Map<Long, BarPathAnalysis>> = exerciseRows
+        .flatMapLatest { rows ->
+            barPathRepository.getBarPathMetricsForSets(rows.flatMap { row -> row.sets.map { it.id } })
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
 
     init {
         sessionRepository.getSessionById(sessionId)

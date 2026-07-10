@@ -3,9 +3,11 @@ package com.saiyanstrong.presentation.screens.exercises
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.saiyanstrong.domain.model.BarPathAnalysis
 import com.saiyanstrong.domain.model.Exercise
 import com.saiyanstrong.domain.model.ExerciseMedia
 import com.saiyanstrong.domain.model.ExerciseSetHistory
+import com.saiyanstrong.domain.repository.BarPathRepository
 import com.saiyanstrong.domain.repository.ExerciseMediaRepository
 import com.saiyanstrong.domain.repository.ExerciseRepository
 import com.saiyanstrong.domain.repository.SessionRepository
@@ -18,6 +20,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -49,15 +53,32 @@ data class ExerciseDetailUiState(
     val e1RmChart: List<ChartPoint> = emptyList(),
     val weightChart: List<ChartPoint> = emptyList(),
     val volumeChart: List<ChartPoint> = emptyList(),
+    val velocityChart: List<ChartPoint> = emptyList(),
     val repMaxRecords: List<RepMaxRecord> = emptyList(),
     val sessionHistory: List<SessionHistoryGroup> = emptyList()
 )
+
+/**
+ * Per session, the tracked (bar-path-recorded) set with the highest weight contributes its mean
+ * concentric velocity — same "best of session" convention weightChart/e1RmChart already use.
+ * Top-level so it's unit-testable without touching Hilt/ViewModel construction.
+ */
+internal fun buildVelocityChart(
+    bySession: Map<Long, List<ExerciseSetHistory>>,
+    barPathBySetId: Map<Long, BarPathAnalysis>
+): List<ChartPoint> =
+    bySession.values.mapNotNull { sets ->
+        val tracked = sets.filter { barPathBySetId.containsKey(it.setLogId) }
+        val best = tracked.maxByOrNull { it.weightKg } ?: return@mapNotNull null
+        ChartPoint(best.dateMs, barPathBySetId.getValue(best.setLogId).meanConcentricVelocityMs)
+    }.sortedBy { it.dateMs }
 
 @HiltViewModel
 class ExerciseDetailViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     exerciseRepository: ExerciseRepository,
     sessionRepository: SessionRepository,
+    private val barPathRepository: BarPathRepository,
     private val estimateOneRepMaxUseCase: EstimateOneRepMaxUseCase,
     private val exerciseMediaRepository: ExerciseMediaRepository
 ) : ViewModel() {
@@ -74,14 +95,22 @@ class ExerciseDetailViewModel @Inject constructor(
         }
     }
 
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     val uiState: StateFlow<ExerciseDetailUiState> = combine(
         exerciseRepository.getExerciseById(exerciseId),
         sessionRepository.getExerciseHistory(exerciseId)
-    ) { exercise, history ->
-        buildState(exercise, history)
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ExerciseDetailUiState())
+    ) { exercise, history -> exercise to history }
+        .flatMapLatest { (exercise, history) ->
+            barPathRepository.getBarPathMetricsForSets(history.map { it.setLogId })
+                .map { barPathBySetId -> buildState(exercise, history, barPathBySetId) }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ExerciseDetailUiState())
 
-    private fun buildState(exercise: Exercise?, history: List<ExerciseSetHistory>): ExerciseDetailUiState {
+    private fun buildState(
+        exercise: Exercise?,
+        history: List<ExerciseSetHistory>,
+        barPathBySetId: Map<Long, BarPathAnalysis>
+    ): ExerciseDetailUiState {
         if (history.isEmpty()) return ExerciseDetailUiState(exercise = exercise)
 
         val bySession = history.groupBy { it.sessionId }
@@ -101,6 +130,8 @@ class ExerciseDetailViewModel @Inject constructor(
         val sessionHistory = bySession.values
             .map { sets -> SessionHistoryGroup(dateMs = sets.first().dateMs, sets = sets) }
             .sortedByDescending { it.dateMs }
+
+        val velocityChart = buildVelocityChart(bySession, barPathBySetId)
 
         // Best performance per rep count (1..10), Strong-style records table
         val repMaxRecords = (1..10).mapNotNull { reps ->
@@ -126,6 +157,7 @@ class ExerciseDetailViewModel @Inject constructor(
             e1RmChart = e1RmChart,
             weightChart = weightChart,
             volumeChart = volumeChart,
+            velocityChart = velocityChart,
             repMaxRecords = repMaxRecords,
             sessionHistory = sessionHistory
         )

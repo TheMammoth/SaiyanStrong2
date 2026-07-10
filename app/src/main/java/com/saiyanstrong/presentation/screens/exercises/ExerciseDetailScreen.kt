@@ -255,6 +255,9 @@ private fun ChartsTab(uiState: ExerciseDetailUiState) {
         item { ChartCard("BEST SET (EST. 1RM)", uiState.e1RmChart) }
         item { ChartCard("BEST SET (MAX WEIGHT)", uiState.weightChart) }
         item { ChartCard("SESSION VOLUME (KG)", uiState.volumeChart) }
+        if (uiState.velocityChart.size >= 2) {
+            item { ChartCard("BAR SPEED (MEAN VELOCITY, M/S)", uiState.velocityChart) }
+        }
     }
 }
 

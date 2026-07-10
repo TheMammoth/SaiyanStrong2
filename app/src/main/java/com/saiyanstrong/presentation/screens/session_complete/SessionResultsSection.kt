@@ -32,6 +32,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.platform.LocalFocusManager
+import com.saiyanstrong.domain.model.BarPathAnalysis
 import com.saiyanstrong.domain.model.SetLog
 import com.saiyanstrong.presentation.components.ConfirmDialog
 import com.saiyanstrong.presentation.components.SetCell
@@ -51,6 +52,7 @@ private fun Double.fmtKg(): String = WeightFormatter.format(this).replace(" kg",
 @Composable
 internal fun ExerciseResultCard(
     row: ExerciseRow,
+    barPathBySetId: Map<Long, BarPathAnalysis> = emptyMap(),
     onEditSet: (setLogId: Long, weightKg: Double, reps: Int, isFailure: Boolean) -> Unit,
     onDeleteSet: (setLogId: Long) -> Unit,
     modifier: Modifier = Modifier
@@ -87,6 +89,7 @@ internal fun ExerciseResultCard(
                 EditableResultSetRow(
                     set = set,
                     stepKg = stepKg,
+                    barPathAnalysis = barPathBySetId[set.id],
                     onEdit = { kg, reps, fail -> onEditSet(set.id, kg, reps, fail) },
                     onDelete = { onDeleteSet(set.id) },
                     modifier = Modifier.padding(vertical = 1.dp)
@@ -100,6 +103,7 @@ internal fun ExerciseResultCard(
 private fun EditableResultSetRow(
     set: SetLog,
     stepKg: Double,
+    barPathAnalysis: BarPathAnalysis? = null,
     onEdit: (Double, Int, Boolean) -> Unit,
     onDelete: () -> Unit,
     modifier: Modifier = Modifier
@@ -109,6 +113,7 @@ private fun EditableResultSetRow(
     var editFail by remember(set.id) { mutableStateOf(set.isFailure) }
     var focusedCell by remember { mutableStateOf<String?>(null) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
+    var showBarPathDetail by remember(set.id) { mutableStateOf(false) }
     val kgFocus = remember { FocusRequester() }
     val repsFocus = remember { FocusRequester() }
     val focusMgr = LocalFocusManager.current
@@ -162,6 +167,12 @@ private fun EditableResultSetRow(
                 onFocusChanged = { if (it) focusedCell = "reps" else if (focusedCell == "reps") focusedCell = null },
                 modifier = Modifier.weight(1f)
             )
+            if (barPathAnalysis != null) {
+                Text(
+                    "⚡", color = NeonGreen, fontSize = 15.sp, fontWeight = FontWeight.Black,
+                    modifier = Modifier.padding(start = 6.dp).clickable { showBarPathDetail = !showBarPathDetail }
+                )
+            }
         }
 
         when (focusedCell) {
@@ -176,5 +187,35 @@ private fun EditableResultSetRow(
                 onEdit(kgTfv.text.toDoubleOrNull() ?: set.weightKg, reps, editFail)
             })
         }
+
+        if (showBarPathDetail && barPathAnalysis != null) {
+            BarPathDetailBlock(barPathAnalysis)
+        }
+    }
+}
+
+@Composable
+private fun BarPathDetailBlock(analysis: BarPathAnalysis) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .background(Color.Black.copy(alpha = 0.3f), RoundedCornerShape(4.dp))
+            .padding(horizontal = 8.dp, vertical = 6.dp)
+    ) {
+        Text(analysis.velocityZone.label, color = NeonGreen, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+        BarPathStatLine("Peak velocity", "%.2f m/s".format(analysis.peakVelocityMs))
+        BarPathStatLine("Mean velocity", "%.2f m/s".format(analysis.meanConcentricVelocityMs))
+        BarPathStatLine("Peak power", "%.0f W".format(analysis.peakPowerWatts))
+        BarPathStatLine("Mean power", "%.0f W".format(analysis.meanPowerWatts))
+        BarPathStatLine("Range of motion", "%.1f cm".format(analysis.rangeOfMotionCm))
+        BarPathStatLine("Bar path deviation", "%.1f cm".format(analysis.barPathDeviationCm))
+    }
+}
+
+@Composable
+private fun BarPathStatLine(label: String, value: String) {
+    Row(Modifier.fillMaxWidth().padding(top = 2.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+        Text(label, color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp)
+        Text(value, color = Color.White.copy(alpha = 0.85f), fontSize = 10.sp, fontFamily = FontFamily.Monospace)
     }
 }

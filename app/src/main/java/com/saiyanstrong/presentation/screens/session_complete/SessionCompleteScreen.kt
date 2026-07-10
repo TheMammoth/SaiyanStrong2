@@ -52,6 +52,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.saiyanstrong.domain.model.BarPathAnalysis
 import com.saiyanstrong.domain.model.PowerLevel
 import com.saiyanstrong.domain.model.SaiyanStage
 import com.saiyanstrong.domain.model.WorkoutSession
@@ -79,6 +80,7 @@ fun SessionCompleteScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val exerciseRows by viewModel.exerciseRows.collectAsStateWithLifecycle()
+    val barPathBySetId by viewModel.barPathBySetId.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     val graphicsLayer = rememberComposeGraphicsLayer()
 
@@ -116,6 +118,7 @@ fun SessionCompleteScreen(
         session = uiState.session,
         powerLevel = uiState.powerLevel,
         exerciseRows = exerciseRows,
+        barPathBySetId = barPathBySetId,
         titleInput = uiState.titleInput,
         isTemplateSaved = uiState.isTemplateSaved,
         onTitleChange = viewModel::onTitleChange,
@@ -140,6 +143,7 @@ internal fun SessionCompleteContent(
     session: WorkoutSession?,
     powerLevel: PowerLevel?,
     exerciseRows: List<ExerciseRow>,
+    barPathBySetId: Map<Long, BarPathAnalysis> = emptyMap(),
     titleInput: String,
     isTemplateSaved: Boolean = false,
     onTitleChange: (String) -> Unit,
@@ -270,7 +274,10 @@ internal fun SessionCompleteContent(
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     exerciseRows.forEach { row ->
-                        ExerciseResultCard(row = row, onEditSet = onEditSet, onDeleteSet = onDeleteSet)
+                        ExerciseResultCard(
+                            row = row, barPathBySetId = barPathBySetId,
+                            onEditSet = onEditSet, onDeleteSet = onDeleteSet
+                        )
                     }
                 }
             }

@@ -1309,6 +1309,34 @@ _(Claude Code appends here after each completed task)_
   `ExerciseDetailScreen` (it saves, but nothing displays it yet), and the personal
   load-velocity-profile upgrade over the generic Bryan Mann zone table (SPEC.md §8, still future).
   versionCode 36, versionName 0.23.0.
+- [x] Sprint 27 — VBT results UI (v0.24.0), per SPEC.md: closes the display gap from the last two
+  sprints — `BarPathAnalysis` has been saveable since v0.22.0 but nothing read it back until now.
+  Lower-risk than the camera/tracking sprint — pure UI wiring over already-unit-tested logic.
+  (1) Real plumbing gap fixed first: `ExerciseSetHistory`/`SetWithDate`/`SetLogDao
+  .getHistoryForExercise` never carried the set's own id, so there was no way to join a history
+  row against `bar_path_metrics` (keyed by `set_log_id`). Added `id`/`setLogId` through the whole
+  chain (query → DAO projection → domain model → repository mapper) — additive, no other caller
+  of `ExerciseSetHistory` broke.
+  (2) Batch lookup over per-row subscriptions: `BarPathMetricsDao.getForSetLogIds` +
+  `BarPathRepository.getBarPathMetricsForSets(List<Long>): Flow<Map<Long, BarPathAnalysis>>` —
+  both `SessionCompleteViewModel` and `ExerciseDetailViewModel` fetch once for all relevant set
+  ids via `flatMapLatest`, not N independent Flows.
+  (3) `SessionCompleteScreen`: a tracked set (one with saved `BarPathAnalysis`) shows a small ⚡
+  badge next to its KG/REPS cells; tapping expands an inline detail block (zone, peak/mean
+  velocity, peak/mean power, ROM, bar path deviation) below the row, same "expand below" language
+  the KG/REPS steppers already use. Untracked sets render byte-for-byte as before.
+  (4) `ExerciseDetailScreen`: new `internal fun buildVelocityChart` (top-level, not a ViewModel
+  method, specifically so it's unit-testable without touching Hilt/SavedStateHandle) picks the
+  heaviest tracked set per session and plots its mean concentric velocity — same "best of session"
+  convention `weightChart`/`e1RmChart` already use. Reuses the existing `ChartCard`/
+  `DetailLineChart` composables verbatim; the new "BAR SPEED" card only appears once ≥2 sessions
+  have tracked data, so exercises nobody's recorded yet look untouched. 5 new unit tests
+  (`ExerciseDetailViewModelTest.kt`) covering the "heaviest tracked set wins, even if an untracked
+  set was heavier" rule and chronological ordering.
+  KNOWN GAP unchanged from Sprint 26: this displays whatever the marker-tracking pipeline
+  produces, and that pipeline is still unverified against real footage. This sprint made the
+  *data* visible, not the *tracking* trustworthy — those are still two separate open items.
+  versionCode 37, versionName 0.24.0.
 
 ## Release rules
 
