@@ -107,7 +107,9 @@ internal fun chooseTrackedBlob(blobs: List<Blob>, previousCentroid: Pair<Double,
  * spurious frame-to-frame jump. Fixed with connected-component blob detection ([findBlobs]) +
  * nearest-neighbor tracking across frames ([chooseTrackedBlob]).
  */
-class BarPathFrameTracker @Inject constructor() {
+class BarPathFrameTracker @Inject constructor(
+    private val barPathVideoDecoder: BarPathVideoDecoder
+) {
 
     /** First frame of the video, for the calibration screen (tap two points of known distance). */
     fun extractFirstFrame(videoPath: String): Bitmap? {
@@ -130,39 +132,43 @@ class BarPathFrameTracker @Inject constructor() {
      * @param downscaleFactor frames are shrunk before scanning for the marker — exact pixel
      * precision isn't needed for a centroid, and scanning a full-resolution frame per sample is
      * needlessly slow.
+     * @param useStreamingDecode opt-in: extract frames via [BarPathVideoDecoder]'s sequential
+     * MediaCodec decode instead of per-timestamp getFrameAtTime seeks (faster at high fps, but
+     * device-fragile and unmeasured — falls back to the retriever path automatically on any
+     * decode failure or if it yields no frames). Defaults off so the proven path stays default.
      */
     fun trackMarker(
         videoPath: String,
         colorProfile: MarkerColorProfile,
         sampleIntervalMs: Long? = null,
-        downscaleFactor: Double = 0.25
+        downscaleFactor: Double = 0.25,
+        useStreamingDecode: Boolean = false
     ): List<BarPathSample> {
-        val retriever = MediaMetadataRetriever()
-        return try {
-            retriever.setDataSource(videoPath)
-            val durationMs = retriever
-                .extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
-                ?.toLongOrNull() ?: 0L
-            val effectiveIntervalMs = sampleIntervalMs ?: deriveSampleIntervalMs(retriever)
+        val (intervalMs, durationMs) = readTiming(videoPath, sampleIntervalMs)
+        if (durationMs <= 0L) return emptyList()
 
+        // Builds a FRESH sample list from whatever frame source drives it — so a failed streaming
+        // attempt's partial list is discarded (local to that call), and the retriever fallback
+        // starts clean with no risk of double-counting.
+        fun collect(drive: (onFrame: (Bitmap, Long) -> Unit) -> Unit): List<BarPathSample> {
             val samples = mutableListOf<BarPathSample>()
             var previousCentroid: Pair<Double, Double>? = null
-            var timestampMs = 0L
-            while (timestampMs <= durationMs) {
-                val frame = retriever.getFrameAtTime(timestampMs * 1000, MediaMetadataRetriever.OPTION_CLOSEST)
-                if (frame != null) {
-                    findMarkerCentroid(frame, colorProfile, downscaleFactor, previousCentroid)?.let { tracked ->
-                        samples += BarPathSample(timestampMs, tracked.xPx, tracked.yPx, tracked.diameterPx)
-                        previousCentroid = tracked.xPx to tracked.yPx
-                    }
-                    frame.recycle()
+            drive { frame, timestampMs ->
+                findMarkerCentroid(frame, colorProfile, downscaleFactor, previousCentroid)?.let { tracked ->
+                    samples += BarPathSample(timestampMs, tracked.xPx, tracked.yPx, tracked.diameterPx)
+                    previousCentroid = tracked.xPx to tracked.yPx
                 }
-                timestampMs += effectiveIntervalMs
             }
-            samples
-        } finally {
-            retriever.release()
+            return samples
         }
+
+        if (useStreamingDecode) {
+            val streamed = runCatching {
+                collect { onFrame -> barPathVideoDecoder.decodeSampledFrames(videoPath, intervalMs, onFrame) }
+            }.getOrNull()
+            if (!streamed.isNullOrEmpty()) return streamed
+        }
+        return collect { onFrame -> driveRetrieverFrames(videoPath, intervalMs, durationMs, onFrame) }
     }
 
     /**
@@ -189,50 +195,89 @@ class BarPathFrameTracker @Inject constructor() {
         referenceColorProfile: MarkerColorProfile,
         referenceDistanceMeters: Double,
         sampleIntervalMs: Long? = null,
-        downscaleFactor: Double = 0.25
+        downscaleFactor: Double = 0.25,
+        useStreamingDecode: Boolean = false
     ): List<BarPathSample> {
+        val (intervalMs, durationMs) = readTiming(videoPath, sampleIntervalMs)
+        if (durationMs <= 0L) return emptyList()
+
+        fun collect(drive: (onFrame: (Bitmap, Long) -> Unit) -> Unit): List<BarPathSample> {
+            val samples = mutableListOf<BarPathSample>()
+            var previousPrimaryCentroid: Pair<Double, Double>? = null
+            var previousReferenceCentroid: Pair<Double, Double>? = null
+            var lastKnownPpm: Double? = null
+            drive { frame, timestampMs ->
+                val scaledWidth = (frame.width * downscaleFactor).toInt().coerceAtLeast(1)
+                val scaledHeight = (frame.height * downscaleFactor).toInt().coerceAtLeast(1)
+                val scaled = Bitmap.createScaledBitmap(frame, scaledWidth, scaledHeight, false)
+
+                val primary = findMarkerCentroidInScaledBitmap(
+                    scaled, primaryColorProfile, downscaleFactor, previousPrimaryCentroid
+                )
+                val reference = findMarkerCentroidInScaledBitmap(
+                    scaled, referenceColorProfile, downscaleFactor, previousReferenceCentroid
+                )
+                scaled.recycle()
+
+                if (primary != null) {
+                    previousPrimaryCentroid = primary.xPx to primary.yPx
+                    if (reference != null) {
+                        previousReferenceCentroid = reference.xPx to reference.yPx
+                        val pixelDist = hypot(primary.xPx - reference.xPx, primary.yPx - reference.yPx)
+                        lastKnownPpm = pixelDist / referenceDistanceMeters
+                    }
+                    samples += BarPathSample(timestampMs, primary.xPx, primary.yPx, primary.diameterPx, lastKnownPpm)
+                }
+            }
+            return samples
+        }
+
+        if (useStreamingDecode) {
+            val streamed = runCatching {
+                collect { onFrame -> barPathVideoDecoder.decodeSampledFrames(videoPath, intervalMs, onFrame) }
+            }.getOrNull()
+            if (!streamed.isNullOrEmpty()) return streamed
+        }
+        return collect { onFrame -> driveRetrieverFrames(videoPath, intervalMs, durationMs, onFrame) }
+    }
+
+    /** (sampleIntervalMs, durationMs) — a lightweight metadata-only read, no frame decode. */
+    private fun readTiming(videoPath: String, sampleIntervalMs: Long?): Pair<Long, Long> {
         val retriever = MediaMetadataRetriever()
         return try {
             retriever.setDataSource(videoPath)
             val durationMs = retriever
                 .extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
                 ?.toLongOrNull() ?: 0L
-            val effectiveIntervalMs = sampleIntervalMs ?: deriveSampleIntervalMs(retriever)
+            (sampleIntervalMs ?: deriveSampleIntervalMs(retriever)) to durationMs
+        } finally {
+            retriever.release()
+        }
+    }
 
-            val samples = mutableListOf<BarPathSample>()
-            var previousPrimaryCentroid: Pair<Double, Double>? = null
-            var previousReferenceCentroid: Pair<Double, Double>? = null
-            var lastKnownPpm: Double? = null
+    /**
+     * The proven frame source: per-timestamp getFrameAtTime seeks over the [0, durationMs] grid.
+     * Each [Bitmap] is recycled right after [onFrame] returns (consume it synchronously) — the
+     * grid timestamp is passed through as the sample time, exactly as before this was extracted.
+     */
+    private fun driveRetrieverFrames(
+        videoPath: String,
+        intervalMs: Long,
+        durationMs: Long,
+        onFrame: (Bitmap, Long) -> Unit
+    ) {
+        val retriever = MediaMetadataRetriever()
+        try {
+            retriever.setDataSource(videoPath)
             var timestampMs = 0L
             while (timestampMs <= durationMs) {
                 val frame = retriever.getFrameAtTime(timestampMs * 1000, MediaMetadataRetriever.OPTION_CLOSEST)
                 if (frame != null) {
-                    val scaledWidth = (frame.width * downscaleFactor).toInt().coerceAtLeast(1)
-                    val scaledHeight = (frame.height * downscaleFactor).toInt().coerceAtLeast(1)
-                    val scaled = Bitmap.createScaledBitmap(frame, scaledWidth, scaledHeight, false)
-
-                    val primary = findMarkerCentroidInScaledBitmap(
-                        scaled, primaryColorProfile, downscaleFactor, previousPrimaryCentroid
-                    )
-                    val reference = findMarkerCentroidInScaledBitmap(
-                        scaled, referenceColorProfile, downscaleFactor, previousReferenceCentroid
-                    )
-                    scaled.recycle()
+                    onFrame(frame, timestampMs)
                     frame.recycle()
-
-                    if (primary != null) {
-                        previousPrimaryCentroid = primary.xPx to primary.yPx
-                        if (reference != null) {
-                            previousReferenceCentroid = reference.xPx to reference.yPx
-                            val pixelDist = hypot(primary.xPx - reference.xPx, primary.yPx - reference.yPx)
-                            lastKnownPpm = pixelDist / referenceDistanceMeters
-                        }
-                        samples += BarPathSample(timestampMs, primary.xPx, primary.yPx, primary.diameterPx, lastKnownPpm)
-                    }
                 }
-                timestampMs += effectiveIntervalMs
+                timestampMs += intervalMs
             }
-            samples
         } finally {
             retriever.release()
         }

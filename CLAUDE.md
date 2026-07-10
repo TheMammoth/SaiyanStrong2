@@ -1739,6 +1739,43 @@ _(Claude Code appends here after each completed task)_
   The final build/test verification for this was interrupted last session by a transient platform
   outage; verified green (all 6 tests pass) at the start of the following session before release.
   versionCode 46, versionName 0.32.0.
+- [x] Sprint 36 — MediaCodec/MediaExtractor streaming decode path (v0.33.0): a faster frame-
+  extraction alternative to `BarPathFrameTracker`'s per-timestamp `getFrameAtTime()` seeks (which
+  re-seek to a sync frame and decode forward on every sampled timestamp — expensive at high fps,
+  the bottleneck flagged since Sprint 33). Preceded by a read-only camera-pipeline audit (the
+  user asked for one to plan this) that re-confirmed: the pipeline is CameraX, record-to-file
+  then extract-and-analyze, no live/ImageAnalysis path, no raw Camera2 classes anywhere.
+  (1) New `util/barpath/BarPathVideoDecoder.kt`: `MediaExtractor` selects the video track →
+  `MediaCodec` decoder in ByteBuffer mode (no Surface) → `getOutputImage()` yields a YUV_420_888
+  `Image` per frame → converted to a full-res ARGB_8888 `Bitmap`. Decodes the track once,
+  sequentially, emitting one frame per sample interval (kept when presentationTime ≥ next sample
+  point) via a synchronous callback; the Bitmap is recycled right after the callback returns.
+  The one pure/testable piece — `yuvToRgb(y,u,v)` (BT.601, clamped, opaque) — is a top-level
+  `internal fun` with 5 unit tests (gray/black/white, red primary, opacity, clamping).
+  (2) Wired into `BarPathFrameTracker` (now `@Inject`ing the decoder) behind a
+  `useStreamingDecode: Boolean = false` opt-in flag on both `trackMarker`/`trackMarkerPair`, with
+  automatic fallback: if streaming throws OR yields zero frames, it falls back to the unchanged
+  retriever loop. Achieved via a refactor extracting the shared frame-driving into a `collect {
+  drive -> ... }` helper that builds a FRESH sample list per attempt (so a failed streaming
+  attempt's partial list is discarded — no double-counting), plus `readTiming` (metadata-only
+  interval/duration read) and `driveRetrieverFrames` (the proven getFrameAtTime loop, behavior-
+  preserved: same grid timestamps, same recycle). The retriever path's semantics are byte-for-
+  byte what they were; the streaming path uses real frame presentation timestamps (marginally
+  more accurate, and SG handles non-uniform timestamps).
+  **Deliberately opt-in / default-off** — the two judgment calls: (a) MediaCodec is the most
+  device-fragile Android API and could not be run even once this session, so the fallback keeps
+  the feature working if it fails on a device; (b) whether it's actually *faster* is unmeasurable
+  here — sequential decode beating repeated seeks is the expectation, but the software YUV→RGB
+  conversion adds cost the hardware getFrameAtTime path doesn't have, so it could even be a
+  regression on some devices. Default-off keeps the user's real-footage validation baseline
+  (retriever) unchanged and lets them A/B on a device before flipping the default (a one-line
+  change: pass `useStreamingDecode = true` from `BarPathCaptureViewModel`, or change the param
+  default). Nothing calls it with `true` yet.
+  KNOWN GAP: the entire MediaCodec/MediaExtractor/YUV-plane path is unverified on a real device —
+  only `yuvToRgb`'s color math is unit-tested. Codec support, output color format, YUV plane
+  strides, and actual decode performance all vary by device and are unknown until run against
+  real footage. This adds a *ready* faster path, not a *proven* one.
+  versionCode 47, versionName 0.33.0.
 
 ## Release rules
 
