@@ -3,12 +3,14 @@ package com.saiyanstrong.data.backup
 import androidx.room.withTransaction
 import com.saiyanstrong.data.datastore.UserPreferencesDataStore
 import com.saiyanstrong.data.local.AppDatabase
+import com.saiyanstrong.data.local.dao.BarPathMetricsDao
 import com.saiyanstrong.data.local.dao.BodyWeightDao
 import com.saiyanstrong.data.local.dao.ExerciseDao
 import com.saiyanstrong.data.local.dao.ExerciseLogDao
 import com.saiyanstrong.data.local.dao.SessionDao
 import com.saiyanstrong.data.local.dao.SetLogDao
 import com.saiyanstrong.data.local.dao.TemplateDao
+import com.saiyanstrong.data.local.entity.BarPathMetricsEntity
 import com.saiyanstrong.data.local.entity.BodyWeightEntity
 import com.saiyanstrong.data.local.entity.ExerciseLogEntity
 import com.saiyanstrong.data.local.entity.SessionEntity
@@ -29,6 +31,7 @@ class BackupSerializer @Inject constructor(
     private val templateDao: TemplateDao,
     private val bodyWeightDao: BodyWeightDao,
     private val exerciseDao: ExerciseDao,
+    private val barPathMetricsDao: BarPathMetricsDao,
     private val userPreferencesDataStore: UserPreferencesDataStore
 ) {
     private val json = Json { ignoreUnknownKeys = true }
@@ -46,7 +49,8 @@ class BackupSerializer @Inject constructor(
             },
         lifetimePowerEarned = userPreferencesDataStore.lifetimePowerEarned.first(),
         useFemaleDotsFormula = userPreferencesDataStore.useFemaleDotsFormula.first(),
-        defaultRestSeconds = userPreferencesDataStore.defaultRestSeconds.first()
+        defaultRestSeconds = userPreferencesDataStore.defaultRestSeconds.first(),
+        barPathMetrics = barPathMetricsDao.getAll().first().map { it.toDto() }
     )
 
     fun encode(envelope: BackupEnvelope): String = json.encodeToString(envelope)
@@ -61,6 +65,7 @@ class BackupSerializer @Inject constructor(
             templateDao.deleteAllExercises()
             templateDao.deleteAll()
             bodyWeightDao.deleteAll()
+            barPathMetricsDao.deleteAll()
 
             sessionDao.insertAll(payload.sessions.map { it.toEntity() })
             exerciseLogDao.insertAll(payload.exerciseLogs.map { it.toEntity() })
@@ -68,6 +73,7 @@ class BackupSerializer @Inject constructor(
             templateDao.insertAll(payload.templates.map { it.toEntity() })
             templateDao.insertExercises(payload.templateExercises.map { it.toEntity() })
             bodyWeightDao.insertAll(payload.bodyWeightLogs.map { it.toEntity() })
+            barPathMetricsDao.insertAll(payload.barPathMetrics.map { it.toEntity() })
 
             payload.exerciseRestTimerOverrides.forEach { override ->
                 exerciseDao.updateRestTimer(override.exerciseId, override.restTimerSec)
@@ -95,4 +101,13 @@ class BackupSerializer @Inject constructor(
 
     private fun BodyWeightEntity.toDto() = BodyWeightDto(id, dateMs, weightKg)
     private fun BodyWeightDto.toEntity() = BodyWeightEntity(id, dateMs, weightKg)
+
+    private fun BarPathMetricsEntity.toDto() = BarPathMetricsDto(
+        id, setLogId, peakVelocityMs, meanConcentricVelocityMs, peakPowerWatts,
+        meanPowerWatts, rangeOfMotionCm, barPathDeviationCm, velocityZone
+    )
+    private fun BarPathMetricsDto.toEntity() = BarPathMetricsEntity(
+        id, setLogId, peakVelocityMs, meanConcentricVelocityMs, peakPowerWatts,
+        meanPowerWatts, rangeOfMotionCm, barPathDeviationCm, velocityZone
+    )
 }

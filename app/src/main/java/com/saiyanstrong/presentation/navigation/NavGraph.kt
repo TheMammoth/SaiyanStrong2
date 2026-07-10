@@ -25,6 +25,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.saiyanstrong.presentation.screens.barpath.BarPathCaptureScreen
 import com.saiyanstrong.presentation.screens.coach.AthleteDetailScreen
 import com.saiyanstrong.presentation.screens.coach.CoachDashboardScreen
 import com.saiyanstrong.presentation.screens.coach.CoachSettingsScreen
@@ -67,7 +68,8 @@ fun NavGraph() {
 
     val showBottomBar = currentRoute != Screen.ActiveWorkout.route &&
             currentRoute != Screen.Onboarding.route &&
-            !currentRoute.startsWith("session_complete")
+            !currentRoute.startsWith("session_complete") &&
+            !currentRoute.startsWith("bar_path_capture")
 
     Scaffold(
         bottomBar = {
@@ -155,8 +157,21 @@ fun NavGraph() {
                             popUpTo(Screen.Home.route)
                         }
                     },
-                    onViewHistory = { navController.navigate(Screen.History.route) }
+                    onViewHistory = { navController.navigate(Screen.History.route) },
+                    onRecordBarPath = { setLogId, weightKg ->
+                        navController.navigate(Screen.BarPathCapture.createRoute(setLogId, weightKg))
+                    }
                 )
+            }
+
+            composable(
+                route = Screen.BarPathCapture.route,
+                arguments = listOf(
+                    navArgument("setLogId") { type = NavType.LongType },
+                    navArgument("weightKg") { type = NavType.FloatType }
+                )
+            ) {
+                BarPathCaptureScreen(onDone = { navController.popBackStack() })
             }
 
             composable(

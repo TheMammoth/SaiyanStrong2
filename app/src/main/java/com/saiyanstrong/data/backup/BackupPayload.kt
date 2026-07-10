@@ -20,7 +20,8 @@ data class BackupPayload(
     val exerciseRestTimerOverrides: List<ExerciseRestTimerOverrideDto>,
     val lifetimePowerEarned: Int,
     val useFemaleDotsFormula: Boolean,
-    val defaultRestSeconds: Int
+    val defaultRestSeconds: Int,
+    val barPathMetrics: List<BarPathMetricsDto> = emptyList()
 )
 
 @Serializable
@@ -82,4 +83,17 @@ data class BodyWeightDto(
 data class ExerciseRestTimerOverrideDto(
     val exerciseId: Int,
     val restTimerSec: Int
+)
+
+@Serializable
+data class BarPathMetricsDto(
+    val id: Long,
+    val setLogId: Long,
+    val peakVelocityMs: Double,
+    val meanConcentricVelocityMs: Double,
+    val peakPowerWatts: Double,
+    val meanPowerWatts: Double,
+    val rangeOfMotionCm: Double,
+    val barPathDeviationCm: Double,
+    val velocityZone: String
 )

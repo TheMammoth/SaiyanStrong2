@@ -24,4 +24,7 @@ sealed class Screen(val route: String) {
     data object AthleteDetail : Screen("athlete/{athleteId}") {
         fun createRoute(athleteId: String) = "athlete/$athleteId"
     }
+    data object BarPathCapture : Screen("bar_path_capture/{setLogId}/{weightKg}") {
+        fun createRoute(setLogId: Long, weightKg: Double) = "bar_path_capture/$setLogId/${weightKg.toFloat()}"
+    }
 }

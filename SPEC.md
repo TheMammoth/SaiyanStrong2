@@ -1,7 +1,7 @@
 # SaiyanStrong — Velocity-Based Training (Bar Path + Bar Speed) Spec
 
-## Status: FOUNDATION BUILT (v0.22.0) — physics + schema shipped, §8 (camera/tracking) not started.
-See CLAUDE.md "Sprint 25".
+## Status: §8 BUILT (v0.23.0) — camera capture + marker tracking shipped, UNVERIFIED against real
+footage. See CLAUDE.md "Sprint 26" for the exact known-gap list before trusting any output.
 
 (Replaces the previous "RPE-Based Progression Hints" spec in this file — that feature shipped in
 full as v0.21.0; see `CLAUDE.md` progress log, "Sprint 24".)

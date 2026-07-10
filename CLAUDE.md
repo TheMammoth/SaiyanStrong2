@@ -1263,6 +1263,52 @@ _(Claude Code appends here after each completed task)_
   `bar_path_metrics` — harmless today since nothing populates the table yet, but must be added
   before this feature goes live or a backup/restore would silently drop real velocity data.
   versionCode 35, versionName 0.22.0.
+- [x] Sprint 26 — VBT camera capture + marker tracking (v0.23.0): closes out SPEC.md §8 on top of
+  Sprint 25's physics/schema foundation, per your explicit instruction to build it now rather than
+  wait for a device session. **Read the KNOWN GAP at the end of this entry before trusting any
+  number this produces** — the tracking algorithm itself is unverified against real footage.
+  (1) CameraX added (`camera-core`/`camera2`/`lifecycle`/`video`/`view` 1.4.0) — first native
+  camera dependency in this project. `CAMERA` permission + `android.hardware.camera.any`
+  (`required=false`, so devices without a camera can still install) added to the manifest.
+  `util/barpath/BarPathVideoRecorder.kt`: thin wrapper — binds `Preview`+`VideoCapture` to a
+  `PreviewView` via `ProcessCameraProvider`, records silently (no audio track — one less
+  permission, audio isn't used for anything) to a cache file.
+  (2) `util/barpath/MarkerColorMatcher.kt`: pure Kotlin RGB→HSV conversion + thresholding (no
+  `android.graphics.Color` dependency, so the *entire* color-matching pipeline including the RGB→
+  HSV math is unit-testable without Robolectric) — tuned for a bright magenta/pink marker (hue
+  300–345°, sat/value floors to reject skin tones and gray plates). 11 new unit tests covering
+  known-color conversions and true/false-positive cases (skin tone, desaturated pink, dark gray
+  plate). `util/barpath/BarPathFrameTracker.kt`: extracts frames via `MediaMetadataRetriever`
+  (33ms/~30fps sampling, frames downscaled 4× before pixel-scanning for speed), finds the
+  marker's centroid per frame (rejects frames with too few matching pixels rather than guessing),
+  returns a `List<BarPathSample>` feeding directly into last sprint's `AnalyzeBarPathUseCase`.
+  (3) `presentation/screens/barpath/BarPathCaptureScreen.kt` + `BarPathCaptureViewModel.kt`: a
+  4-step flow — RECORD (camera preview + record/stop) → CALIBRATE (tap two points on the first
+  frame + enter their real-world distance in cm — a plate diameter or the bar sleeve) → PROCESSING
+  (frame extraction + tracking + physics, off the main thread) → RESULTS (peak/mean velocity,
+  zone, peak/mean power, ROM, bar path deviation) → SAVE writes to `BarPathRepository`. MVP scope:
+  one rep per recording (the whole clip is treated as a single concentric phase) — automatic
+  multi-rep segmentation is still a documented future item, not built.
+  (4) Entry point: `ExerciseLogCard`'s existing ⋮ menu (REST TIMER / REMOVE EXERCISE) gains
+  "RECORD BAR PATH (SET n)" for the exercise's most recently logged set, only shown once at least
+  one set exists. New route `Screen.BarPathCapture` (`bar_path_capture/{setLogId}/{weightKg}`),
+  hidden from the bottom nav bar like `ActiveWorkout`/`SessionComplete`.
+  (5) Closed the backup gap flagged at the end of Sprint 25: `BackupPayload` gains
+  `barPathMetrics: List<BarPathMetricsDto> = emptyList()` (defaulted, so older backup JSON without
+  this field still decodes — same pattern as `TemplateDto.isFromCoach`), `BackupSerializer`
+  reads/writes/restores it, `BarPathMetricsDao` gained `getAll`/`insertAll`/`deleteAll` to support
+  it. A backup/restore cycle no longer silently drops recorded velocity data.
+  KNOWN GAP — the important one: **the actual marker-tracking algorithm has not been run against
+  a single real video this session.** `MarkerColorMatcher`'s pure color math is unit-tested and
+  correct on its own terms; `BarPathFrameTracker`/`BarPathVideoRecorder`/the whole CameraX binding
+  path compile but are unverified — real gym lighting, real marker visibility, real motion blur,
+  and CameraX's actual runtime behavior on a physical device are all unknowns until this is tried
+  against one real recorded lift. Treat every number this pipeline produces as untrusted until
+  that happens. Also not built: automatic multi-rep segmentation (one recording = one rep for
+  now), any UI surfacing saved `BarPathAnalysis` data back on `SessionCompleteScreen`/
+  `ExerciseDetailScreen` (it saves, but nothing displays it yet), and the personal
+  load-velocity-profile upgrade over the generic Bryan Mann zone table (SPEC.md §8, still future).
+  versionCode 36, versionName 0.23.0.
 
 ## Release rules
 

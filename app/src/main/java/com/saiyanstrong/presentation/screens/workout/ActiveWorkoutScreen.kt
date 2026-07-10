@@ -26,6 +26,7 @@ import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Timer
+import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -100,6 +101,7 @@ private fun LoadSuggestion.label(): String = when (this) {
 fun ActiveWorkoutScreen(
     onWorkoutFinished: (Long) -> Unit,
     onViewHistory: () -> Unit,
+    onRecordBarPath: (setLogId: Long, weightKg: Double) -> Unit = { _, _ -> },
     workoutViewModel: ActiveWorkoutViewModel = hiltViewModel()
 ) {
     val uiState by workoutViewModel.uiState.collectAsStateWithLifecycle()
@@ -121,7 +123,8 @@ fun ActiveWorkoutScreen(
         onAdjustRest = workoutViewModel::onAdjustRestTimer,
         onFinishWorkout = workoutViewModel::onFinishWorkout,
         onRemoveExercise = workoutViewModel::onRemoveExercise,
-        onSetExerciseRestTimer = workoutViewModel::onSetExerciseRestTimer
+        onSetExerciseRestTimer = workoutViewModel::onSetExerciseRestTimer,
+        onRecordBarPath = onRecordBarPath
     )
 }
 
@@ -144,7 +147,8 @@ internal fun ActiveWorkoutContent(
     onAdjustRest: (Int) -> Unit,
     onFinishWorkout: () -> Unit,
     onRemoveExercise: (Int) -> Unit = {},
-    onSetExerciseRestTimer: (Int, Int?) -> Unit = { _, _ -> }
+    onSetExerciseRestTimer: (Int, Int?) -> Unit = { _, _ -> },
+    onRecordBarPath: (setLogId: Long, weightKg: Double) -> Unit = { _, _ -> }
 ) {
     val totalSets = uiState.exerciseLogs.sumOf { it.sets.size }
     val totalVolumeKg = uiState.exerciseLogs.sumOf { log -> log.sets.sumOf { it.volumeKg } }
@@ -204,7 +208,10 @@ internal fun ActiveWorkoutContent(
                         onSkipRest = onSkipRest,
                         onAdjustRest = onAdjustRest,
                         onRemoveExercise = { onRemoveExercise(log.exercise.id) },
-                        onSetRestTimer = { seconds -> onSetExerciseRestTimer(log.exercise.id, seconds) }
+                        onSetRestTimer = { seconds -> onSetExerciseRestTimer(log.exercise.id, seconds) },
+                        onRecordBarPath = {
+                            log.sets.lastOrNull()?.let { onRecordBarPath(it.id, it.weightKg) }
+                        }
                     )
                 }
                 item {
@@ -253,7 +260,8 @@ internal fun ExerciseLogCard(
     onSkipRest: () -> Unit = {},
     onAdjustRest: (Int) -> Unit = {},
     onRemoveExercise: () -> Unit = {},
-    onSetRestTimer: (Int?) -> Unit = {}
+    onSetRestTimer: (Int?) -> Unit = {},
+    onRecordBarPath: () -> Unit = {}
 ) {
     val lastWeight = exerciseLog.sets.lastOrNull()?.weightKg ?: 60.0
     val lastReps   = exerciseLog.sets.lastOrNull()?.reps ?: 5
@@ -284,6 +292,13 @@ internal fun ExerciseLogCard(
                         leadingIcon = { Icon(Icons.Default.Timer, null, tint = PowerAmber, modifier = Modifier.size(18.dp)) },
                         onClick = { showMenu = false; showRestDialog = true }
                     )
+                    if (exerciseLog.sets.isNotEmpty()) {
+                        DropdownMenuItem(
+                            text = { Text("RECORD BAR PATH (SET ${exerciseLog.sets.size})", fontSize = 13.sp, fontWeight = FontWeight.Bold) },
+                            leadingIcon = { Icon(Icons.Default.Videocam, null, tint = NeonGreen, modifier = Modifier.size(18.dp)) },
+                            onClick = { showMenu = false; onRecordBarPath() }
+                        )
+                    }
                     DropdownMenuItem(
                         text = { Text("REMOVE EXERCISE", color = DangerRed, fontSize = 13.sp, fontWeight = FontWeight.Bold) },
                         leadingIcon = { Icon(Icons.Default.Delete, null, tint = DangerRed, modifier = Modifier.size(18.dp)) },
