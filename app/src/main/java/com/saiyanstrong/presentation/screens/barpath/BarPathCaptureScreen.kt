@@ -84,6 +84,7 @@ import com.saiyanstrong.presentation.theme.SaiyanGray
 import com.saiyanstrong.util.barpath.BarPathVideoRecorder
 import com.saiyanstrong.domain.util.CameraStability
 import com.saiyanstrong.domain.util.LiftPhase
+import com.saiyanstrong.domain.util.ReticleState
 import com.saiyanstrong.domain.util.StabilityLevel
 import com.saiyanstrong.util.barpath.HighSpeedCapabilityChecker
 import com.saiyanstrong.util.barpath.HighSpeedTier
@@ -106,6 +107,10 @@ fun BarPathCaptureScreen(
     val liveVelocity by viewModel.liveVelocity.collectAsStateWithLifecycle()
     val livePhase by viewModel.livePhase.collectAsStateWithLifecycle()
     val liveColorLockedOn by viewModel.liveColorLockedOn.collectAsStateWithLifecycle()
+    val reticleState by viewModel.reticleState.collectAsStateWithLifecycle()
+    val reticleConfidence by viewModel.reticleConfidence.collectAsStateWithLifecycle()
+    val liveMarkerFrame by viewModel.liveMarkerFrame.collectAsStateWithLifecycle()
+    val lockLost by viewModel.lockLost.collectAsStateWithLifecycle()
 
     LaunchedEffect(uiState.isSaved) { if (uiState.isSaved) onDone() }
 
@@ -139,6 +144,10 @@ fun BarPathCaptureScreen(
                     liveVelocity = liveVelocity,
                     livePhase = livePhase,
                     liveColorLockedOn = liveColorLockedOn,
+                    reticleState = reticleState,
+                    reticleConfidence = reticleConfidence,
+                    liveMarkerFrame = liveMarkerFrame,
+                    lockLost = lockLost,
                     onLiveResult = viewModel::onLiveResult,
                     onRetapColor = viewModel::onRetapColor,
                     onFinished = viewModel::onRecordingFinished,
@@ -197,6 +206,10 @@ private fun RecordingStep(
     liveVelocity: Float = 0f,
     livePhase: LiftPhase = LiftPhase.IDLE,
     liveColorLockedOn: Boolean = false,
+    reticleState: ReticleState = ReticleState.SEARCHING,
+    reticleConfidence: Float = 0f,
+    liveMarkerFrame: BarPathCaptureViewModel.LiveMarkerFrame? = null,
+    lockLost: Boolean = false,
     onLiveResult: (LiveFrameResult) -> Unit = {},
     onRetapColor: () -> Unit = {},
     onFinished: (String?, com.saiyanstrong.domain.util.GyroTimeline?, Double, Double, Long) -> Unit,
@@ -213,6 +226,9 @@ private fun RecordingStep(
     var angularVelocityMagnitude by remember { mutableFloatStateOf(0f) }
     val stabilityMonitor = remember { StabilityMonitor { mag -> angularVelocityMagnitude = mag } }
     val stabilityLevel = CameraStability.classify(angularVelocityMagnitude)
+
+    var previewBoxSizePx by remember { mutableStateOf(Size.Zero) }
+    var lastTapAnchor by remember { mutableStateOf<Offset?>(null) }
 
     var hasPermission by remember {
         mutableStateOf(
@@ -304,7 +320,10 @@ private fun RecordingStep(
                 stabilityMonitor.start(context)
                 onDispose { stabilityMonitor.stop() }
             }
-            Box(Modifier.fillMaxWidth().height(360.dp)) {
+            Box(
+                Modifier.fillMaxWidth().height(360.dp)
+                    .onSizeChanged { size -> previewBoxSizePx = Size(size.width.toFloat(), size.height.toFloat()) }
+            ) {
                 AndroidView(
                     factory = { ctx ->
                         PreviewView(ctx).also { previewView ->
@@ -345,6 +364,10 @@ private fun RecordingStep(
                                     angularVelocityMagnitudeAtTap = angularVelocityMagnitude
                                 )
                                 tapHighlightOffset = offset
+                                // Persists past the fade -- SEARCHING draws its reticle here until
+                                // a real centroid is detected, unlike tapHighlightOffset which is
+                                // purely a transient "you tapped here" confirmation flash.
+                                lastTapAnchor = offset
                                 coroutineScope.launch {
                                     tapHighlightAlpha.snapTo(1f)
                                     tapHighlightAlpha.animateTo(0f, animationSpec = tween(1500))
@@ -379,6 +402,19 @@ private fun RecordingStep(
                     }
                     LiveTrackingReadout(tracking = liveTracking, velocity = liveVelocity, phase = livePhase)
                 }
+                // The lock-on reticle: the phase between a successful tap and the lift starting.
+                // Only meaningful post-tap -- before that, the tap-catcher + stability indicator
+                // above are the whole story.
+                if (liveColorLockedOn) {
+                    LockOnReticle(
+                        state = reticleState,
+                        confidence = reticleConfidence,
+                        markerFrame = liveMarkerFrame,
+                        tapAnchor = lastTapAnchor,
+                        boxSize = previewBoxSizePx,
+                        liftPhase = livePhase
+                    )
+                }
                 if (liveColorLockedOn) {
                     OutlinedButton(
                         onClick = {
@@ -388,6 +424,16 @@ private fun RecordingStep(
                         modifier = Modifier.align(Alignment.TopEnd).padding(8.dp),
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = PowerAmber)
                     ) { Text("RE-TAP", fontSize = 11.sp, fontWeight = FontWeight.Black) }
+                }
+                if (lockLost) {
+                    LockLostBanner(
+                        onRetap = {
+                            onRetapColor()
+                            tapHighlightOffset = null
+                            lastTapAnchor = null
+                        },
+                        modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 80.dp)
+                    )
                 }
                 if (livePhase == LiftPhase.IDLE || livePhase == LiftPhase.COMPLETE) {
                     SaiyanButton(

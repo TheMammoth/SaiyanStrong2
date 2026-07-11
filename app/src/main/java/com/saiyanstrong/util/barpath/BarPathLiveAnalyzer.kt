@@ -13,7 +13,11 @@ import com.saiyanstrong.domain.util.Point2D
  * downsampled analysis-image space, the smoothed velocity (only meaningful in MOVING), and the
  * current lift phase. [sampledColorProfile]/[sampledAngularVelocityMagnitude] are non-null only
  * on the one frame that consumed a pending tap-to-sample request (see
- * [BarPathLiveAnalyzer.pendingColorSample]). */
+ * [BarPathLiveAnalyzer.pendingColorSample]). [blobDiameterPx] is the detected blob's bounding
+ * diameter (null when not detected) — feeds the lock-on confidence calculation. [frameWidthPx]/
+ * [frameHeightPx] are the downsampled analysis-frame's own dimensions, needed by the UI to turn
+ * [xPx]/[yPx] into a 0..1 fraction before scaling onto the preview box (see [LockOnReticle] for
+ * the same crop/aspect-ratio caveat already flagged for the tap-to-sample mapping). */
 data class LiveFrameResult(
     val markerDetected: Boolean,
     val xPx: Float,
@@ -22,7 +26,10 @@ data class LiveFrameResult(
     val phase: LiftPhase = LiftPhase.IDLE,
     val repJustCompleted: Boolean = false,
     val sampledColorProfile: MarkerColorProfile? = null,
-    val sampledAngularVelocityMagnitude: Float? = null
+    val sampledAngularVelocityMagnitude: Float? = null,
+    val blobDiameterPx: Float? = null,
+    val frameWidthPx: Int = 0,
+    val frameHeightPx: Int = 0
 )
 
 /**
@@ -176,7 +183,10 @@ class BarPathLiveAnalyzer(
                     phase = phaseUpdate.phase,
                     repJustCompleted = phaseUpdate.repJustCompleted,
                     sampledColorProfile = sampledProfile,
-                    sampledAngularVelocityMagnitude = sampledAngularVelocity
+                    sampledAngularVelocityMagnitude = sampledAngularVelocity,
+                    blobDiameterPx = detected?.third?.toFloat(),
+                    frameWidthPx = pixels.width,
+                    frameHeightPx = pixels.height
                 )
             )
         } catch (_: Throwable) {

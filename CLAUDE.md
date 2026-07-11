@@ -2108,6 +2108,58 @@ _(Claude Code appends here after each completed task)_
   stack — whether the 0.05/0.15 rad/s thresholds actually feel right in the hand (too twitchy, too
   lenient) is a real tuning question that needs a phone, not just math.
   versionCode 59, versionName 0.44.0.
+- [x] Sprint 45 — lock-on targeting reticle (v0.45.0): the "magnet" state between a successful
+  tap and the lift starting — confirms the tracker actually found (and is holding) the right
+  object before the user trusts it enough to lift.
+  Two real mismatches flagged before building, not silently worked around: (1) the prompt asked
+  for a custom `android.view.View` + `ValueAnimator`/`ObjectAnimator` — this project's CLAUDE.md
+  lists "Compose only. No XML layouts, ever" as a NON-NEGOTIABLE rule. Built as a Compose
+  composable on a Compose `Canvas` instead, using Compose's own first-party animation APIs
+  (`Animatable`, `animateFloatAsState`, `spring()`, `rememberInfiniteTransition`) — genuinely
+  first-party to this UI toolkit, so "no third-party animation libraries" is honored in spirit,
+  just through Compose's own system rather than the View-system one. (2) `BarTrailOverlayView`
+  does not exist (grep-confirmed) — no live trail overlay was ever built (explicitly deferred in
+  Sprint 37/40 as a materially different architecture, CameraX `ImageAnalysis` + live rendering).
+  Implemented the fade-out-on-MOVING behavior the reticle itself needs; skipped "BarTrailOverlayView
+  becomes visible" since there's nothing to make visible — that remains its own separate, larger,
+  not-yet-built feature.
+  (1) `domain/util/LockOnTracker.kt` (pure, no Android — mirrors `LiftPhaseDetector`'s pattern of
+  a small stateful class driven by per-frame updates): `ReticleState{SEARCHING,ACQUIRING,LOCKED}`,
+  literal threshold rules from spec (5 consecutive detections -> LOCKED; any pre-lock miss resets
+  the streak; once LOCKED, misses are tolerated up to 10 consecutive frames before reverting to
+  SEARCHING with a one-shot `justLostLock` flag). Confidence = 1 - coefficient-of-variation of a
+  10-frame blob-diameter window (a real marker holds roughly constant apparent size; a false
+  positive — a shirt, a reflection — tends to fluctuate). This is explicitly a DIFFERENT axis from
+  `LiftPhaseDetector` (detection-quality vs. rep-timing), not a replacement or a merge. 10 unit
+  tests (every transition, the pre-lock-vs-post-lock miss-tolerance asymmetry, confidence on
+  stable vs. wildly-varying diameter, reset).
+  (2) `BarPathLiveAnalyzer`/`LiveFrameResult` gained `blobDiameterPx`/`frameWidthPx`/
+  `frameHeightPx` (all additive, existing detection data that was being computed and discarded —
+  no new detection logic). `BarPathCaptureViewModel` owns the `LockOnTracker` instance, feeds it
+  from `onLiveResult` only once `liveColorLockedOn` is true (pre-tap, there's no profile to detect
+  against, so the reticle has nothing to show) — new `reticleState`/`reticleConfidence`/
+  `liveMarkerFrame`/`lockLost` StateFlows, all reset together on a fresh sample or RE-TAP.
+  (3) `presentation/screens/barpath/LockOnReticle.kt`: SEARCHING (rotating dashed white circle at
+  the last tap point, 360°/2s), ACQUIRING (amber, pulsing 80%<->40% alpha over 600ms, radius
+  animating toward the detected blob size), LOCKED (green camera-autofocus-style corner brackets
+  — 4 hand-drawn L-shapes, not a full square — snapped to the blob bbox + 8dp padding via a
+  `spring()` "snap" animation, "Locked ✓" label fading after 1.5s, a confidence bar colored
+  green/amber/red by the 0.7/0.4 thresholds, and a "LIFT WHEN READY" prompt after 1s of sustained
+  lock — all via fresh `LaunchedEffect(Unit)` scopes that correctly restart every time LOCKED is
+  freshly (re)entered, since this branch is only composed while state==LOCKED). Position exponential
+  smoothing (spec's literal `pos = pos*0.7 + new*0.3`) via a `LaunchedEffect` keyed on the raw
+  target. Whole reticle fades over 300ms when `livePhase == MOVING`. A separate `LockLostBanner`
+  ("Lost marker — retap to reselect" + a RETAP button reusing the existing `onRetapColor()` from
+  Sprint 39/40) — per spec, does NOT reset the session, just re-arms the tap-catcher with the
+  existing profile still configuring the analyzer as a starting point.
+  KNOWN GAP, and the important one: [xPx]/[yPx] -> screen-position mapping reuses the SAME
+  approximation already flagged for tap-to-sample (Sprint 39/44) — assumes the downsampled
+  analysis buffer and the displayed preview box share aspect ratio/crop, no correction for
+  CameraX's FILL_CENTER possibly cropping Preview and ImageAnalysis differently. This is the first
+  time that assumption becomes visually consequential (a positioned overlay snapping to a point on
+  screen, not just a numeric debug readout) — unverified on a device, same standing caveat as the
+  whole live VBT stack.
+  versionCode 60, versionName 0.45.0.
 
 ## Release rules
 

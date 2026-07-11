@@ -14,6 +14,8 @@ import com.saiyanstrong.domain.repository.UserRepository
 import com.saiyanstrong.domain.usecase.AnalyzeBarPathUseCase
 import com.saiyanstrong.domain.util.GyroTimeline
 import com.saiyanstrong.domain.util.LiftPhase
+import com.saiyanstrong.domain.util.LockOnTracker
+import com.saiyanstrong.domain.util.ReticleState
 import com.saiyanstrong.util.SessionShareImageSaver
 import com.saiyanstrong.util.barpath.BarPathFrameTracker
 import com.saiyanstrong.util.barpath.BarPathVideoImporter
@@ -144,6 +146,39 @@ class BarPathCaptureViewModel @Inject constructor(
     private val _liveColorSampleAngularVelocity = MutableStateFlow<Float?>(null)
     val liveColorSampleAngularVelocity: StateFlow<Float?> = _liveColorSampleAngularVelocity.asStateFlow()
 
+    // ── Lock-on reticle (post-tap, pre-lift) ────────────────────────────────────
+    // Distinct from LiftPhase: this is a detection-QUALITY axis ("is the blob real and stable?"),
+    // driven by LockOnTracker, not the rep-TIMING axis LiftPhaseDetector already owns. Only
+    // meaningful once liveColorLockedOn is true — before a tap there's no profile to detect
+    // against, so lockOnTracker isn't fed at all pre-tap.
+    private val lockOnTracker = LockOnTracker()
+
+    private val _reticleState = MutableStateFlow(ReticleState.SEARCHING)
+    val reticleState: StateFlow<ReticleState> = _reticleState.asStateFlow()
+
+    private val _reticleConfidence = MutableStateFlow(0f)
+    val reticleConfidence: StateFlow<Float> = _reticleConfidence.asStateFlow()
+
+    /** The live marker's position in analysis-frame pixel space, plus that frame's own
+     * dimensions — the UI turns this into a 0..1 fraction before scaling onto the preview box.
+     * Null whenever the marker isn't currently detected (SEARCHING, or a within-tolerance miss
+     * while LOCKED — the UI keeps drawing at the last known position rather than snapping to 0,0). */
+    data class LiveMarkerFrame(
+        val xPx: Float,
+        val yPx: Float,
+        val diameterPx: Float,
+        val frameWidthPx: Int,
+        val frameHeightPx: Int
+    )
+
+    private val _liveMarkerFrame = MutableStateFlow<LiveMarkerFrame?>(null)
+    val liveMarkerFrame: StateFlow<LiveMarkerFrame?> = _liveMarkerFrame.asStateFlow()
+
+    /** One-shot signal: lock was held, then lost for 10+ consecutive frames. Sticky until the
+     * user acknowledges it via RE-TAP (which also calls [onRetapColor], clearing this). */
+    private val _lockLost = MutableStateFlow(false)
+    val lockLost: StateFlow<Boolean> = _lockLost.asStateFlow()
+
     /** Called on the analyzer's background thread — MutableStateFlow.value is safe cross-thread. */
     fun onLiveResult(result: LiveFrameResult) {
         _liveTracking.value = result.markerDetected
@@ -153,6 +188,22 @@ class BarPathCaptureViewModel @Inject constructor(
             _liveColorProfile.value = it
             _liveColorLockedOn.value = true
             _liveColorSampleAngularVelocity.value = result.sampledAngularVelocityMagnitude
+            lockOnTracker.reset()
+            _reticleState.value = ReticleState.SEARCHING
+            _reticleConfidence.value = 0f
+            _lockLost.value = false
+        }
+        if (_liveColorLockedOn.value) {
+            val update = lockOnTracker.update(result.markerDetected, result.blobDiameterPx?.toDouble())
+            _reticleState.value = update.state
+            _reticleConfidence.value = update.confidence
+            if (update.justLostLock) _lockLost.value = true
+            if (result.markerDetected) {
+                _liveMarkerFrame.value = LiveMarkerFrame(
+                    result.xPx, result.yPx, result.blobDiameterPx ?: 0f,
+                    result.frameWidthPx, result.frameHeightPx
+                )
+            }
         }
     }
 
@@ -160,6 +211,11 @@ class BarPathCaptureViewModel @Inject constructor(
     fun onRetapColor() {
         _liveColorLockedOn.value = false
         _liveColorSampleAngularVelocity.value = null
+        _liveMarkerFrame.value = null
+        _lockLost.value = false
+        lockOnTracker.reset()
+        _reticleState.value = ReticleState.SEARCHING
+        _reticleConfidence.value = 0f
     }
 
     fun onRecordingFinished(path: String?, gyroTimeline: GyroTimeline?, focalMm: Double, sensorWidthMm: Double, videoStartUptimeNs: Long) {
