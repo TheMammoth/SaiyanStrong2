@@ -49,6 +49,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -90,6 +91,7 @@ import com.saiyanstrong.util.barpath.HighSpeedCapabilityChecker
 import com.saiyanstrong.util.barpath.HighSpeedTier
 import com.saiyanstrong.util.barpath.LiveFrameResult
 import com.saiyanstrong.util.barpath.StabilityMonitor
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 private val MarkerGreen = Color(0xFF39FF14)
@@ -111,6 +113,9 @@ fun BarPathCaptureScreen(
     val reticleConfidence by viewModel.reticleConfidence.collectAsStateWithLifecycle()
     val liveMarkerFrame by viewModel.liveMarkerFrame.collectAsStateWithLifecycle()
     val lockLost by viewModel.lockLost.collectAsStateWithLifecycle()
+    val currentRepSummary by viewModel.currentRepSummary.collectAsStateWithLifecycle()
+    val liveTrailPoints by viewModel.liveTrailPoints.collectAsStateWithLifecycle()
+    val liveSessionReps by viewModel.liveSessionReps.collectAsStateWithLifecycle()
 
     LaunchedEffect(uiState.isSaved) { if (uiState.isSaved) onDone() }
 
@@ -148,8 +153,15 @@ fun BarPathCaptureScreen(
                     reticleConfidence = reticleConfidence,
                     liveMarkerFrame = liveMarkerFrame,
                     lockLost = lockLost,
+                    currentRepSummary = currentRepSummary,
+                    liveTrailPoints = liveTrailPoints,
+                    repCount = liveSessionReps.size,
                     onLiveResult = viewModel::onLiveResult,
                     onRetapColor = viewModel::onRetapColor,
+                    onSaveRep = viewModel::onSaveRep,
+                    onDiscardRep = viewModel::onDiscardRep,
+                    onShareLiveRep = viewModel::onShareLiveRep,
+                    onEndLiveSession = viewModel::onEndLiveSession,
                     onFinished = viewModel::onRecordingFinished,
                     onGalleryVideoPicked = viewModel::onGalleryVideoPicked
                 )
@@ -210,8 +222,15 @@ private fun RecordingStep(
     reticleConfidence: Float = 0f,
     liveMarkerFrame: BarPathCaptureViewModel.LiveMarkerFrame? = null,
     lockLost: Boolean = false,
+    currentRepSummary: BarPathCaptureViewModel.LiveRepSummary? = null,
+    liveTrailPoints: List<BarPathCaptureViewModel.TrailPoint> = emptyList(),
+    repCount: Int = 0,
     onLiveResult: (LiveFrameResult) -> Unit = {},
     onRetapColor: () -> Unit = {},
+    onSaveRep: () -> Unit = {},
+    onDiscardRep: () -> Unit = {},
+    onShareLiveRep: (onExplain: (String) -> Unit) -> Unit = { _ -> },
+    onEndLiveSession: () -> Unit = {},
     onFinished: (String?, com.saiyanstrong.domain.util.GyroTimeline?, Double, Double, Long) -> Unit,
     onGalleryVideoPicked: (android.net.Uri) -> Unit = {}
 ) {
@@ -229,6 +248,19 @@ private fun RecordingStep(
 
     var previewBoxSizePx by remember { mutableStateOf(Size.Zero) }
     var lastTapAnchor by remember { mutableStateOf<Offset?>(null) }
+
+    // Live-session elapsed timer -- counts time since lock-on, not video-file recording (Option A
+    // saves no video per rep; the pre-existing manual RECORD/STOP button below is unrelated).
+    var liveSessionElapsedSeconds by remember { mutableIntStateOf(0) }
+    LaunchedEffect(liveColorLockedOn) {
+        liveSessionElapsedSeconds = 0
+        if (liveColorLockedOn) {
+            while (true) {
+                delay(1000)
+                liveSessionElapsedSeconds++
+            }
+        }
+    }
 
     var hasPermission by remember {
         mutableStateOf(
@@ -320,6 +352,31 @@ private fun RecordingStep(
                 stabilityMonitor.start(context)
                 onDispose { stabilityMonitor.stop() }
             }
+            // Auto-arms the settling window the moment a tap locks the color — LiftPhaseDetector's
+            // COMPLETE->READY transition already re-arms itself automatically every rep (verified
+            // in LiftPhaseDetector.kt: READY actively watches for the next onset with no external
+            // call needed), so this one auto-trigger, not a per-rep manual button, is genuinely all
+            // that's needed to satisfy "don't require a tap between reps" -- including the FIRST
+            // rep. Supersedes the old manual START REP button, removed below.
+            LaunchedEffect(liveColorLockedOn) {
+                if (liveColorLockedOn) recorder.startRep()
+            }
+            if (liveColorLockedOn) {
+                LiveSessionTopBar(
+                    elapsedSeconds = liveSessionElapsedSeconds,
+                    repCount = repCount,
+                    onRetap = {
+                        onRetapColor()
+                        tapHighlightOffset = null
+                        lastTapAnchor = null
+                    },
+                    onEndSession = {
+                        onEndLiveSession()
+                        tapHighlightOffset = null
+                        lastTapAnchor = null
+                    }
+                )
+            }
             Box(
                 Modifier.fillMaxWidth().height(360.dp)
                     .onSizeChanged { size -> previewBoxSizePx = Size(size.width.toFloat(), size.height.toFloat()) }
@@ -369,8 +426,12 @@ private fun RecordingStep(
                                 // purely a transient "you tapped here" confirmation flash.
                                 lastTapAnchor = offset
                                 coroutineScope.launch {
-                                    tapHighlightAlpha.snapTo(1f)
-                                    tapHighlightAlpha.animateTo(0f, animationSpec = tween(1500))
+                                    // 200ms fade-in, 500ms hold, 500ms fade-out -- the patch
+                                    // boundary flash confirming where the color was sampled.
+                                    tapHighlightAlpha.snapTo(0f)
+                                    tapHighlightAlpha.animateTo(1f, animationSpec = tween(200))
+                                    delay(500)
+                                    tapHighlightAlpha.animateTo(0f, animationSpec = tween(500))
                                 }
                             }
                         }
@@ -402,28 +463,51 @@ private fun RecordingStep(
                     }
                     LiveTrackingReadout(tracking = liveTracking, velocity = liveVelocity, phase = livePhase)
                 }
-                // The lock-on reticle: the phase between a successful tap and the lift starting.
-                // Only meaningful post-tap -- before that, the tap-catcher + stability indicator
-                // above are the whole story.
-                if (liveColorLockedOn) {
-                    LockOnReticle(
-                        state = reticleState,
-                        confidence = reticleConfidence,
-                        markerFrame = liveMarkerFrame,
-                        tapAnchor = lastTapAnchor,
-                        boxSize = previewBoxSizePx,
-                        liftPhase = livePhase
+                // STEP 1 prompt -- only before the first successful tap of this lock-on cycle.
+                if (!liveColorLockedOn) {
+                    Text(
+                        "Hold still, then tap the bar",
+                        color = Color.White.copy(alpha = 0.85f),
+                        fontSize = 14.sp, fontWeight = FontWeight.Black,
+                        modifier = Modifier
+                            .align(Alignment.Center)
+                            .background(Color.Black.copy(alpha = 0.4f), androidx.compose.foundation.shape.RoundedCornerShape(6.dp))
+                            .padding(horizontal = 12.dp, vertical = 6.dp)
                     )
                 }
-                if (liveColorLockedOn) {
-                    OutlinedButton(
-                        onClick = {
-                            onRetapColor()
-                            tapHighlightOffset = null
-                        },
-                        modifier = Modifier.align(Alignment.TopEnd).padding(8.dp),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = PowerAmber)
-                    ) { Text("RE-TAP", fontSize = 11.sp, fontWeight = FontWeight.Black) }
+                // The lock-on reticle: rendered unconditionally (not just post-tap) -- reticleState
+                // defaults to SEARCHING before any tap too, so this doubles as the subtle ambient
+                // "aim here" hint STEP 1 asks for, falling back to the box center with no tap anchor
+                // yet, and continues seamlessly into real ACQUIRING/LOCKED tracking once a tap lands.
+                LockOnReticle(
+                    state = reticleState,
+                    confidence = reticleConfidence,
+                    markerFrame = liveMarkerFrame,
+                    tapAnchor = lastTapAnchor,
+                    boxSize = previewBoxSizePx,
+                    liftPhase = livePhase
+                )
+                // Velocity-colored trail: invisible until MOVING, frozen (not cleared) through
+                // COMPLETE so the user can see what they just lifted, per spec.
+                if (livePhase == LiftPhase.MOVING || livePhase == LiftPhase.COMPLETE) {
+                    LiveTrailOverlay(
+                        points = liveTrailPoints,
+                        frameWidthPx = liveMarkerFrame?.frameWidthPx ?: 0,
+                        frameHeightPx = liveMarkerFrame?.frameHeightPx ?: 0,
+                        boxSize = previewBoxSizePx
+                    )
+                }
+                if (livePhase == LiftPhase.MOVING) {
+                    Text(
+                        "~%.2f".format(liveVelocity),
+                        color = NeonGreen, fontSize = 22.sp, fontWeight = FontWeight.Black,
+                        fontFamily = FontFamily.Monospace,
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(8.dp)
+                            .background(Color.Black.copy(alpha = 0.55f), androidx.compose.foundation.shape.RoundedCornerShape(6.dp))
+                            .padding(horizontal = 10.dp, vertical = 6.dp)
+                    )
                 }
                 if (lockLost) {
                     LockLostBanner(
@@ -435,13 +519,14 @@ private fun RecordingStep(
                         modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 80.dp)
                     )
                 }
-                if (livePhase == LiftPhase.IDLE || livePhase == LiftPhase.COMPLETE) {
-                    SaiyanButton(
-                        onClick = { recorder.startRep() },
-                        modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 12.dp)
-                    ) {
-                        Text("START REP", fontWeight = FontWeight.Black, letterSpacing = 1.sp)
-                    }
+                currentRepSummary?.let { summary ->
+                    RepSummaryCard(
+                        summary = summary,
+                        onSave = onSaveRep,
+                        onDiscard = onDiscardRep,
+                        onShare = { onShareLiveRep { msg -> snackbarMessage = msg } },
+                        modifier = Modifier.align(Alignment.BottomCenter)
+                    )
                 }
             }
         } else {

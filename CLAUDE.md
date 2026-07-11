@@ -2160,6 +2160,72 @@ _(Claude Code appends here after each completed task)_
   screen, not just a numeric debug readout) — unverified on a device, same standing caveat as the
   whole live VBT stack.
   versionCode 60, versionName 0.45.0.
+- [x] Sprint 46 — continuous live VBT session, wired end-to-end (v0.46.0): the "full coherent
+  journey" request — camera opens, tap once, then every subsequent rep auto-detects with no
+  further taps, until the user ends the session.
+  **Real scope fork, asked before building** (AskUserQuestion): the rep-summary card's "Mean
+  Propulsive Velocity: X.XX m/s" implies calibrated physics, but the live pipeline has never had a
+  real pixels-per-meter scale (that only ever comes from post-hoc calibration on a *completed*
+  recording — the whole existing offline pipeline: SG smoothing, gyro compensation, dual-marker
+  correction, all operate on ONE finished video file, not a continuous multi-rep live stream).
+  Three options laid out: (a) live uncalibrated numbers, honestly labelled, buildable now; (b) a
+  new one-time inline scale-calibration step before the first rep, for real m/s thereafter; (c)
+  segment the continuous recording per rep and run the full offline pipeline + save real video per
+  rep — by far the largest build. User picked (a).
+  Also flagged: `BarTrailOverlayView` doesn't exist (checked again) — built new this sprint, since
+  STEP 4 explicitly needs it and it's squarely in scope now, unlike prior sprints where it was
+  correctly out of scope.
+  **A real latent bug/rough-edge found while wiring this, not part of the original ask**: read
+  `LiftPhaseDetector.kt` before wiring the "no tap between reps" requirement, and confirmed
+  `COMPLETE -> READY` already transitions fully automatically (500ms, self-rebaselining) and READY
+  already actively watches for the next onset with zero external calls — meaning the old manual
+  "START REP" button was only ever load-bearing for the very FIRST rep of a session, not the
+  ones after. Replaced it with a single `LaunchedEffect(liveColorLockedOn) { recorder.startRep() }`
+  firing once per lock-on — genuinely satisfies "auto-detect every rep, no tap between reps"
+  including rep 1, and removes a UI element that was redundant for every rep after the first
+  (a real UX improvement discovered via code-reading, not assumed).
+  (1) `BarPathCaptureViewModel` — "Continuous live rep session" section: accumulates
+  `TrackedFrame`s (reusing the existing domain model, timestamped via `System.currentTimeMillis()`
+  since there's no calibrated frame timestamp live) while `phase == MOVING`; on
+  `LiveFrameResult.repJustCompleted` (fires with `phase==COMPLETE` — verified before assuming, so
+  the accumulate-then-check call order in `onLiveResult` is correct without a special case),
+  computes `LiveRepSummary` (mean velocity via the SAME total-displacement/total-time formula
+  shape the offline pipeline uses, just unscaled pixels; peak; range-of-motion in px).
+  **Deliberately never written to `BarPathAnalysis`/`bar_path_metrics`** — that table's fields are
+  real physical units, consumed as such by `ExerciseDetailScreen`'s velocity chart and
+  `RepCardGenerator`'s share card; writing fake numbers into real-labelled columns would silently
+  corrupt both. Kept in an in-memory `liveSessionReps` list instead (session-lifetime only, matches
+  the chosen scope's "no video/no persisted record" limits) — `onSaveRep`/`onDiscardRep` just
+  manage that list + clear per-rep accumulation; `onShareLiveRep` explains why sharing isn't wired
+  (a real share card built around real m/s would misrepresent a relative number) rather than
+  silently no-op'ing. `onEndLiveSession` stops the loop and clears session counters — does not
+  navigate away (no such callback exists on this screen) and doesn't touch the separate manual
+  RECORD/STOP + offline-analysis flow, which remains fully independent and unaffected.
+  (2) `presentation/screens/barpath/LiveTrailOverlay.kt` (new): velocity-colored polyline through
+  accumulated MOVING-phase points, reusing `velocityColorArgb` (built for the calibrated offline
+  replay screen, 0.2-0.8 m/s anchors) purely as a color-gradient shape — documented as a visual
+  approximation, not a claim of matching real velocity zones, since this trail's numbers are the
+  same uncalibrated relative readings.
+  (3) `presentation/screens/barpath/LiveSessionUi.kt` (new): `LiveSessionTopBar` ("● LIVE" +
+  elapsed session timer — deliberately NOT labelled "REC", since no video is saved per rep in this
+  mode and that framing would be misleading; rep count; ⊕ RETAP; ✕ END) and `RepSummaryCard`
+  (labels every number "rel. speed" / "px", never bare "m/s" or "cm" — the whole point of the
+  scope decision above).
+  (4) `BarPathCaptureScreen.kt` (`RecordingStep`): `LockOnReticle` now renders unconditionally
+  (not gated on `liveColorLockedOn`) — its `reticleState` already defaults to SEARCHING pre-tap
+  and its `tapAnchor` fallback already centers on the box, so this doubles as STEP 1's "subtle,
+  not intrusive" ambient reticle hint for free, continuing seamlessly into real tracking once a
+  tap lands. Removed the old standalone RE-TAP button (superseded by the top bar's). Tap-flash
+  timing changed to the literal spec (200ms fade-in / 500ms hold / 500ms fade-out, was a single
+  1500ms fade) — a real, deliberate replacement, not additive, since keeping two different flash
+  timings for the same visual interaction made no sense.
+  KNOWN GAP: this is Option (a) — every velocity/ROM number in this mode is relative, not real
+  physics, by deliberate choice. Getting real m/s per rep without re-tapping (option b) or full
+  per-rep video + offline pipeline (option c) are real, larger follow-ups if wanted later, not
+  silently done here. Unverified on a real device this session, same standing caveat as the whole
+  live VBT stack — now covering more surface area (continuous multi-rep cycling, the new trail
+  overlay, the auto-startRep timing) than any single prior sprint.
+  versionCode 61, versionName 0.46.0.
 
 ## Release rules
 

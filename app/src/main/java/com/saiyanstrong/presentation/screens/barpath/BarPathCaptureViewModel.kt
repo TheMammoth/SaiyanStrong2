@@ -204,6 +204,11 @@ class BarPathCaptureViewModel @Inject constructor(
                     result.frameWidthPx, result.frameHeightPx
                 )
             }
+            accumulateLiveRepFrame(result)
+            if (result.repJustCompleted) {
+                _currentRepSummary.value = summarizeCurrentRep()
+                clearCurrentRepAccumulation()
+            }
         }
     }
 
@@ -216,6 +221,111 @@ class BarPathCaptureViewModel @Inject constructor(
         lockOnTracker.reset()
         _reticleState.value = ReticleState.SEARCHING
         _reticleConfidence.value = 0f
+        clearCurrentRepAccumulation()
+        _currentRepSummary.value = null
+        _liveTrailPoints.value = emptyList()
+    }
+
+    // ── Continuous live rep session ──────────────────────────────────────────────
+    // Auto-detects each subsequent rep once locked on, without requiring another tap — the
+    // ColorProfile persists in BarPathLiveAnalyzer for the whole session already (Sprint 39/44);
+    // LiftPhaseDetector already cycles COMPLETE->READY on its own (Sprint 40), so "next rep, no
+    // retap" falls out of infrastructure that already existed. What's genuinely new here is
+    // accumulating + summarizing each rep's live frames.
+    //
+    // DELIBERATE SCOPE (per explicit choice over the alternative of adding inline scale
+    // calibration or a full segmented-recording pipeline): this is UNCALIBRATED. The live
+    // analyzer has never had a real pixels-per-meter scale — that only ever comes from post-hoc
+    // calibration on a completed recording. So a live rep's "velocity" here is a RELATIVE number,
+    // not real m/s, and is deliberately NEVER written into BarPathAnalysis/bar_path_metrics
+    // (Room) — that table's fields (peakVelocityMs, etc.) are real physical units consumed
+    // elsewhere as real physics (ExerciseDetailScreen's "BAR SPEED" chart, RepCardGenerator's
+    // share card). Writing fake numbers into real-labeled fields would silently corrupt those.
+    // Instead, live-session reps are kept in-memory only, for this screen's lifetime.
+    data class LiveRepSummary(
+        val meanVelocityRel: Double,
+        val peakVelocityRel: Double,
+        val romPx: Double,
+        val frames: List<TrackedFrame>
+    )
+
+    private val currentRepFrames = mutableListOf<TrackedFrame>()
+
+    private val _currentRepSummary = MutableStateFlow<LiveRepSummary?>(null)
+    val currentRepSummary: StateFlow<LiveRepSummary?> = _currentRepSummary.asStateFlow()
+
+    /** In-memory only (see the scope note above) — cleared if the screen is left. */
+    private val _liveSessionReps = MutableStateFlow<List<LiveRepSummary>>(emptyList())
+    val liveSessionReps: StateFlow<List<LiveRepSummary>> = _liveSessionReps.asStateFlow()
+
+    /** Screen-space trail points accumulated during MOVING, for [LiveTrailOverlay] — frozen (not
+     * cleared) once the rep completes, per spec; cleared only on Save/Discard/RE-TAP. */
+    data class TrailPoint(val xPx: Float, val yPx: Float, val velocityMps: Float)
+    private val _liveTrailPoints = MutableStateFlow<List<TrailPoint>>(emptyList())
+    val liveTrailPoints: StateFlow<List<TrailPoint>> = _liveTrailPoints.asStateFlow()
+
+    private fun clearCurrentRepAccumulation() {
+        currentRepFrames.clear()
+    }
+
+    /** Called from [onLiveResult] on every frame while MOVING, and once more on completion. */
+    private fun accumulateLiveRepFrame(result: LiveFrameResult) {
+        if (result.phase != LiftPhase.MOVING) return
+        currentRepFrames.add(
+            TrackedFrame(System.currentTimeMillis(), result.xPx.toDouble(), result.yPx.toDouble(), result.smoothedVelocityMps.toDouble())
+        )
+        _liveTrailPoints.update {
+            it + TrailPoint(result.xPx, result.yPx, result.smoothedVelocityMps)
+        }
+    }
+
+    /** Mean here matches the offline pipeline's convention (total displacement / total time, not
+     * an average of instantaneous readings) — same formula shape as
+     * [com.saiyanstrong.domain.usecase.AnalyzeBarPathUseCase], just unscaled (pixels, not meters,
+     * since there's no live calibration — see the scope note above). */
+    private fun summarizeCurrentRep(): LiveRepSummary? {
+        val frames = currentRepFrames
+        if (frames.size < 2) return null
+        val first = frames.first(); val last = frames.last()
+        val totalDisplacementPx = hypot(last.xPx - first.xPx, last.yPx - first.yPx)
+        val totalTimeS = (last.timestampMs - first.timestampMs) / 1000.0
+        val meanVelocityRel = if (totalTimeS > 0.0) totalDisplacementPx / totalTimeS else 0.0
+        val peakVelocityRel = frames.maxOf { it.velocityMps } // velocityMps field reused for the relative reading
+        val yValues = frames.map { it.yPx }
+        val romPx = (yValues.maxOrNull() ?: 0.0) - (yValues.minOrNull() ?: 0.0)
+        return LiveRepSummary(meanVelocityRel, peakVelocityRel, romPx, frames.toList())
+    }
+
+    /** User pressed SAVE on the rep summary card — keeps it in the in-memory session list (bumps
+     * the rep counter) and clears the trail/summary so the next rep can begin. */
+    fun onSaveRep() {
+        _currentRepSummary.value?.let { summary -> _liveSessionReps.update { it + summary } }
+        _currentRepSummary.value = null
+        clearCurrentRepAccumulation()
+        _liveTrailPoints.value = emptyList()
+    }
+
+    /** DISCARD — same cleanup as save, minus the append (rep doesn't count). */
+    fun onDiscardRep() {
+        _currentRepSummary.value = null
+        clearCurrentRepAccumulation()
+        _liveTrailPoints.value = emptyList()
+    }
+
+    /** SHARE on a live (uncalibrated) rep card is intentionally not wired to the real
+     * RepCardGenerator/share pipeline — that path is built around real m/s numbers, and sharing a
+     * card that visually claims real velocity for an uncalibrated relative reading would be
+     * actively misleading. Surfaces an explanation instead of a silent no-op. */
+    fun onShareLiveRep(onExplain: (String) -> Unit) {
+        onExplain("Share is available after a full calibrated analysis (record + calibrate scale).")
+    }
+
+    /** "End Session" — stops the continuous live loop and clears session-scoped counters. Does
+     * NOT navigate away (no such callback is wired into this screen today) or touch the separate
+     * manual RECORD/STOP + offline-analysis flow, which remains fully independent of this mode. */
+    fun onEndLiveSession() {
+        onRetapColor()
+        _liveSessionReps.value = emptyList()
     }
 
     fun onRecordingFinished(path: String?, gyroTimeline: GyroTimeline?, focalMm: Double, sensorWidthMm: Double, videoStartUptimeNs: Long) {
