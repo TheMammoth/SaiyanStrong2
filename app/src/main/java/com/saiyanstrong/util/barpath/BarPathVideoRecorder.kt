@@ -78,10 +78,12 @@ class BarPathVideoRecorder {
         previewView: PreviewView,
         highSpeedEnabled: Boolean = false,
         onHighSpeedUnavailable: () -> Unit = {},
+        onError: (String) -> Unit = {},
         onLiveResult: ((LiveFrameResult) -> Unit)? = null
     ) {
         val providerFuture = ProcessCameraProvider.getInstance(context)
         providerFuture.addListener({
+          try {
             val provider = providerFuture.get()
 
             val tier = if (highSpeedEnabled) HighSpeedCapabilityChecker.check(provider) else HighSpeedTier.STANDARD_30
@@ -133,10 +135,17 @@ class BarPathVideoRecorder {
                     Log.e("BarPathVideoRecorder", "Camera bind failed", e)
                     if (tier != HighSpeedTier.STANDARD_30) {
                         onHighSpeedUnavailable()
-                        bindCamera(context, lifecycleOwner, previewView, highSpeedEnabled = false, onLiveResult = onLiveResult)
+                        bindCamera(context, lifecycleOwner, previewView, highSpeedEnabled = false, onError = onError, onLiveResult = onLiveResult)
+                    } else {
+                        onError("Camera unavailable on this device")
                     }
                 }
             }
+          } catch (t: Throwable) {
+            // Last-resort guard: nothing on the camera provider callback may crash the app.
+            Log.e("BarPathVideoRecorder", "Camera setup failed", t)
+            onError("Camera failed to start")
+          }
         }, ContextCompat.getMainExecutor(context))
     }
 
@@ -147,6 +156,7 @@ class BarPathVideoRecorder {
     }
 
     fun startRecording(context: Context, onFinalized: (path: String?, gyroTimeline: GyroTimeline?, focalMm: Double, sensorWidthMm: Double, videoStartUptimeNs: Long) -> Unit) {
+      try {
         val capture = videoCapture ?: run { onFinalized(null, null, 0.0, 0.0, 0L); return }
         val outputDir = File(context.cacheDir, "bar_path").apply { mkdirs() }
         val outputFile = File(outputDir, "recording_${System.currentTimeMillis()}.mp4")
@@ -218,12 +228,20 @@ class BarPathVideoRecorder {
                     }
                 }
             }
+      } catch (t: Throwable) {
+        // Record start can throw on device (codec/camera state) — never crash; reset and report.
+        Log.e("BarPathVideoRecorder", "startRecording failed", t)
+        gyroListener?.let { sensorManager?.unregisterListener(it) }
+        gyroListener = null
+        currentGyroTimeline = null
+        onFinalized(null, null, 0.0, 0.0, 0L)
+      }
     }
 
     fun stopRecording() {
-        activeRecording?.stop()
+        runCatching { activeRecording?.stop() }
         activeRecording = null
-        gyroListener?.let { sensorManager?.unregisterListener(it) }
+        gyroListener?.let { runCatching { sensorManager?.unregisterListener(it) } }
         gyroListener = null
     }
 }

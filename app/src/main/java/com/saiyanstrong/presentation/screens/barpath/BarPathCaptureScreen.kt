@@ -212,8 +212,10 @@ private fun RecordingStep(
         }, ContextCompat.getMainExecutor(context))
     }
     val deviceSupportsHighSpeed = highSpeedTier != null && highSpeedTier != HighSpeedTier.STANDARD_30
-    // Defaults to on when the device supports it, unless the user has explicitly chosen otherwise.
-    val effectiveHighSpeedEnabled = highSpeedPreference ?: deviceSupportsHighSpeed
+    // Defaults to OFF: forcing a fixed high frame rate via Camera2Interop is the most device-fragile
+    // part of the capture path and a suspected crash source on devices that only advertise a
+    // *variable* fps range. Opt-in only — the user must flip the toggle to enable it.
+    val effectiveHighSpeedEnabled = highSpeedPreference ?: false
 
     val snackbarHostState = remember { SnackbarHostState() }
     var snackbarMessage by remember { mutableStateOf<String?>(null) }
@@ -273,6 +275,7 @@ private fun RecordingStep(
                                 onHighSpeedUnavailable = {
                                     snackbarMessage = "High-speed mode unavailable on this device, using 30fps"
                                 },
+                                onError = { msg -> snackbarMessage = msg },
                                 onLiveResult = onLiveResult
                             )
                         }

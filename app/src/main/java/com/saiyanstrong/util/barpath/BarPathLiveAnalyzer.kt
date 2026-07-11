@@ -109,8 +109,9 @@ class BarPathLiveAnalyzer(
                     repJustCompleted = phaseUpdate.repJustCompleted
                 )
             )
-        } catch (_: Exception) {
-            // A single bad frame must never crash the analyzer / camera pipeline.
+        } catch (_: Throwable) {
+            // A single bad frame must never crash the analyzer / camera pipeline (incl. OOM on a
+            // large frame — better a dropped frame than a downed camera).
         } finally {
             image.close()
         }

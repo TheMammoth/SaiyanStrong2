@@ -1981,6 +1981,28 @@ _(Claude Code appends here after each completed task)_
   would mean running the filter continuously across phases (a `BarPathLiveAnalyzer` change, not done
   here). And, as with the whole live VBT stack, none of this is verified on a real device this session.
   versionCode 56, versionName 0.42.0.
+- [x] v0.42.1 — hardened bar-path recording against on-device crash: user reported the app
+  crashing "when recording" — the first real-device run of the live-camera capture path (never
+  device-tested before). No stack trace available (USB debugging not set up), so this is a
+  probable-cause hardening pass, not a confirmed fix, chosen by the user over connecting for the
+  exact trace.
+  (1) **High-speed capture defaulted OFF**: `effectiveHighSpeedEnabled` was
+  `highSpeedPreference ?: deviceSupportsHighSpeed` (auto-on for any device advertising a high fps),
+  now `?: false` (opt-in only). Forcing a fixed `CONTROL_AE_TARGET_FPS_RANGE(120,120)` via
+  Camera2Interop is the most device-fragile part of the pipeline and the leading crash suspect —
+  many devices only advertise a *variable* `[30,120]` range and reject a fixed one at bind.
+  (2) **Hard guards so a camera failure surfaces instead of crashing**: `BarPathVideoRecorder`
+  gained an `onError: (String) -> Unit` param; the entire `ProcessCameraProvider` provider-ready
+  callback body in `bindCamera` is wrapped in `try/catch (Throwable)` (last-resort — nothing on
+  the camera main-executor callback may crash the app), and `startRecording`'s whole body is
+  likewise wrapped (record start can throw on device from codec/camera state), resetting the gyro
+  listener + reporting `onFinalized(null,...)` so the UI unwinds `isRecording` instead of hanging.
+  `stopRecording` wraps its `stop()`/`unregisterListener` in `runCatching`. `onError` is wired to
+  the existing `RecordingStep` snackbar.
+  (3) `BarPathLiveAnalyzer.analyze` per-frame catch broadened `Exception` → `Throwable` (covers an
+  OOM on a large frame — a dropped frame beats a downed camera).
+  KNOWN GAP: still no confirmed root cause — if the crash persists after this, the real fix needs
+  the logcat stack trace via USB debugging. versionCode 57, versionName 0.42.1.
 
 ## Release rules
 
