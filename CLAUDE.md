@@ -1920,6 +1920,41 @@ _(Claude Code appends here after each completed task)_
   whole live-analysis path) is unverified on a device — same standing caveat as the rest of the
   live loop.
   versionCode 51, versionName 0.37.0.
+- [x] Sprint 41 — gyroscope shake compensation, offline path (v0.39.0 "Sensor Fusion Active",
+  through v0.41.0): compensates for camera rotation by subtracting the gyro-predicted apparent
+  centroid shift, so shaking the phone during a stationary/lifting bar doesn't corrupt the tracked
+  path. User chose (over live-only) to fix the SAVED numbers, so this runs in the OFFLINE analysis
+  path (the one that produces the persisted results / rep card / replay), not just the live
+  overlay. NOTE: this sprint was completed partly by parallel work on the repo — the version
+  stream advanced 0.37→0.41 and releases v0.38–v0.41 were cut outside this session's own
+  build/commit flow (a GitHub release workflow was also added/fixed), and this CLAUDE.md entry was
+  written after the fact to close the progress-log gap.
+  (1) Pure, unit-tested cores (`domain/util/`, not the requested `domain/analysis/`): `ShakeCompensator`
+  (`compensate` subtracts `focalLengthPx × cumulativeAngle`; `focalLengthPx` = pinhole formula) —
+  4 tests; `GyroTimeline` (records cumulative integrated angle keyed by device-uptime ns, linear
+  interpolation with end-clamping) — 4 tests. **SPEC CORRECTNESS FIX**: the spec passed the angle
+  *since the last frame* and subtracted it from the raw centroid — mathematically wrong (the raw
+  centroid carries the *accumulated* rotation, so per-frame subtraction leaves position and
+  frame-to-frame velocity corrupted). Uses the CUMULATIVE angle since a reference instead, which
+  makes compensated frame-to-frame displacement = real motion − that interval's rotation (correct
+  for velocity). `PointF` → pure `Point2D`.
+  (2) `BarPathVideoRecorder.startRecording` records the gyro (`TYPE_GYROSCOPE_UNCALIBRATED` with
+  `TYPE_GYROSCOPE` fallback, `SENSOR_DELAY_FASTEST`) into a `GyroTimeline` for the duration of the
+  capture, anchors the video-timeline↔gyro-timeline alignment on `SystemClock.elapsedRealtimeNanos()`
+  captured at `VideoRecordEvent.Start`, reads focal length + sensor width from the back camera's
+  `CameraCharacteristics`, and hands all of it to the callback on finalize (gracefully null when no
+  gyro). `BarPathCaptureViewModel` threads it through; `BarPathFrameTracker.trackMarker`/
+  `trackMarkerPair` map each frame's video-PTS → uptime via the anchor, look up the cumulative
+  angle, and compensate the centroid before it enters the pipeline.
+  KNOWN GAP — the important one: the offline gyro↔video timebase alignment is the single most
+  device-fragile, unverifiable part. It assumes the gyro `SensorEvent.timestamp` and
+  `elapsedRealtimeNanos()` share a timebase (device-dependent), and that the recording-start anchor
+  matches video-PTS 0 (there's real capture-start latency). The pure compensation math is tested
+  and correct; whether the *alignment* is accurate enough to actually clean up real footage is
+  entirely unverified on a device. Also: `imageWidthPx` for the focal→pixel conversion uses the
+  extracted frame width, and rotation-axis handling for portrait video is unverified. The live-path
+  gyro wiring (task 4/6 of the request) was NOT added — this is offline-only, per the chosen scope.
+  versionCode 55, versionName 0.41.0 (through parallel releases v0.38–v0.41).
 
 ## Release rules
 
