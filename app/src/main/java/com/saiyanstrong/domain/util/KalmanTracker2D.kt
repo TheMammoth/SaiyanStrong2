@@ -20,8 +20,17 @@ data class Point2D(val x: Double, val y: Double)
  * must stay UI-only: the Savitzky-Golay post-analysis pipeline receives raw centroids, never
  * Kalman-smoothed ones.
  *
- * @param measurementNoiseSigma centroid uncertainty, in pixels.
+ * ADAPTIVE NOISE — both noise levels retune with the current [LiftPhase] via [setPhase]: during
+ * the stationary IDLE/SETTLING/READY/COMPLETE phases the process noise is dropped hard (the model
+ * expects the bar to be nearly still, so measurement jitter is damped away instead of chased) and
+ * during MOVING it opens back up (trust the fast, real motion). Measurement noise moves the other
+ * way — high while stationary (distrust every pixel wobble), low while MOVING. Paired with the
+ * [smoothedVelocityMps] deadband, this kills the ~0.02 m/s phantom velocity readout that a
+ * fixed-noise filter shows during the setup/pause before a rep.
+ *
+ * @param measurementNoiseSigma centroid uncertainty, in pixels. Adaptive after the first [setPhase].
  * @param processNoiseSigma model/process noise, in pixels/s² (roughly max bar acceleration).
+ * Adaptive after the first [setPhase].
  * @param maxAccelerationMps2 physical sanity cap on estimated acceleration — a magnitude above
  * this (default 15 m/s² ≈ 1.5g) is a tracking error, not real barbell motion, so the predicted
  * acceleration vector is scaled back to this bound (direction preserved). Converting the cap
@@ -29,10 +38,12 @@ data class Point2D(val x: Double, val y: Double)
  * frame (it can vary per frame in dual-marker mode).
  */
 class KalmanTracker2D(
-    private val measurementNoiseSigma: Double = VbtConstants.KALMAN_MEASUREMENT_NOISE,
-    private val processNoiseSigma: Double = VbtConstants.KALMAN_PROCESS_NOISE,
+    private var measurementNoiseSigma: Double = VbtConstants.KALMAN_MEASUREMENT_NOISE,
+    private var processNoiseSigma: Double = VbtConstants.KALMAN_PROCESS_NOISE,
     private val maxAccelerationMps2: Double = 15.0
 ) {
+    /** The phase last supplied to [setPhase]; gates the [smoothedVelocityMps] deadband. */
+    private var currentPhase: LiftPhase = LiftPhase.IDLE
     /** Current pixels-per-meter scale — set by the caller each frame; used by the acceleration
      * clamp and the m/s velocity/acceleration readouts. Defaults to a neutral value so the
      * clamp is effectively inactive until a real scale is supplied. */
@@ -45,9 +56,36 @@ class KalmanTracker2D(
         doubleArrayOf(1.0, 0.0, 0.0, 0.0, 0.0, 0.0),
         doubleArrayOf(0.0, 1.0, 0.0, 0.0, 0.0, 0.0)
     )
-    private val measurementNoise = run {  // R: 2x2
+    // R: 2x2. Depends only on measurementNoiseSigma (not dt), so it is rebuilt once per phase
+    // change in setPhase rather than every frame. (Q, by contrast, is dt-dependent — see predict.)
+    private var measurementNoise = buildMeasurementNoise()
+
+    private fun buildMeasurementNoise(): Array<DoubleArray> {
         val r2 = measurementNoiseSigma * measurementNoiseSigma
-        arrayOf(doubleArrayOf(r2, 0.0), doubleArrayOf(0.0, r2))
+        return arrayOf(doubleArrayOf(r2, 0.0), doubleArrayOf(0.0, r2))
+    }
+
+    /**
+     * Retune both noise levels to the current [LiftPhase]. Cheap — the only per-call allocation is
+     * the 2x2 R matrix (dt-independent, so it belongs here, not in predict); the process noise σ is
+     * just stored and folded into Q per-frame in predict, since Q scales with dt and can't be
+     * precomputed for a variable-frame-rate source. Safe to call every frame; it only rebuilds R
+     * when the phase actually changes.
+     */
+    fun setPhase(phase: LiftPhase) {
+        if (phase == currentPhase) return
+        currentPhase = phase
+        processNoiseSigma = when (phase) {
+            LiftPhase.IDLE, LiftPhase.SETTLING -> 0.1   // dead still — damp jitter hard
+            LiftPhase.READY -> 0.5                       // braced, tiny sway allowed
+            LiftPhase.MOVING -> VbtConstants.KALMAN_PROCESS_NOISE  // real fast motion — trust it
+            LiftPhase.COMPLETE -> 0.5                    // racked/paused — settle back down
+        }
+        measurementNoiseSigma = when (phase) {
+            LiftPhase.MOVING -> 2.0                       // motion is real — trust the pixels
+            else -> 8.0                                   // stationary — distrust every wobble
+        }
+        measurementNoise = buildMeasurementNoise()
     }
 
     init { reset(0.0, 0.0) }
@@ -88,7 +126,14 @@ class KalmanTracker2D(
     val smoothedPosition: Point2D get() = Point2D(state[0], state[1])
 
     val smoothedVelocityMps: Float
-        get() = if (pixelsPerMeter > 0.0) (hypot(state[2], state[3]) / pixelsPerMeter).toFloat() else 0f
+        get() {
+            if (pixelsPerMeter <= 0.0) return 0f
+            val v = (hypot(state[2], state[3]) / pixelsPerMeter).toFloat()
+            // Deadband: outside the actual lift, anything under 3 cm/s is residual filter/tracking
+            // noise, not motion — clamp it to a clean 0 so the readout reads "0.00" while racked.
+            // Never applied in MOVING, where a genuinely slow grind can sit below this.
+            return if (v < VELOCITY_DEADBAND_MPS && currentPhase != LiftPhase.MOVING) 0f else v
+        }
 
     /** Exposed for debug/validation — the estimated acceleration magnitude in real units. */
     val accelerationMagnitudeMps2: Double
@@ -138,6 +183,11 @@ class KalmanTracker2D(
         q[3][1] = qpv; q[3][3] = qvv; q[3][5] = qva
         q[5][1] = qpa; q[5][3] = qva; q[5][5] = qaa
         return q
+    }
+
+    companion object {
+        /** Velocity readouts below this (m/s), outside MOVING, are clamped to exactly 0. */
+        const val VELOCITY_DEADBAND_MPS = 0.03f
     }
 }
 

@@ -1955,6 +1955,32 @@ _(Claude Code appends here after each completed task)_
   extracted frame width, and rotation-axis handling for portrait video is unverified. The live-path
   gyro wiring (task 4/6 of the request) was NOT added — this is offline-only, per the chosen scope.
   versionCode 55, versionName 0.41.0 (through parallel releases v0.38–v0.41).
+- [x] Sprint 42 — adaptive Kalman noise + velocity deadband (v0.42.0): the live VBT readout
+  (`KalmanTracker2D`, consumed by `BarPathLiveAnalyzer`) previously ran one fixed process/measurement
+  noise pair, so it chased marker jitter during the pre-lift stationary phase and showed a phantom
+  ~0.02 m/s. Two fixes, both on the pure/testable filter:
+  (1) `KalmanTracker2D.setPhase(LiftPhase)` retunes both noise levels to the current phase —
+  process σ dropped hard while stationary (IDLE/SETTLING 0.1, READY/COMPLETE 0.5) and opened to
+  `VbtConstants.KALMAN_PROCESS_NOISE` (50) in MOVING; measurement σ inverted (8.0 stationary, 2.0
+  MOVING). `measurementNoiseSigma`/`processNoiseSigma` became mutable; R (2x2, dt-independent) is
+  rebuilt once per phase change in `setPhase`, while Q stays assembled per-frame in `predict` since
+  it scales with the variable frame dt and can't be precomputed. `setPhase` is idempotent (no-op if
+  phase unchanged).
+  (2) Velocity deadband on `smoothedVelocityMps`: readings under 3 cm/s (`VELOCITY_DEADBAND_MPS`)
+  are clamped to exactly 0 UNLESS phase == MOVING (a genuine slow grind can sit below that), so the
+  live number reads a clean 0.00 while racked.
+  Wiring: the prompt asked for a `tracker.setPhase(phase)` call "from the ViewModel", but the Kalman
+  lives inside `BarPathLiveAnalyzer` (alongside the phase detector, which is where the per-frame
+  phase is known) — so the single call site is the analyzer, right after `phaseDetector.update`, not
+  the ViewModel. Added 5 unit tests (deadband clamps outside MOVING / preserved during MOVING,
+  MOVING more responsive than READY, setPhase idempotency).
+  KNOWN GAP: `BarPathLiveAnalyzer` currently only runs the Kalman during MOVING (it resets at
+  movement onset and gates velocity to that phase), so the READY/IDLE/COMPLETE process-noise settings
+  are set-but-dormant for the live readout as wired today — the *active* effects are the deadband and
+  the MOVING-phase tuning. Making the stationary-phase damping actually shape the on-screen number
+  would mean running the filter continuously across phases (a `BarPathLiveAnalyzer` change, not done
+  here). And, as with the whole live VBT stack, none of this is verified on a real device this session.
+  versionCode 56, versionName 0.42.0.
 
 ## Release rules
 

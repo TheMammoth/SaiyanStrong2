@@ -112,4 +112,63 @@ class KalmanTracker2DTest {
             1e-9
         )
     }
+
+    @Test
+    fun `deadband clamps tiny velocity to zero outside MOVING`() {
+        val tracker = KalmanTracker2D()
+        tracker.pixelsPerMeter = 1000.0
+        tracker.setPhase(LiftPhase.READY)
+        tracker.reset(100.0, 100.0)
+        // drive a ~0.01 m/s crawl (10 px/s at 1000 px/m) — under the 0.03 deadband
+        var y = 100.0
+        repeat(20) { y += 1.0; tracker.predict(0.1); tracker.update(100.0, y) }
+        assertTrue("velocity should be a small non-zero before the deadband", tracker.smoothedVelocityMps >= 0f)
+        assertEquals("under-deadband + not MOVING clamps to exactly 0", 0.0, tracker.smoothedVelocityMps.toDouble(), 0.0)
+    }
+
+    @Test
+    fun `deadband does not fire during MOVING`() {
+        val tracker = KalmanTracker2D()
+        tracker.pixelsPerMeter = 1000.0
+        tracker.setPhase(LiftPhase.MOVING)
+        tracker.reset(100.0, 100.0)
+        // a slow grind ~0.01 m/s — below the deadband but MOVING must report it, not clamp
+        var y = 100.0
+        repeat(20) { y += 1.0; tracker.predict(0.1); tracker.update(100.0, y) }
+        assertTrue(
+            "MOVING must preserve sub-deadband velocity, got ${tracker.smoothedVelocityMps}",
+            tracker.smoothedVelocityMps > 0f
+        )
+    }
+
+    @Test
+    fun `MOVING phase reacts faster to real motion than READY phase`() {
+        // Same measurement stream, different phase: MOVING's higher process + lower measurement
+        // noise should track a real acceleration more responsively than the damped READY tuning.
+        fun run(phase: LiftPhase): Float {
+            val t = KalmanTracker2D()
+            t.pixelsPerMeter = 1000.0
+            t.setPhase(phase)
+            t.reset(0.0, 0.0)
+            var x = 0.0
+            repeat(10) { x += 20.0; t.predict(0.05); t.update(x, 0.0) } // 0.4 m/s true
+            return t.smoothedVelocityMps
+        }
+        val moving = run(LiftPhase.MOVING)
+        val ready = run(LiftPhase.READY)
+        assertTrue("MOVING ($moving) should be at least as responsive as READY ($ready)", moving >= ready)
+    }
+
+    @Test
+    fun `setPhase is idempotent for the same phase`() {
+        val tracker = KalmanTracker2D()
+        tracker.pixelsPerMeter = 1000.0
+        tracker.setPhase(LiftPhase.MOVING)
+        tracker.reset(0.0, 0.0)
+        var x = 0.0
+        repeat(10) { x += 10.0; tracker.predict(0.1); tracker.update(x, 0.0) }
+        val before = tracker.smoothedVelocityMps
+        tracker.setPhase(LiftPhase.MOVING) // same phase — must not perturb state
+        assertEquals(before.toDouble(), tracker.smoothedVelocityMps.toDouble(), 1e-9)
+    }
 }

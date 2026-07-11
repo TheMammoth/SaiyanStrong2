@@ -75,6 +75,10 @@ class BarPathLiveAnalyzer(
             // the actual lift (MOVING) so camera-shake jitter during the stationary phase produces
             // no phantom movement.
             val phaseUpdate = phaseDetector.update(centroidPoint, timestampMs)
+            // Retune the filter's noise to the phase (no-op unless the phase changed). The prompt
+            // called for this call "from the ViewModel", but the Kalman lives here in the analyzer
+            // alongside the phase detector — this is its real, single call site.
+            kalman.setPhase(phaseUpdate.phase)
 
             var velocity = 0f
             var px = centroidPoint?.x?.toFloat() ?: 0f
