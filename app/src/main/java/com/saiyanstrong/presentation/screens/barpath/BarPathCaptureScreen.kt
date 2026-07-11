@@ -8,6 +8,8 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -40,12 +42,16 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
@@ -71,6 +77,7 @@ import com.saiyanstrong.domain.util.LiftPhase
 import com.saiyanstrong.util.barpath.HighSpeedCapabilityChecker
 import com.saiyanstrong.util.barpath.HighSpeedTier
 import com.saiyanstrong.util.barpath.LiveFrameResult
+import kotlinx.coroutines.launch
 
 private val MarkerGreen = Color(0xFF39FF14)
 private val MarkerBlue = Color(0xFF2E9EFF)
@@ -86,6 +93,7 @@ fun BarPathCaptureScreen(
     val liveTracking by viewModel.liveTracking.collectAsStateWithLifecycle()
     val liveVelocity by viewModel.liveVelocity.collectAsStateWithLifecycle()
     val livePhase by viewModel.livePhase.collectAsStateWithLifecycle()
+    val liveColorLockedOn by viewModel.liveColorLockedOn.collectAsStateWithLifecycle()
 
     LaunchedEffect(uiState.isSaved) { if (uiState.isSaved) onDone() }
 
@@ -118,7 +126,9 @@ fun BarPathCaptureScreen(
                     liveTracking = liveTracking,
                     liveVelocity = liveVelocity,
                     livePhase = livePhase,
+                    liveColorLockedOn = liveColorLockedOn,
                     onLiveResult = viewModel::onLiveResult,
+                    onRetapColor = viewModel::onRetapColor,
                     onFinished = viewModel::onRecordingFinished,
                     onGalleryVideoPicked = viewModel::onGalleryVideoPicked
                 )
@@ -174,13 +184,19 @@ private fun RecordingStep(
     liveTracking: Boolean = false,
     liveVelocity: Float = 0f,
     livePhase: LiftPhase = LiftPhase.IDLE,
+    liveColorLockedOn: Boolean = false,
     onLiveResult: (LiveFrameResult) -> Unit = {},
+    onRetapColor: () -> Unit = {},
     onFinished: (String?, com.saiyanstrong.domain.util.GyroTimeline?, Double, Double, Long) -> Unit,
     onGalleryVideoPicked: (android.net.Uri) -> Unit = {}
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val recorder = remember { BarPathVideoRecorder() }
+    var previewViewRef by remember { mutableStateOf<PreviewView?>(null) }
+    var tapHighlightOffset by remember { mutableStateOf<Offset?>(null) }
+    val tapHighlightAlpha = remember { Animatable(0f) }
+    val coroutineScope = rememberCoroutineScope()
 
     var hasPermission by remember {
         mutableStateOf(
@@ -269,6 +285,7 @@ private fun RecordingStep(
                 AndroidView(
                     factory = { ctx ->
                         PreviewView(ctx).also { previewView ->
+                            previewViewRef = previewView
                             recorder.bindCamera(
                                 ctx, lifecycleOwner, previewView,
                                 highSpeedEnabled = effectiveHighSpeedEnabled,
@@ -282,12 +299,58 @@ private fun RecordingStep(
                     },
                     modifier = Modifier.fillMaxSize()
                 )
+                // Tap-to-lock marker color: only listens while not yet locked on, so an accidental
+                // tap mid-recording can't silently re-sample. RE-TAP re-arms it explicitly.
+                if (!liveColorLockedOn) {
+                    Box(
+                        Modifier.fillMaxSize().pointerInput(Unit) {
+                            detectTapGestures { offset ->
+                                val pv = previewViewRef
+                                if (pv != null && pv.width > 0 && pv.height > 0) {
+                                    val point = pv.meteringPointFactory.createPoint(offset.x, offset.y)
+                                    recorder.requestColorSample(point.x, point.y)
+                                    tapHighlightOffset = offset
+                                    coroutineScope.launch {
+                                        tapHighlightAlpha.snapTo(1f)
+                                        tapHighlightAlpha.animateTo(0f, animationSpec = tween(1500))
+                                    }
+                                }
+                            }
+                        }
+                    )
+                }
+                tapHighlightOffset?.let { point ->
+                    if (tapHighlightAlpha.value > 0f) {
+                        Canvas(Modifier.fillMaxSize()) {
+                            val half = 15.dp.toPx()
+                            drawRect(
+                                color = Color.White.copy(alpha = tapHighlightAlpha.value),
+                                topLeft = Offset(point.x - half, point.y - half),
+                                size = Size(half * 2, half * 2),
+                                style = Stroke(
+                                    width = 2.dp.toPx(),
+                                    pathEffect = PathEffect.dashPathEffect(floatArrayOf(8f, 6f))
+                                )
+                            )
+                        }
+                    }
+                }
                 LiveTrackingReadout(
                     tracking = liveTracking,
                     velocity = liveVelocity,
                     phase = livePhase,
                     modifier = Modifier.align(Alignment.TopStart).padding(8.dp)
                 )
+                if (liveColorLockedOn) {
+                    OutlinedButton(
+                        onClick = {
+                            onRetapColor()
+                            tapHighlightOffset = null
+                        },
+                        modifier = Modifier.align(Alignment.TopEnd).padding(8.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = PowerAmber)
+                    ) { Text("RE-TAP", fontSize = 11.sp, fontWeight = FontWeight.Black) }
+                }
                 if (livePhase == LiftPhase.IDLE || livePhase == LiftPhase.COMPLETE) {
                     SaiyanButton(
                         onClick = { recorder.startRep() },

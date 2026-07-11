@@ -125,11 +125,28 @@ class BarPathCaptureViewModel @Inject constructor(
     private val _livePhase = MutableStateFlow(LiftPhase.IDLE)
     val livePhase: StateFlow<LiftPhase> = _livePhase.asStateFlow()
 
+    private val _liveColorProfile = MutableStateFlow<MarkerColorProfile?>(null)
+    val liveColorProfile: StateFlow<MarkerColorProfile?> = _liveColorProfile.asStateFlow()
+
+    /** True once a live tap-to-sample has locked onto a marker color; drives the RE-TAP button
+     * and gates further taps (avoids an accidental re-sample mid-recording). */
+    private val _liveColorLockedOn = MutableStateFlow(false)
+    val liveColorLockedOn: StateFlow<Boolean> = _liveColorLockedOn.asStateFlow()
+
     /** Called on the analyzer's background thread — MutableStateFlow.value is safe cross-thread. */
     fun onLiveResult(result: LiveFrameResult) {
         _liveTracking.value = result.markerDetected
         _liveVelocity.value = result.smoothedVelocityMps
         _livePhase.value = result.phase
+        result.sampledColorProfile?.let {
+            _liveColorProfile.value = it
+            _liveColorLockedOn.value = true
+        }
+    }
+
+    /** RE-TAP pressed — re-arms the tap-catcher so the next tap samples a new color. */
+    fun onRetapColor() {
+        _liveColorLockedOn.value = false
     }
 
     fun onRecordingFinished(path: String?, gyroTimeline: GyroTimeline?, focalMm: Double, sensorWidthMm: Double, videoStartUptimeNs: Long) {

@@ -2003,6 +2003,61 @@ _(Claude Code appends here after each completed task)_
   OOM on a large frame — a dropped frame beats a downed camera).
   KNOWN GAP: still no confirmed root cause — if the crash persists after this, the real fix needs
   the logcat stack trace via USB debugging. versionCode 57, versionName 0.42.1.
+- [x] Sprint 43 — live tap-to-color-sample (v0.43.0): closes the gap flagged in Sprint 37/39 —
+  live tracking used a fixed `MarkerColorProfile.default()` (magenta/pink) because the user's real
+  marker color was only ever sampled AFTER recording (Sprint 29's calibration-frame tap). Now the
+  user can tap the marker directly in the LIVE preview during `RecordingStep` and lock onto it.
+  (1) `util/barpath/ColorPatchSampler.kt` (new, pure — no Bitmap/Android dependency, operates on
+  the same flat ARGB IntArray `BarPathLiveAnalyzer` already decodes): `sampleColorPatch` averages
+  HSV statistics over a small patch instead of one pixel — saturation-filtered first (drops
+  near-grey specular highlights on a metal bar/plate), falling back to the unfiltered patch if
+  fewer than 20 pixels clear the filter (the user may have tapped a genuinely low-saturation
+  marker). Uses `MarkerColorMatcher.rgbToHsv`'s [0,360) hue convention — deliberately NOT
+  `android.graphics.Color.colorToHSV`'s [0,180], which the prompt suggested but would silently
+  desync from every other hue calculation in this pipeline (`MarkerColorProfile.hueDistance` etc.
+  all assume 360°). `circularMeanDegrees`/`circularStdDegrees` implement the real Fisher
+  circular-statistics formulas (mean via atan2(mean sin, mean cos); std = sqrt(-2 ln R)) — the
+  prompt's pseudocode left "circular std" as an unfilled TODO comment, this fills it in properly
+  rather than approximating. Tolerances: hue = 2.5σ with an 8° floor (prevents a perfectly uniform
+  patch collapsing to a zero-width range), sat/val = 2σ + a small floor, mapped onto
+  `MarkerColorProfile`'s REAL fields (hueCenter/hueTolerance/minSaturation/minValue/satCenter/
+  satTolerance/valCenter/valTolerance) — not the differently-shaped `ColorProfile` the prompt
+  described (hueRange/satMin/satMax/valMin/valMax/sampleSize/...), which doesn't exist in this
+  codebase and would have forked the profile type the rest of the pipeline already depends on.
+  10 unit tests (uniform-patch matching, tolerance floor holding, edge-clamped tap, saturation-
+  filter relaxation, distinguishing two different patch colors, circular mean/std correctness).
+  (2) `BarPathLiveAnalyzer` gains `pendingColorSample: PendingColorSample?` (`@Volatile`, set by
+  the tap handler, consumed — and cleared — by the next `analyze()` call) and `LiveFrameResult`
+  gains `sampledColorProfile: MarkerColorProfile?` (non-null only on the frame that consumed a
+  pending request), reusing the single existing `onResult` callback conduit rather than adding a
+  second one. `analysisStep` (the downsample factor) is now a named constant shared between the
+  pixel-decode call and the tap-coordinate math, instead of the literal `2` appearing twice, which
+  would have been exactly the kind of silent-desync bug this project's retros keep catching.
+  **The genuinely unverified piece**: `pendingColorSample.normX/normY` come from CameraX's
+  `PreviewView.meteringPointFactory.createPoint(x, y)` — the same documented mechanism CameraX
+  uses for tap-to-focus, normalized to the sensor's active array, and used here (not hand-rolled
+  crop/letterbox math) specifically because it's the one API actually designed for "map a screen
+  tap to a sensor-relative point." The mapping assumes Preview and the live `ImageAnalysis` stream
+  share the same crop region — a known CameraX gotcha when their target aspect ratios differ, and
+  something this session cannot verify without a device.
+  (3) `BarPathVideoRecorder.requestColorSample(normX, normY)` forwards to the bound analyzer
+  (no-op if the live loop isn't bound), mirroring the existing `startRep()` precedent.
+  (4) `BarPathCaptureViewModel`: `liveColorProfile`/`liveColorLockedOn` StateFlows, updated from
+  `onLiveResult` exactly like the existing `liveTracking`/`liveVelocity`/`livePhase` fields;
+  `onRetapColor()` re-arms tap capture.
+  (5) `RecordingStep` (`BarPathCaptureScreen.kt`): a transparent tap-catcher `Box` layered over the
+  live `PreviewView`, active only while not yet locked on (an accidental tap mid-recording can't
+  silently re-sample); on tap, hoists the actual `PreviewView` reference (captured in the
+  `AndroidView` factory) to compute the metering point, calls `recorder.requestColorSample(...)`
+  directly (matching how `recorder.startRep()`/`startRecording()` are already called straight from
+  this composable, not routed through the ViewModel), and shows a white dashed 30×30dp square at
+  the tap point that fades out over 1.5s (`Animatable` + `tween(1500)`) — confirms to the user
+  where the app actually sampled from. A RE-TAP button appears top-end once locked on.
+  KNOWN GAP: the metering-point-to-analysis-buffer coordinate mapping is the standing camera-
+  geometry risk (same category as every prior VBT sprint's device caveat) — unverified whether
+  Preview/ImageAnalysis crop regions actually align on a real device. If a live tap consistently
+  samples the wrong spot, that mismatch is the first thing to check.
+  versionCode 58, versionName 0.43.0.
 
 ## Release rules
 

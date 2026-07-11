@@ -10,15 +10,25 @@ import com.saiyanstrong.domain.util.Point2D
 
 /** One live-analyzed frame: whether the marker was found, its (Kalman-smoothed) position in the
  * downsampled analysis-image space, the smoothed velocity (only meaningful in MOVING), and the
- * current lift phase. */
+ * current lift phase. [sampledColorProfile] is non-null only on the one frame that consumed a
+ * pending tap-to-sample request (see [BarPathLiveAnalyzer.pendingColorSample]). */
 data class LiveFrameResult(
     val markerDetected: Boolean,
     val xPx: Float,
     val yPx: Float,
     val smoothedVelocityMps: Float,
     val phase: LiftPhase = LiftPhase.IDLE,
-    val repJustCompleted: Boolean = false
+    val repJustCompleted: Boolean = false,
+    val sampledColorProfile: MarkerColorProfile? = null
 )
+
+/**
+ * A pending tap-to-sample request: [normX]/[normY] are normalized [0,1] coordinates in the
+ * coordinate space CameraX's `PreviewView.meteringPointFactory` reports (sensor-active-array
+ * relative — the same documented mechanism CameraX uses for tap-to-focus). Consumed by the next
+ * [BarPathLiveAnalyzer.analyze] call, then cleared.
+ */
+data class PendingColorSample(val normX: Float, val normY: Float)
 
 /**
  * The live analysis loop — the piece that did NOT exist before (the rest of the VBT pipeline
@@ -44,6 +54,15 @@ class BarPathLiveAnalyzer(
     @Volatile
     var colorProfile: MarkerColorProfile = MarkerColorProfile.default()
 
+    /** Set by the UI thread on a tap; consumed (and cleared) by the next analyzed frame. */
+    @Volatile
+    var pendingColorSample: PendingColorSample? = null
+
+    /** Must match the `step` passed to [imageProxyToDownsampledPixels] below — kept as one named
+     * constant rather than the literal appearing twice, since a mismatch would silently misalign
+     * a tap-sample request with the pixel grid it's meant to sample. */
+    private val analysisStep = 2
+
     private val kalman = KalmanTracker2D()
     private val phaseDetector = LiftPhaseDetector()
     private var previousCentroid: Pair<Double, Double>? = null
@@ -55,6 +74,7 @@ class BarPathLiveAnalyzer(
         previousCentroid = null
         previousPhase = LiftPhase.IDLE
         lastPhaseTimestampMs = 0L
+        pendingColorSample = null
         phaseDetector.reset()
     }
 
@@ -63,7 +83,32 @@ class BarPathLiveAnalyzer(
 
     override fun analyze(image: ImageProxy) {
         try {
-            val pixels = imageProxyToDownsampledPixels(image) ?: return
+            val pixels = imageProxyToDownsampledPixels(image, analysisStep) ?: return
+
+            var sampledProfile: MarkerColorProfile? = null
+            val pending = pendingColorSample
+            if (pending != null) {
+                pendingColorSample = null
+                // Both the metering factory's normalized point and this ImageAnalysis buffer are
+                // assumed to be in the sensor's natural (pre-rotation) orientation — CameraX
+                // documents the metering-point coordinate space as sensor-active-array-relative,
+                // and imageInfo.rotationDegrees exists to rotate a frame TO display orientation,
+                // not to realign it with the sensor frame — so no extra rotation is applied here.
+                // UNVERIFIED on a device: if Preview and ImageAnalysis end up bound to
+                // differently-cropped surfaces (a known CameraX gotcha when target aspect ratios
+                // differ), the sampled point will land off-target in the analysis buffer.
+                val bufferX = (pending.normX * image.width).toInt()
+                val bufferY = (pending.normY * image.height).toInt()
+                val profile = sampleColorPatch(
+                    pixels.data, pixels.width, pixels.height,
+                    bufferX / analysisStep, bufferY / analysisStep
+                )
+                if (profile != null) {
+                    colorProfile = profile
+                    sampledProfile = profile
+                }
+            }
+
             val detected = detectMarkerCentroidInPixels(
                 pixels.data, pixels.width, pixels.height, colorProfile, previousCentroid
             )
@@ -106,7 +151,8 @@ class BarPathLiveAnalyzer(
                     xPx = px, yPx = py,
                     smoothedVelocityMps = velocity,
                     phase = phaseUpdate.phase,
-                    repJustCompleted = phaseUpdate.repJustCompleted
+                    repJustCompleted = phaseUpdate.repJustCompleted,
+                    sampledColorProfile = sampledProfile
                 )
             )
         } catch (_: Throwable) {

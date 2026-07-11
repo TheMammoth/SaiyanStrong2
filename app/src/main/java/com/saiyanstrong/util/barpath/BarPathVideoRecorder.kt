@@ -155,6 +155,14 @@ class BarPathVideoRecorder {
         liveAnalyzer?.startRep()
     }
 
+    /** User tapped the marker in the live preview — [normX]/[normY] must come from
+     * `PreviewView.meteringPointFactory.createPoint(...)`, not raw view pixels (see
+     * [BarPathLiveAnalyzer.pendingColorSample] for the coordinate-space assumption/caveat). A
+     * no-op if the live analysis loop isn't bound (e.g. the third camera stream failed to bind). */
+    fun requestColorSample(normX: Float, normY: Float) {
+        liveAnalyzer?.pendingColorSample = PendingColorSample(normX, normY)
+    }
+
     fun startRecording(context: Context, onFinalized: (path: String?, gyroTimeline: GyroTimeline?, focalMm: Double, sensorWidthMm: Double, videoStartUptimeNs: Long) -> Unit) {
       try {
         val capture = videoCapture ?: run { onFinalized(null, null, 0.0, 0.0, 0L); return }
