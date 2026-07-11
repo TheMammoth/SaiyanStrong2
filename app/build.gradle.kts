@@ -39,8 +39,8 @@ android {
         applicationId = "com.saiyanstrong"
         minSdk = 26
         targetSdk = 35
-        versionCode = 51
-        versionName = "0.37.0"
+        versionCode = 54
+        versionName = "0.40.0"
 
         buildConfigField("String", "SUPABASE_URL", "\"${localProps["supabase.url"] ?: ""}\"")
         buildConfigField("String", "SUPABASE_ANON_KEY", "\"${localProps["supabase.anonKey"] ?: ""}\"")
@@ -67,9 +67,9 @@ android {
     signingConfigs {
         create("release") {
             storeFile     = file(keystoreProps["storeFile"] as? String ?: "saiyanstrong.keystore")
-            storePassword = keystoreProps["storePassword"] as? String ?: ""
-            keyAlias      = keystoreProps["keyAlias"]      as? String ?: ""
-            keyPassword   = keystoreProps["keyPassword"]   as? String ?: ""
+            storePassword = keystoreProps["storePassword"] as? String ?: "saiyanstrong"
+            keyAlias      = keystoreProps["keyAlias"]      as? String ?: "saiyanstrong"
+            keyPassword   = keystoreProps["keyPassword"]   as? String ?: "saiyanstrong"
         }
         create("playRelease") {
             val hasPlayKeystore = playKeystoreProps["storeFile"] != null
@@ -78,11 +78,11 @@ android {
                     ?: (keystoreProps["storeFile"] as? String ?: "saiyanstrong.keystore")
             )
             storePassword = (if (hasPlayKeystore) playKeystoreProps["storePassword"] as? String else null)
-                ?: keystoreProps["storePassword"] as? String ?: ""
+                ?: keystoreProps["storePassword"] as? String ?: "saiyanstrong"
             keyAlias = (if (hasPlayKeystore) playKeystoreProps["keyAlias"] as? String else null)
-                ?: keystoreProps["keyAlias"] as? String ?: ""
+                ?: keystoreProps["keyAlias"] as? String ?: "saiyanstrong"
             keyPassword = (if (hasPlayKeystore) playKeystoreProps["keyPassword"] as? String else null)
-                ?: keystoreProps["keyPassword"] as? String ?: ""
+                ?: keystoreProps["keyPassword"] as? String ?: "saiyanstrong"
         }
     }
 
