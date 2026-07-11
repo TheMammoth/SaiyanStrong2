@@ -1882,6 +1882,44 @@ _(Claude Code appends here after each completed task)_
   helpers + colour mapping are tested; the visual result needs a device to eyeball. The share
   path itself (FileProvider/ACTION_SEND) is the proven Sprint-20 util, unchanged.
   versionCode 50, versionName 0.36.0.
+- [x] Sprint 40 — lift-phase state machine (settling/onset gating for camera-shake jitter),
+  v0.37.0: the tracker treated camera shake during the stationary pre-lift phase as bar movement;
+  this adds a rep-phase state machine that gates velocity to the actual lift.
+  (1) `domain/util/LiftPhaseDetector.kt` (pure Kotlin, no Android — `domain/util/`, not the
+  requested `domain/analysis/`; `Point2D` substituted for `PointF`): IDLE → SETTLING (via
+  `startRep()`) → READY → MOVING → COMPLETE → READY. Settling measures a per-session baseline
+  centroid + variance (what "stationary" looks like on THIS device); READY clamps a near-baseline
+  centroid to (0,0) so a still bar produces no phantom velocity; onset (READY→MOVING) requires
+  displacement > 12px AND direction-consistent motion (positive dot of consecutive motion vectors)
+  for 8 consecutive frames — random back-and-forth jitter resets the run; completion (MOVING→
+  COMPLETE) requires sustained low velocity (15 frames < 0.05 m/s) AND real ROM (> 0.05 m), so a
+  camera bump can't end a rep; COMPLETE→READY after 500ms, rebaselining. **10 unit tests** cover
+  every transition incl. the jitter-rejection and ROM-gated-completion cases — the most thoroughly
+  tested piece of the whole VBT feature, and (unlike everything camera-side) genuinely verified.
+  SPEC BUG FIXED: the READY clamp was specified as "displacement < baselineVariance * 2.0", but
+  displacement is px and variance px² — dimensionally invalid and pathological as noise scales;
+  implemented as 2 standard deviations (2·√variance), the correct "within settling noise" band,
+  and documented.
+  (2) Full live integration: `BarPathLiveAnalyzer` runs each centroid through the detector before
+  the Kalman filter and only computes/reports velocity in MOVING (resetting the Kalman at movement
+  onset so the READY→MOVING coordinate jump doesn't spike velocity — a deliberate deviation from
+  the literal "feed baseline-subtracted coords into the Kalman", which would create exactly that
+  spike). `LiveFrameResult` gains `phase` + `repJustCompleted`. `BarPathVideoRecorder.startRep()`
+  and `BarPathLiveAnalyzer.startRep()` added; `startRecording` no longer resets the analyzer (the
+  phase machine owns its own lifecycle now). `BarPathCaptureViewModel` exposes `livePhase`.
+  (3) UI: the live readout is phase-aware (TAP START REP / SETTLING… / ● READY / ▲ MOVING + speed /
+  REP COMPLETE), velocity shown only in MOVING; a large "START REP" button overlays the preview
+  when IDLE/COMPLETE. Adaptations from the request, flagged: "remove automatic velocity-threshold
+  rep-start" — there was none to remove (recording is manual). "MOVING: show the full velocity-
+  coloured trail" — no live trail exists (declined earlier), so the readout shows phase + gated
+  speed instead. START REP drives the live phase machine independently of the video RECORD/STOP
+  (which still produces the file for post-hoc analysis) — a coexistence rough edge worth unifying
+  later.
+  KNOWN GAP: the detector itself is fully unit-tested and trustworthy, but its LIVE behaviour
+  (running on real camera frames at frame rate, the uncalibrated m/s completion threshold, the
+  whole live-analysis path) is unverified on a device — same standing caveat as the rest of the
+  live loop.
+  versionCode 51, versionName 0.37.0.
 
 ## Release rules
 

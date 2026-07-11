@@ -123,8 +123,13 @@ class BarPathVideoRecorder {
         }, ContextCompat.getMainExecutor(context))
     }
 
+    /** User tapped "Start rep" — drives the live phase machine's settling window. Independent of
+     * video [startRecording] (which still produces the file for post-hoc analysis). */
+    fun startRep() {
+        liveAnalyzer?.startRep()
+    }
+
     fun startRecording(context: Context, onFinalized: (path: String?) -> Unit) {
-        liveAnalyzer?.reset() // fresh trail/velocity for this rep
         val capture = videoCapture ?: run { onFinalized(null); return }
         val outputDir = File(context.cacheDir, "bar_path").apply { mkdirs() }
         val outputFile = File(outputDir, "recording_${System.currentTimeMillis()}.mp4")

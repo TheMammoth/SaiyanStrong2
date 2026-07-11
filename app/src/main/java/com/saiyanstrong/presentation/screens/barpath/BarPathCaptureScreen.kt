@@ -67,6 +67,7 @@ import com.saiyanstrong.presentation.theme.NeonGreen
 import com.saiyanstrong.presentation.theme.PowerAmber
 import com.saiyanstrong.presentation.theme.SaiyanGray
 import com.saiyanstrong.util.barpath.BarPathVideoRecorder
+import com.saiyanstrong.domain.util.LiftPhase
 import com.saiyanstrong.util.barpath.HighSpeedCapabilityChecker
 import com.saiyanstrong.util.barpath.HighSpeedTier
 import com.saiyanstrong.util.barpath.LiveFrameResult
@@ -84,6 +85,7 @@ fun BarPathCaptureScreen(
     val highSpeedPreference by viewModel.highSpeedModeEnabled.collectAsStateWithLifecycle()
     val liveTracking by viewModel.liveTracking.collectAsStateWithLifecycle()
     val liveVelocity by viewModel.liveVelocity.collectAsStateWithLifecycle()
+    val livePhase by viewModel.livePhase.collectAsStateWithLifecycle()
 
     LaunchedEffect(uiState.isSaved) { if (uiState.isSaved) onDone() }
 
@@ -115,6 +117,7 @@ fun BarPathCaptureScreen(
                     onHighSpeedPreferenceChanged = viewModel::onHighSpeedModeChanged,
                     liveTracking = liveTracking,
                     liveVelocity = liveVelocity,
+                    livePhase = livePhase,
                     onLiveResult = viewModel::onLiveResult,
                     onFinished = viewModel::onRecordingFinished,
                     onGalleryVideoPicked = viewModel::onGalleryVideoPicked
@@ -170,6 +173,7 @@ private fun RecordingStep(
     onHighSpeedPreferenceChanged: (Boolean) -> Unit,
     liveTracking: Boolean = false,
     liveVelocity: Float = 0f,
+    livePhase: LiftPhase = LiftPhase.IDLE,
     onLiveResult: (LiveFrameResult) -> Unit = {},
     onFinished: (String?) -> Unit,
     onGalleryVideoPicked: (android.net.Uri) -> Unit = {}
@@ -278,8 +282,17 @@ private fun RecordingStep(
                 LiveTrackingReadout(
                     tracking = liveTracking,
                     velocity = liveVelocity,
+                    phase = livePhase,
                     modifier = Modifier.align(Alignment.TopStart).padding(8.dp)
                 )
+                if (livePhase == LiftPhase.IDLE || livePhase == LiftPhase.COMPLETE) {
+                    SaiyanButton(
+                        onClick = { recorder.startRep() },
+                        modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 12.dp)
+                    ) {
+                        Text("START REP", fontWeight = FontWeight.Black, letterSpacing = 1.sp)
+                    }
+                }
             }
         } else {
             Box(
@@ -322,21 +335,32 @@ private fun RecordingStep(
  * "rel", not "m/s", to avoid implying a real physical reading.
  */
 @Composable
-private fun LiveTrackingReadout(tracking: Boolean, velocity: Float, modifier: Modifier = Modifier) {
+private fun LiveTrackingReadout(tracking: Boolean, velocity: Float, phase: LiftPhase, modifier: Modifier = Modifier) {
+    val (phaseLabel, phaseColor) = when (phase) {
+        LiftPhase.IDLE -> "TAP START REP" to Color.White.copy(alpha = 0.6f)
+        LiftPhase.SETTLING -> "SETTLING…" to PowerAmber
+        LiftPhase.READY -> "● READY" to NeonGreen
+        LiftPhase.MOVING -> "▲ MOVING" to NeonGreen
+        LiftPhase.COMPLETE -> "REP COMPLETE" to PowerAmber
+    }
     Column(
         modifier = modifier
             .background(Color.Black.copy(alpha = 0.55f), androidx.compose.foundation.shape.RoundedCornerShape(6.dp))
             .padding(horizontal = 10.dp, vertical = 6.dp)
     ) {
+        Text(phaseLabel, color = phaseColor, fontSize = 12.sp, fontWeight = FontWeight.Black, letterSpacing = 1.sp)
         Text(
-            if (tracking) "● TRACKING" else "○ SEARCHING",
-            color = if (tracking) NeonGreen else Color.White.copy(alpha = 0.6f),
-            fontSize = 11.sp, fontWeight = FontWeight.Black, letterSpacing = 1.sp
+            if (tracking) "● tracking" else "○ searching",
+            color = if (tracking) NeonGreen.copy(alpha = 0.8f) else Color.White.copy(alpha = 0.5f),
+            fontSize = 9.sp, fontFamily = FontFamily.Monospace
         )
-        Text(
-            "~%.2f (rel. speed)".format(velocity),
-            color = Color.White.copy(alpha = 0.85f), fontSize = 11.sp, fontFamily = FontFamily.Monospace
-        )
+        // Velocity only meaningful in MOVING (gated by the phase machine). Uncalibrated → "rel".
+        if (phase == LiftPhase.MOVING) {
+            Text(
+                "~%.2f (rel. speed)".format(velocity),
+                color = Color.White.copy(alpha = 0.85f), fontSize = 11.sp, fontFamily = FontFamily.Monospace
+            )
+        }
     }
 }
 

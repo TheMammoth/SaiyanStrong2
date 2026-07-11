@@ -4,14 +4,20 @@ import android.graphics.ImageFormat
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
 import com.saiyanstrong.domain.util.KalmanTracker2D
+import com.saiyanstrong.domain.util.LiftPhase
+import com.saiyanstrong.domain.util.LiftPhaseDetector
+import com.saiyanstrong.domain.util.Point2D
 
 /** One live-analyzed frame: whether the marker was found, its (Kalman-smoothed) position in the
- * downsampled analysis-image space, and the smoothed velocity. */
+ * downsampled analysis-image space, the smoothed velocity (only meaningful in MOVING), and the
+ * current lift phase. */
 data class LiveFrameResult(
     val markerDetected: Boolean,
     val xPx: Float,
     val yPx: Float,
-    val smoothedVelocityMps: Float
+    val smoothedVelocityMps: Float,
+    val phase: LiftPhase = LiftPhase.IDLE,
+    val repJustCompleted: Boolean = false
 )
 
 /**
@@ -39,50 +45,66 @@ class BarPathLiveAnalyzer(
     var colorProfile: MarkerColorProfile = MarkerColorProfile.default()
 
     private val kalman = KalmanTracker2D()
+    private val phaseDetector = LiftPhaseDetector()
     private var previousCentroid: Pair<Double, Double>? = null
-    private var lastTimestampNs = 0L
-    private var initialized = false
+    private var previousPhase = LiftPhase.IDLE
+    private var lastPhaseTimestampMs = 0L
 
-    /** Call at recording (rep) start — clears the trail/velocity history. */
+    /** Full reset to IDLE — the phase machine starts fresh, awaiting [startRep]. */
     fun reset() {
         previousCentroid = null
-        lastTimestampNs = 0L
-        initialized = false
+        previousPhase = LiftPhase.IDLE
+        lastPhaseTimestampMs = 0L
+        phaseDetector.reset()
     }
+
+    /** User tapped "Start rep" — begins the settling window (see [LiftPhaseDetector]). */
+    fun startRep() = phaseDetector.startRep()
 
     override fun analyze(image: ImageProxy) {
         try {
             val pixels = imageProxyToDownsampledPixels(image) ?: return
-            val centroid = detectMarkerCentroidInPixels(
+            val detected = detectMarkerCentroidInPixels(
                 pixels.data, pixels.width, pixels.height, colorProfile, previousCentroid
             )
-            val timestampNs = image.imageInfo.timestamp
+            val timestampMs = image.imageInfo.timestamp / 1_000_000L
+            val centroidPoint = detected?.let { Point2D(it.first, it.second) }
+            if (detected != null) previousCentroid = detected.first to detected.second
 
-            if (centroid != null) {
-                val (cx, cy, _) = centroid
-                if (!initialized) {
-                    kalman.reset(cx, cy)
-                    initialized = true
+            // Every centroid goes through the phase machine before the Kalman: it gates velocity to
+            // the actual lift (MOVING) so camera-shake jitter during the stationary phase produces
+            // no phantom movement.
+            val phaseUpdate = phaseDetector.update(centroidPoint, timestampMs)
+
+            var velocity = 0f
+            var px = centroidPoint?.x?.toFloat() ?: 0f
+            var py = centroidPoint?.y?.toFloat() ?: 0f
+            if (phaseUpdate.phase == LiftPhase.MOVING && centroidPoint != null) {
+                // Reset the filter at movement onset — otherwise the READY→MOVING jump (from the
+                // near-zero baseline-subtracted position to the raw centroid) would spike velocity.
+                if (previousPhase != LiftPhase.MOVING) {
+                    kalman.reset(centroidPoint.x, centroidPoint.y)
                 } else {
-                    val dt = (timestampNs - lastTimestampNs) / 1_000_000_000.0
+                    val dt = (timestampMs - lastPhaseTimestampMs) / 1000.0
                     if (dt > 0.0) kalman.predict(dt)
-                    kalman.update(cx, cy)
+                    kalman.update(centroidPoint.x, centroidPoint.y)
                 }
-                previousCentroid = cx to cy
-                lastTimestampNs = timestampNs
                 val pos = kalman.smoothedPosition
-                onResult(LiveFrameResult(true, pos.x.toFloat(), pos.y.toFloat(), kalman.smoothedVelocityMps))
-            } else {
-                // Missed frame: coast on the filter's momentum if we've already locked on.
-                if (initialized) {
-                    val dt = (timestampNs - lastTimestampNs) / 1_000_000_000.0
-                    if (dt > 0.0) {
-                        kalman.predict(dt)
-                        lastTimestampNs = timestampNs
-                    }
-                }
-                onResult(LiveFrameResult(false, 0f, 0f, if (initialized) kalman.smoothedVelocityMps else 0f))
+                px = pos.x.toFloat(); py = pos.y.toFloat()
+                velocity = kalman.smoothedVelocityMps
             }
+            previousPhase = phaseUpdate.phase
+            lastPhaseTimestampMs = timestampMs
+
+            onResult(
+                LiveFrameResult(
+                    markerDetected = detected != null,
+                    xPx = px, yPx = py,
+                    smoothedVelocityMps = velocity,
+                    phase = phaseUpdate.phase,
+                    repJustCompleted = phaseUpdate.repJustCompleted
+                )
+            )
         } catch (_: Exception) {
             // A single bad frame must never crash the analyzer / camera pipeline.
         } finally {

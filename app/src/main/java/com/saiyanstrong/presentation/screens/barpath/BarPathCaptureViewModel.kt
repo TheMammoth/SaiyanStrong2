@@ -12,6 +12,7 @@ import com.saiyanstrong.domain.repository.BarPathRepository
 import com.saiyanstrong.domain.repository.ExerciseRepository
 import com.saiyanstrong.domain.repository.UserRepository
 import com.saiyanstrong.domain.usecase.AnalyzeBarPathUseCase
+import com.saiyanstrong.domain.util.LiftPhase
 import com.saiyanstrong.util.SessionShareImageSaver
 import com.saiyanstrong.util.barpath.BarPathFrameTracker
 import com.saiyanstrong.util.barpath.BarPathVideoImporter
@@ -116,10 +117,14 @@ class BarPathCaptureViewModel @Inject constructor(
     private val _liveVelocity = MutableStateFlow(0f)
     val liveVelocity: StateFlow<Float> = _liveVelocity.asStateFlow()
 
+    private val _livePhase = MutableStateFlow(LiftPhase.IDLE)
+    val livePhase: StateFlow<LiftPhase> = _livePhase.asStateFlow()
+
     /** Called on the analyzer's background thread — MutableStateFlow.value is safe cross-thread. */
     fun onLiveResult(result: LiveFrameResult) {
         _liveTracking.value = result.markerDetected
         _liveVelocity.value = result.smoothedVelocityMps
+        _livePhase.value = result.phase
     }
 
     fun onRecordingFinished(path: String?) {
