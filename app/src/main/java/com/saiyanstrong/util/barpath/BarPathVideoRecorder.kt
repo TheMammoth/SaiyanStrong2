@@ -23,6 +23,14 @@ import androidx.lifecycle.LifecycleOwner
 import java.io.File
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
+import android.os.SystemClock
+import android.hardware.camera2.CameraManager
+import android.hardware.camera2.CameraCharacteristics
+import com.saiyanstrong.domain.util.GyroTimeline
 
 /**
  * Thin CameraX wrapper: bind preview + video capture to a [PreviewView], record silently (no
@@ -45,6 +53,15 @@ class BarPathVideoRecorder {
     private var activeRecording: Recording? = null
     private var analyzerExecutor: ExecutorService? = null
     private var liveAnalyzer: BarPathLiveAnalyzer? = null
+
+    private var sensorManager: SensorManager? = null
+    private var gyroSensor: Sensor? = null
+    private var gyroListener: SensorEventListener? = null
+    private var currentGyroTimeline: GyroTimeline? = null
+
+    private var cumulativeGyroX = 0.0
+    private var cumulativeGyroY = 0.0
+    private var lastGyroTimestampNs = 0L
 
     /**
      * @param onLiveResult when non-null, binds a live [ImageAnalysis] loop ([BarPathLiveAnalyzer])
@@ -129,20 +146,75 @@ class BarPathVideoRecorder {
         liveAnalyzer?.startRep()
     }
 
-    fun startRecording(context: Context, onFinalized: (path: String?) -> Unit) {
-        val capture = videoCapture ?: run { onFinalized(null); return }
+    fun startRecording(context: Context, onFinalized: (path: String?, gyroTimeline: GyroTimeline?, focalMm: Double, sensorWidthMm: Double, videoStartUptimeNs: Long) -> Unit) {
+        val capture = videoCapture ?: run { onFinalized(null, null, 0.0, 0.0, 0L); return }
         val outputDir = File(context.cacheDir, "bar_path").apply { mkdirs() }
         val outputFile = File(outputDir, "recording_${System.currentTimeMillis()}.mp4")
+
+        sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
+        gyroSensor = sensorManager?.getDefaultSensor(Sensor.TYPE_GYROSCOPE_UNCALIBRATED)
+            ?: sensorManager?.getDefaultSensor(Sensor.TYPE_GYROSCOPE)
+        
+        currentGyroTimeline = GyroTimeline()
+        cumulativeGyroX = 0.0
+        cumulativeGyroY = 0.0
+        lastGyroTimestampNs = 0L
+
+        gyroListener = object : SensorEventListener {
+            override fun onSensorChanged(event: SensorEvent) {
+                if (lastGyroTimestampNs != 0L) {
+                    val dt = (event.timestamp - lastGyroTimestampNs) / 1e9
+                    cumulativeGyroX += event.values[0] * dt
+                    cumulativeGyroY += event.values[1] * dt
+                    currentGyroTimeline?.addSample(event.timestamp, cumulativeGyroX, cumulativeGyroY)
+                }
+                lastGyroTimestampNs = event.timestamp
+            }
+            override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
+        }
+        gyroSensor?.let {
+            sensorManager?.registerListener(gyroListener, it, SensorManager.SENSOR_DELAY_FASTEST)
+        }
+
+        var videoStartUptimeNs = 0L
+
+        var focalMm = 0.0
+        var sensorWidthMm = 0.0
+        try {
+            val cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
+            for (cameraId in cameraManager.cameraIdList) {
+                val characteristics = cameraManager.getCameraCharacteristics(cameraId)
+                if (characteristics.get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_BACK) {
+                    val focalLengths = characteristics.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)
+                    val sensorSize = characteristics.get(CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE)
+                    if (focalLengths != null && focalLengths.isNotEmpty() && sensorSize != null) {
+                        focalMm = focalLengths[0].toDouble()
+                        sensorWidthMm = sensorSize.width.toDouble()
+                        break
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("BarPathVideoRecorder", "Failed to get camera characteristics", e)
+        }
 
         activeRecording = capture.output
             .prepareRecording(context, FileOutputOptions.Builder(outputFile).build())
             .start(ContextCompat.getMainExecutor(context)) { event ->
+                if (event is VideoRecordEvent.Start) {
+                    videoStartUptimeNs = SystemClock.elapsedRealtimeNanos()
+                }
                 if (event is VideoRecordEvent.Finalize) {
+                    val timeline = currentGyroTimeline
+                    gyroListener?.let { sensorManager?.unregisterListener(it) }
+                    gyroListener = null
+                    currentGyroTimeline = null
+
                     if (event.hasError()) {
                         Log.e("BarPathVideoRecorder", "Recording error: ${event.error}")
-                        onFinalized(null)
+                        onFinalized(null, null, 0.0, 0.0, 0L)
                     } else {
-                        onFinalized(outputFile.absolutePath)
+                        onFinalized(outputFile.absolutePath, timeline, focalMm, sensorWidthMm, videoStartUptimeNs)
                     }
                 }
             }
@@ -151,5 +223,7 @@ class BarPathVideoRecorder {
     fun stopRecording() {
         activeRecording?.stop()
         activeRecording = null
+        gyroListener?.let { sensorManager?.unregisterListener(it) }
+        gyroListener = null
     }
 }

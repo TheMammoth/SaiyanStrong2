@@ -175,7 +175,7 @@ private fun RecordingStep(
     liveVelocity: Float = 0f,
     livePhase: LiftPhase = LiftPhase.IDLE,
     onLiveResult: (LiveFrameResult) -> Unit = {},
-    onFinished: (String?) -> Unit,
+    onFinished: (String?, com.saiyanstrong.domain.util.GyroTimeline?, Double, Double, Long) -> Unit,
     onGalleryVideoPicked: (android.net.Uri) -> Unit = {}
 ) {
     val context = LocalContext.current
@@ -309,9 +309,9 @@ private fun RecordingStep(
             onClick = {
                 if (!isRecording) {
                     isRecording = true
-                    recorder.startRecording(context) { path ->
+                    recorder.startRecording(context) { path, timeline, focal, sensor, startUptime ->
+                        onFinished(path, timeline, focal, sensor, startUptime)
                         isRecording = false
-                        onFinished(path)
                     }
                 } else {
                     recorder.stopRecording()

@@ -12,6 +12,7 @@ import com.saiyanstrong.domain.repository.BarPathRepository
 import com.saiyanstrong.domain.repository.ExerciseRepository
 import com.saiyanstrong.domain.repository.UserRepository
 import com.saiyanstrong.domain.usecase.AnalyzeBarPathUseCase
+import com.saiyanstrong.domain.util.GyroTimeline
 import com.saiyanstrong.domain.util.LiftPhase
 import com.saiyanstrong.util.SessionShareImageSaver
 import com.saiyanstrong.util.barpath.BarPathFrameTracker
@@ -63,7 +64,11 @@ data class BarPathCaptureUiState(
     val isSaved: Boolean = false,
     /** True while importing/reading the video before the calibration frame is ready — the
      * recording/picker UI otherwise gives no feedback during this gap. */
-    val isPreparingVideo: Boolean = false
+    val isPreparingVideo: Boolean = false,
+    val gyroTimeline: GyroTimeline? = null,
+    val focalMm: Double = 0.0,
+    val sensorWidthMm: Double = 0.0,
+    val videoStartUptimeNs: Long = 0L
 )
 
 /**
@@ -127,11 +132,17 @@ class BarPathCaptureViewModel @Inject constructor(
         _livePhase.value = result.phase
     }
 
-    fun onRecordingFinished(path: String?) {
+    fun onRecordingFinished(path: String?, gyroTimeline: GyroTimeline?, focalMm: Double, sensorWidthMm: Double, videoStartUptimeNs: Long) {
         if (path == null) {
             _uiState.update { it.copy(step = CaptureStep.ERROR, errorMessage = "Recording failed — try again.") }
             return
         }
+        _uiState.update { it.copy(
+            gyroTimeline = gyroTimeline, 
+            focalMm = focalMm, 
+            sensorWidthMm = sensorWidthMm, 
+            videoStartUptimeNs = videoStartUptimeNs
+        ) }
         loadCalibrationFrame(path, failureMessage = "Couldn't read the recorded video.")
     }
 
@@ -277,7 +288,14 @@ class BarPathCaptureViewModel @Inject constructor(
 
         _uiState.update { it.copy(step = CaptureStep.PROCESSING, errorMessage = null) }
         viewModelScope.launch(Dispatchers.Default) {
-            val samples = barPathFrameTracker.trackMarker(videoPath, colorProfile)
+            val samples = barPathFrameTracker.trackMarker(
+                videoPath = videoPath,
+                colorProfile = colorProfile,
+                gyroTimeline = state.gyroTimeline,
+                focalMm = state.focalMm,
+                sensorWidthMm = state.sensorWidthMm,
+                videoStartUptimeNs = state.videoStartUptimeNs
+            )
             if (samples.size < 2) {
                 _uiState.update {
                     it.copy(
@@ -335,7 +353,16 @@ class BarPathCaptureViewModel @Inject constructor(
 
         _uiState.update { it.copy(step = CaptureStep.PROCESSING, errorMessage = null) }
         viewModelScope.launch(Dispatchers.Default) {
-            val samples = barPathFrameTracker.trackMarkerPair(videoPath, colorProfileA, colorProfileB, referenceDistanceMeters)
+            val samples = barPathFrameTracker.trackMarkerPair(
+                videoPath = videoPath,
+                primaryColorProfile = colorProfileA,
+                referenceColorProfile = colorProfileB,
+                referenceDistanceMeters = referenceDistanceMeters,
+                gyroTimeline = state.gyroTimeline,
+                focalMm = state.focalMm,
+                sensorWidthMm = state.sensorWidthMm,
+                videoStartUptimeNs = state.videoStartUptimeNs
+            )
             if (samples.size < 2) {
                 _uiState.update {
                     it.copy(

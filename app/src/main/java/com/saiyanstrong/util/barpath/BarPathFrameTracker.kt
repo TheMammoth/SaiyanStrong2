@@ -4,6 +4,8 @@ import android.graphics.Bitmap
 import android.graphics.Color
 import android.media.MediaMetadataRetriever
 import com.saiyanstrong.domain.model.BarPathSample
+import com.saiyanstrong.domain.util.GyroTimeline
+import com.saiyanstrong.domain.util.ShakeCompensator
 import javax.inject.Inject
 import kotlin.math.hypot
 
@@ -160,7 +162,11 @@ class BarPathFrameTracker @Inject constructor(
         colorProfile: MarkerColorProfile,
         sampleIntervalMs: Long? = null,
         downscaleFactor: Double = 0.25,
-        useStreamingDecode: Boolean = false
+        useStreamingDecode: Boolean = false,
+        gyroTimeline: GyroTimeline? = null,
+        focalMm: Double = 0.0,
+        sensorWidthMm: Double = 0.0,
+        videoStartUptimeNs: Long = 0L
     ): List<BarPathSample> {
         val (intervalMs, durationMs) = readTiming(videoPath, sampleIntervalMs)
         if (durationMs <= 0L) return emptyList()
@@ -171,10 +177,23 @@ class BarPathFrameTracker @Inject constructor(
         fun collect(drive: (onFrame: (Bitmap, Long) -> Unit) -> Unit): List<BarPathSample> {
             val samples = mutableListOf<BarPathSample>()
             var previousCentroid: Pair<Double, Double>? = null
+            var focalLengthPx = 0.0
             drive { frame, timestampMs ->
+                if (focalLengthPx == 0.0 && focalMm > 0.0 && sensorWidthMm > 0.0) {
+                    focalLengthPx = ShakeCompensator.focalLengthPx(focalMm, sensorWidthMm, frame.width)
+                }
                 findMarkerCentroid(frame, colorProfile, downscaleFactor, previousCentroid)?.let { tracked ->
-                    samples += BarPathSample(timestampMs, tracked.xPx, tracked.yPx, tracked.diameterPx)
-                    previousCentroid = tracked.xPx to tracked.yPx
+                    var x = tracked.xPx
+                    var y = tracked.yPx
+                    if (gyroTimeline != null && !gyroTimeline.isEmpty && focalLengthPx > 0.0) {
+                        val uptimeNs = videoStartUptimeNs + timestampMs * 1_000_000L
+                        val (cumX, cumY) = gyroTimeline.cumulativeAngleAt(uptimeNs)
+                        val compensated = ShakeCompensator.compensate(x, y, cumX, cumY, focalLengthPx)
+                        x = compensated.x
+                        y = compensated.y
+                    }
+                    samples += BarPathSample(timestampMs, x, y, tracked.diameterPx)
+                    previousCentroid = x to y
                 }
             }
             return samples
@@ -214,7 +233,11 @@ class BarPathFrameTracker @Inject constructor(
         referenceDistanceMeters: Double,
         sampleIntervalMs: Long? = null,
         downscaleFactor: Double = 0.25,
-        useStreamingDecode: Boolean = false
+        useStreamingDecode: Boolean = false,
+        gyroTimeline: GyroTimeline? = null,
+        focalMm: Double = 0.0,
+        sensorWidthMm: Double = 0.0,
+        videoStartUptimeNs: Long = 0L
     ): List<BarPathSample> {
         val (intervalMs, durationMs) = readTiming(videoPath, sampleIntervalMs)
         if (durationMs <= 0L) return emptyList()
@@ -224,7 +247,11 @@ class BarPathFrameTracker @Inject constructor(
             var previousPrimaryCentroid: Pair<Double, Double>? = null
             var previousReferenceCentroid: Pair<Double, Double>? = null
             var lastKnownPpm: Double? = null
+            var focalLengthPx = 0.0
             drive { frame, timestampMs ->
+                if (focalLengthPx == 0.0 && focalMm > 0.0 && sensorWidthMm > 0.0) {
+                    focalLengthPx = ShakeCompensator.focalLengthPx(focalMm, sensorWidthMm, frame.width)
+                }
                 val scaledWidth = (frame.width * downscaleFactor).toInt().coerceAtLeast(1)
                 val scaledHeight = (frame.height * downscaleFactor).toInt().coerceAtLeast(1)
                 val scaled = Bitmap.createScaledBitmap(frame, scaledWidth, scaledHeight, false)
@@ -238,13 +265,32 @@ class BarPathFrameTracker @Inject constructor(
                 scaled.recycle()
 
                 if (primary != null) {
-                    previousPrimaryCentroid = primary.xPx to primary.yPx
+                    var px = primary.xPx
+                    var py = primary.yPx
+                    if (gyroTimeline != null && !gyroTimeline.isEmpty && focalLengthPx > 0.0) {
+                        val uptimeNs = videoStartUptimeNs + timestampMs * 1_000_000L
+                        val (cumX, cumY) = gyroTimeline.cumulativeAngleAt(uptimeNs)
+                        val compensated = ShakeCompensator.compensate(px, py, cumX, cumY, focalLengthPx)
+                        px = compensated.x
+                        py = compensated.y
+                    }
+                    previousPrimaryCentroid = px to py
+                    
                     if (reference != null) {
-                        previousReferenceCentroid = reference.xPx to reference.yPx
-                        val pixelDist = hypot(primary.xPx - reference.xPx, primary.yPx - reference.yPx)
+                        var rx = reference.xPx
+                        var ry = reference.yPx
+                        if (gyroTimeline != null && !gyroTimeline.isEmpty && focalLengthPx > 0.0) {
+                            val uptimeNs = videoStartUptimeNs + timestampMs * 1_000_000L
+                            val (cumX, cumY) = gyroTimeline.cumulativeAngleAt(uptimeNs)
+                            val compensated = ShakeCompensator.compensate(rx, ry, cumX, cumY, focalLengthPx)
+                            rx = compensated.x
+                            ry = compensated.y
+                        }
+                        previousReferenceCentroid = rx to ry
+                        val pixelDist = hypot(px - rx, py - ry)
                         lastKnownPpm = pixelDist / referenceDistanceMeters
                     }
-                    samples += BarPathSample(timestampMs, primary.xPx, primary.yPx, primary.diameterPx, lastKnownPpm)
+                    samples += BarPathSample(timestampMs, px, py, primary.diameterPx, lastKnownPpm)
                 }
             }
             return samples
