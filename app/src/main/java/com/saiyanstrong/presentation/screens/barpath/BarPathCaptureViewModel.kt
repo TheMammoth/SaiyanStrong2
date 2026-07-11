@@ -9,8 +9,10 @@ import com.saiyanstrong.domain.model.BarPathAnalysis
 import com.saiyanstrong.domain.model.BarPathSample
 import com.saiyanstrong.domain.model.TrackedFrame
 import com.saiyanstrong.domain.repository.BarPathRepository
+import com.saiyanstrong.domain.repository.ExerciseRepository
 import com.saiyanstrong.domain.repository.UserRepository
 import com.saiyanstrong.domain.usecase.AnalyzeBarPathUseCase
+import com.saiyanstrong.util.SessionShareImageSaver
 import com.saiyanstrong.util.barpath.BarPathFrameTracker
 import com.saiyanstrong.util.barpath.BarPathVideoImporter
 import com.saiyanstrong.util.barpath.LiveFrameResult
@@ -21,6 +23,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -74,7 +77,9 @@ class BarPathCaptureViewModel @Inject constructor(
     private val barPathVideoImporter: BarPathVideoImporter,
     private val analyzeBarPathUseCase: AnalyzeBarPathUseCase,
     private val barPathRepository: BarPathRepository,
-    private val userRepository: UserRepository
+    private val userRepository: UserRepository,
+    private val exerciseRepository: ExerciseRepository,
+    private val sessionShareImageSaver: SessionShareImageSaver
 ) : ViewModel() {
 
     private val exerciseId: Int = checkNotNull(savedStateHandle["exerciseId"])
@@ -360,6 +365,35 @@ class BarPathCaptureViewModel @Inject constructor(
 
     fun onShowReplay() { _uiState.update { it.copy(showReplay = true) } }
     fun onHideReplay() { _uiState.update { it.copy(showReplay = false) } }
+
+    /** Generate the shareable rep card (Canvas drawing on Dispatchers.Default) and open the share
+     * sheet via the existing image-share util (cache PNG + FileProvider + ACTION_SEND). */
+    fun onShareRep() {
+        val state = _uiState.value
+        val analysis = state.analysis ?: return
+        val frames = state.trackedFrames
+        if (frames.isEmpty()) return
+        val weightKg = if (isStandalone) state.weightKgInput.toDoubleOrNull() ?: 0.0 else knownWeightKg
+        viewModelScope.launch(Dispatchers.Default) {
+            val exerciseName = runCatching {
+                exerciseRepository.getExerciseById(exerciseId).firstOrNull()?.name
+            }.getOrNull() ?: ""
+            val tutSeconds = (frames.last().timestampMs - frames.first().timestampMs) / 1000.0
+            val bitmap = RepCardGenerator.generateRepCard(
+                RepCardData(
+                    frames = frames,
+                    exerciseName = exerciseName,
+                    weightKg = weightKg,
+                    meanVelocityMps = analysis.meanConcentricVelocityMs,
+                    peakVelocityMps = analysis.peakVelocityMs,
+                    romMeters = analysis.rangeOfMotionCm / 100.0,
+                    tutSeconds = tutSeconds,
+                    dateMs = System.currentTimeMillis()
+                )
+            )
+            sessionShareImageSaver.share(bitmap, "saiyanstrong-rep.png")
+        }
+    }
 
     fun onSave() {
         val analysis = _uiState.value.analysis ?: return

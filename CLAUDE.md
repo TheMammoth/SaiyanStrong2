@@ -1853,6 +1853,35 @@ _(Claude Code appends here after each completed task)_
   untested. Coordinate mapping assumes both getFrameAtTime and PlayerView render in the same
   rotation-applied display space — plausible but a real thing to verify on a device.
   versionCode 49, versionName 0.35.0.
+- [x] Sprint 39 — shareable "rep card" image (v0.36.0): generates a 1080×1920 (9:16 Stories) PNG
+  combining the bar-path viz + metrics, for sharing to Instagram/WhatsApp. Fits the codebase well —
+  most of what it needs already existed (TrackedFrame series from Sprint 38, `SessionShareImageSaver`
+  + the `shares/` FileProvider path from Sprint 20, `velocityColorArgb` from Sprint 38).
+  (1) `presentation/screens/barpath/RepCardGenerator.kt` (`object`, `android.graphics` only — no XML,
+  no third-party libs): `generateRepCard(data): Bitmap` draws a dark-crimson→black gradient, then
+  top 40% = bar-path viz (white ghost + velocity-coloured path reusing `velocityColorArgb` + peak/
+  sticking markers + subtle rack-upright line art), middle 30% = 2×2 metric grid, bottom 30% =
+  exercise/weight/date + "TRACKED WITH SAIYANSTRONG". The path-fitting geometry (`boundsOf`,
+  `fitTransform`/`RepCardTransform`) is pure and unit-tested (5 tests incl. the still-marker
+  zero-size guard).
+  (2) `RepCardData` — adapted from the requested `VbtSessionResult`, honestly: sets/reps omitted
+  (a VBT recording is one rep; standalone analyses have no logged set), "Mean Propulsive Velocity"
+  is the app's mean *concentric* velocity (labelled "MEAN VELOCITY", not mis-claimed as MPV), Time
+  Under Tension derived from the tracked frame span (not a stored metric). `generateRepCard` takes
+  no `Context` (pure Canvas, hardcoded theme colours/typeface, no resources needed).
+  (3) `BarPathCaptureViewModel.onShareRep()` (injects `ExerciseRepository` for the name +
+  `SessionShareImageSaver`) assembles the data, generates the bitmap on `Dispatchers.Default`, and
+  shares it via the existing util (cache PNG → FileProvider → ACTION_SEND — the requested steps b/c/d,
+  already built in Sprint 20, reused not reinvented). A "SHARE REP CARD" button on the RESULTS
+  screen (shown when ≥2 tracked frames exist) triggers it — a button on the review screen rather
+  than the requested FAB in the replay screen; RESULTS is where all the post-rep actions live and
+  it works without entering replay (video not required — the card is path + metrics only, so it
+  also works for gallery-imported analyses).
+  KNOWN GAP: `RepCardGenerator`'s actual Canvas drawing (layout, gradient, text placement) is
+  unverified — `android.graphics.Bitmap` can't run in plain unit tests, so only the geometry
+  helpers + colour mapping are tested; the visual result needs a device to eyeball. The share
+  path itself (FileProvider/ACTION_SEND) is the proven Sprint-20 util, unchanged.
+  versionCode 50, versionName 0.36.0.
 
 ## Release rules
 

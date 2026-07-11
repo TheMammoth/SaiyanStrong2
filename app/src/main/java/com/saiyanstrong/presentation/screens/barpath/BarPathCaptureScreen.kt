@@ -138,6 +138,8 @@ fun BarPathCaptureScreen(
                     canReplay = uiState.trackedFrames.size >= 2 && uiState.videoPath != null &&
                         uiState.videoWidthPx > 0,
                     onReplay = viewModel::onShowReplay,
+                    canShare = uiState.trackedFrames.size >= 2,
+                    onShareRep = viewModel::onShareRep,
                     onSave = viewModel::onSave
                 )
                 CaptureStep.ERROR -> ErrorStep(message = uiState.errorMessage, onRetry = viewModel::onRetry)
@@ -568,6 +570,8 @@ private fun ResultsStep(
     trackedSamples: List<BarPathSample> = emptyList(),
     canReplay: Boolean = false,
     onReplay: () -> Unit = {},
+    canShare: Boolean = false,
+    onShareRep: () -> Unit = {},
     onSave: () -> Unit
 ) {
     if (analysis == null) return
@@ -606,6 +610,12 @@ private fun ResultsStep(
         if (canReplay) {
             OutlinedButton(onClick = onReplay, modifier = Modifier.fillMaxWidth()) {
                 Text("▶ REPLAY WITH BAR PATH", fontWeight = FontWeight.Black, color = NeonGreen)
+            }
+            Spacer(Modifier.height(8.dp))
+        }
+        if (canShare) {
+            OutlinedButton(onClick = onShareRep, modifier = Modifier.fillMaxWidth()) {
+                Text("SHARE REP CARD", fontWeight = FontWeight.Black, color = PowerAmber)
             }
             Spacer(Modifier.height(8.dp))
         }
