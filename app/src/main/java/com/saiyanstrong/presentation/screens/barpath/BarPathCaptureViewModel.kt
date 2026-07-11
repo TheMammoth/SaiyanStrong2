@@ -133,6 +133,17 @@ class BarPathCaptureViewModel @Inject constructor(
     private val _liveColorLockedOn = MutableStateFlow(false)
     val liveColorLockedOn: StateFlow<Boolean> = _liveColorLockedOn.asStateFlow()
 
+    /** The gyroscope reading at the moment of the tap that produced [liveColorProfile] — kept for
+     * the capture session so "was the phone stable when this was sampled?" can be correlated with
+     * tracking quality afterward. NOTE: in-memory only, cleared on RE-TAP/process death — this is
+     * NOT written to Room. True cross-session correlation would need a persisted column; out of
+     * scope here (the color profile itself isn't persisted either — it only configures the live
+     * tracker at runtime, so persisting just the stability reading without it would be a half
+     * measure). Also logged via Log.i("BarPathColorSample", ...) in BarPathLiveAnalyzer for
+     * immediate logcat inspection. */
+    private val _liveColorSampleAngularVelocity = MutableStateFlow<Float?>(null)
+    val liveColorSampleAngularVelocity: StateFlow<Float?> = _liveColorSampleAngularVelocity.asStateFlow()
+
     /** Called on the analyzer's background thread — MutableStateFlow.value is safe cross-thread. */
     fun onLiveResult(result: LiveFrameResult) {
         _liveTracking.value = result.markerDetected
@@ -141,12 +152,14 @@ class BarPathCaptureViewModel @Inject constructor(
         result.sampledColorProfile?.let {
             _liveColorProfile.value = it
             _liveColorLockedOn.value = true
+            _liveColorSampleAngularVelocity.value = result.sampledAngularVelocityMagnitude
         }
     }
 
     /** RE-TAP pressed — re-arms the tap-catcher so the next tap samples a new color. */
     fun onRetapColor() {
         _liveColorLockedOn.value = false
+        _liveColorSampleAngularVelocity.value = null
     }
 
     fun onRecordingFinished(path: String?, gyroTimeline: GyroTimeline?, focalMm: Double, sensorWidthMm: Double, videoStartUptimeNs: Long) {

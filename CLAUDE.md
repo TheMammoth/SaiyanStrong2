@@ -2058,6 +2058,56 @@ _(Claude Code appends here after each completed task)_
   Preview/ImageAnalysis crop regions actually align on a real device. If a live tap consistently
   samples the wrong spot, that mismatch is the first thing to check.
   versionCode 58, versionName 0.43.0.
+- [x] Sprint 44 — phone stability indicator for live tap-to-sample (v0.44.0): a tap during camera
+  shake produces a blurred, spatially-averaged patch sample ([sampleColorPatch] averages a pixel
+  neighborhood, so motion blur across it corrupts the color) — this warns the user before they
+  tap, and gates what actually happens when they do.
+  (1) No `GyroscopeIntegrator` class existed (the prompt assumed one) — the real gyro code is
+  `GyroTimeline`, an unrelated concern (cumulative angle over a recording, for OFFLINE shake
+  compensation, alive only during `startRecording`). Rather than bolt an "instantaneous magnitude"
+  reading onto that class, built a separate, always-on piece: `domain/util/CameraStability.kt`
+  (pure — `StabilityLevel` enum + `angularVelocityMagnitude(x,y,z)` = sqrt(ωx²+ωy²+ωz²) + the
+  0.05/0.15 rad/s threshold classifier, all unit-tested) and `util/barpath/StabilityMonitor.kt`
+  (Android-touching — wraps a `SensorEventListener` on `TYPE_GYROSCOPE`, falling back to
+  `TYPE_GYROSCOPE_UNCALIBRATED`, `SENSOR_DELAY_UI` since this only drives a UI hint and doesn't
+  need the recording-time listener's `SENSOR_DELAY_FASTEST` precision). Runs for the whole time
+  the camera preview is visible (`DisposableEffect` in `RecordingStep`, scoped to the
+  `hasPermission` block so it starts "immediately when the camera opens," per spec), fully
+  independent of `BarPathVideoRecorder`'s own recording-time gyro listener.
+  (2) Stability is classified in the TAP HANDLER itself (`RecordingStep`'s `detectTapGestures`),
+  not inside `BarPathLiveAnalyzer`'s frame loop — the analyzer runs on a background camera thread
+  with no gyro access today, while the tap handler already has the current angular-velocity value
+  synchronously on the main thread. MOVING: no `requestColorSample` call at all, a gentle (not
+  harsh) snackbar — "Hold the phone still, then tap" — exactly the wording asked for. SETTLING:
+  proceeds, with a `widenTolerance=true` flag riding along in `PendingColorSample`. STABLE:
+  proceeds normally.
+  (3) `MarkerColorProfile.widened(factor)` (new extension in `MarkerColorProfile.kt`): scales
+  `hueTolerance`/`satTolerance`/`valTolerance` by the factor — the real fields, not the prompt's
+  invented `hueRange`/`satRange`/`valRange`, which don't exist on this profile shape. Deliberately
+  leaves `minSaturation`/`minValue` (the floor-based accept/reject gate) untouched — only the
+  distance-scale tolerance fields widen. Applied in `BarPathLiveAnalyzer.analyze()` right after
+  `sampleColorPatch` computes the raw profile, before it's stored as `colorProfile`.
+  (4) `angularVelocityMagnitudeAtTap` rides through `PendingColorSample` → `BarPathLiveAnalyzer`
+  (logged via `Log.i("BarPathColorSample", ...)` alongside the resulting profile, genuinely
+  correlated in one line rather than two disconnected log calls from different threads/times) →
+  `LiveFrameResult.sampledAngularVelocityMagnitude` → a new `liveColorSampleAngularVelocity`
+  StateFlow in the ViewModel, cleared on RE-TAP. **Scope call, flagged rather than silently
+  under-built**: this is in-memory for the capture session only, not written to Room — the color
+  profile itself isn't persisted either (it only configures the live tracker at runtime), so
+  persisting just the stability reading without the profile it was measured against wouldn't
+  support real cross-session correlation anyway. True "correlate with tracking quality later"
+  would need a new persisted calibration-diagnostics table; out of scope unless asked for.
+  (5) UI: `StabilityIndicator` composable (top-left, stacked above the existing
+  `LiveTrackingReadout` in a shared Column so they don't overlap) — colored dot (DangerRed/
+  PowerAmber/NeonGreen, all existing theme tokens, no hardcoded colors) + label, pulsing alpha via
+  `rememberInfiniteTransition` only in SETTLING. Hidden once `liveColorLockedOn` — "only needed
+  pre-tap," per spec.
+  14 new unit tests (4 CameraStability threshold/magnitude tests, 4 MarkerColorProfile.widened
+  tests, plus reuse of existing ColorPatchSampler/analyzer test infra — no changes needed there).
+  KNOWN GAP: unverified on a real device this session, same standing caveat as the whole live VBT
+  stack — whether the 0.05/0.15 rad/s thresholds actually feel right in the hand (too twitchy, too
+  lenient) is a real tuning question that needs a phone, not just math.
+  versionCode 59, versionName 0.44.0.
 
 ## Release rules
 

@@ -83,3 +83,17 @@ data class MarkerColorProfile(
         }
     }
 }
+
+/**
+ * Widens all three tolerance bands (hue/saturation/value) by [factor] — used for a tap sampled
+ * while the phone was only SETTLING (not fully STABLE): a small amount of motion blur can shift
+ * the true marker color slightly outside a tightly-fit tolerance, so the band is loosened rather
+ * than rejecting a sample that's still usable. Deliberately leaves [MarkerColorProfile.minSaturation]/
+ * [MarkerColorProfile.minValue] (the floor-based accept/reject gate in [MarkerColorProfile.matches])
+ * untouched — only the three tolerance/distance-scale fields widen.
+ */
+fun MarkerColorProfile.widened(factor: Double): MarkerColorProfile = copy(
+    hueTolerance = hueTolerance * factor,
+    satTolerance = satTolerance * factor,
+    valTolerance = valTolerance * factor
+)

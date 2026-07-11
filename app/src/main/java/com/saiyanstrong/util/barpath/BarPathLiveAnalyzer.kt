@@ -1,6 +1,7 @@
 package com.saiyanstrong.util.barpath
 
 import android.graphics.ImageFormat
+import android.util.Log
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
 import com.saiyanstrong.domain.util.KalmanTracker2D
@@ -10,8 +11,9 @@ import com.saiyanstrong.domain.util.Point2D
 
 /** One live-analyzed frame: whether the marker was found, its (Kalman-smoothed) position in the
  * downsampled analysis-image space, the smoothed velocity (only meaningful in MOVING), and the
- * current lift phase. [sampledColorProfile] is non-null only on the one frame that consumed a
- * pending tap-to-sample request (see [BarPathLiveAnalyzer.pendingColorSample]). */
+ * current lift phase. [sampledColorProfile]/[sampledAngularVelocityMagnitude] are non-null only
+ * on the one frame that consumed a pending tap-to-sample request (see
+ * [BarPathLiveAnalyzer.pendingColorSample]). */
 data class LiveFrameResult(
     val markerDetected: Boolean,
     val xPx: Float,
@@ -19,7 +21,8 @@ data class LiveFrameResult(
     val smoothedVelocityMps: Float,
     val phase: LiftPhase = LiftPhase.IDLE,
     val repJustCompleted: Boolean = false,
-    val sampledColorProfile: MarkerColorProfile? = null
+    val sampledColorProfile: MarkerColorProfile? = null,
+    val sampledAngularVelocityMagnitude: Float? = null
 )
 
 /**
@@ -27,8 +30,20 @@ data class LiveFrameResult(
  * coordinate space CameraX's `PreviewView.meteringPointFactory` reports (sensor-active-array
  * relative — the same documented mechanism CameraX uses for tap-to-focus). Consumed by the next
  * [BarPathLiveAnalyzer.analyze] call, then cleared.
+ *
+ * @param widenTolerance the tap happened while the phone was only SETTLING (not fully STABLE) —
+ * widen the resulting profile's tolerance bands (see [widened]) rather than fitting a tight range
+ * to a possibly slightly motion-blurred patch.
+ * @param angularVelocityMagnitudeAtTap the gyroscope reading at the moment of the tap (rad/s) —
+ * carried through so it can be logged/reported alongside the resulting [MarkerColorProfile], not
+ * as a disconnected value from a different point in time.
  */
-data class PendingColorSample(val normX: Float, val normY: Float)
+data class PendingColorSample(
+    val normX: Float,
+    val normY: Float,
+    val widenTolerance: Boolean = false,
+    val angularVelocityMagnitudeAtTap: Float = 0f
+)
 
 /**
  * The live analysis loop — the piece that did NOT exist before (the rest of the VBT pipeline
@@ -86,6 +101,7 @@ class BarPathLiveAnalyzer(
             val pixels = imageProxyToDownsampledPixels(image, analysisStep) ?: return
 
             var sampledProfile: MarkerColorProfile? = null
+            var sampledAngularVelocity: Float? = null
             val pending = pendingColorSample
             if (pending != null) {
                 pendingColorSample = null
@@ -99,13 +115,20 @@ class BarPathLiveAnalyzer(
                 // differ), the sampled point will land off-target in the analysis buffer.
                 val bufferX = (pending.normX * image.width).toInt()
                 val bufferY = (pending.normY * image.height).toInt()
-                val profile = sampleColorPatch(
+                var profile = sampleColorPatch(
                     pixels.data, pixels.width, pixels.height,
                     bufferX / analysisStep, bufferY / analysisStep
                 )
                 if (profile != null) {
+                    if (pending.widenTolerance) profile = profile.widened(1.2)
                     colorProfile = profile
                     sampledProfile = profile
+                    sampledAngularVelocity = pending.angularVelocityMagnitudeAtTap
+                    Log.i(
+                        "BarPathColorSample",
+                        "tap sample: angularVelocity=${pending.angularVelocityMagnitudeAtTap} " +
+                            "widened=${pending.widenTolerance} profile=$profile"
+                    )
                 }
             }
 
@@ -152,7 +175,8 @@ class BarPathLiveAnalyzer(
                     smoothedVelocityMps = velocity,
                     phase = phaseUpdate.phase,
                     repJustCompleted = phaseUpdate.repJustCompleted,
-                    sampledColorProfile = sampledProfile
+                    sampledColorProfile = sampledProfile,
+                    sampledAngularVelocityMagnitude = sampledAngularVelocity
                 )
             )
         } catch (_: Throwable) {

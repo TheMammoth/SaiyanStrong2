@@ -9,6 +9,10 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
@@ -25,7 +29,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -38,8 +45,10 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -73,10 +82,13 @@ import com.saiyanstrong.presentation.theme.NeonGreen
 import com.saiyanstrong.presentation.theme.PowerAmber
 import com.saiyanstrong.presentation.theme.SaiyanGray
 import com.saiyanstrong.util.barpath.BarPathVideoRecorder
+import com.saiyanstrong.domain.util.CameraStability
 import com.saiyanstrong.domain.util.LiftPhase
+import com.saiyanstrong.domain.util.StabilityLevel
 import com.saiyanstrong.util.barpath.HighSpeedCapabilityChecker
 import com.saiyanstrong.util.barpath.HighSpeedTier
 import com.saiyanstrong.util.barpath.LiveFrameResult
+import com.saiyanstrong.util.barpath.StabilityMonitor
 import kotlinx.coroutines.launch
 
 private val MarkerGreen = Color(0xFF39FF14)
@@ -198,6 +210,10 @@ private fun RecordingStep(
     val tapHighlightAlpha = remember { Animatable(0f) }
     val coroutineScope = rememberCoroutineScope()
 
+    var angularVelocityMagnitude by remember { mutableFloatStateOf(0f) }
+    val stabilityMonitor = remember { StabilityMonitor { mag -> angularVelocityMagnitude = mag } }
+    val stabilityLevel = CameraStability.classify(angularVelocityMagnitude)
+
     var hasPermission by remember {
         mutableStateOf(
             ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
@@ -281,6 +297,13 @@ private fun RecordingStep(
         }
 
         if (hasPermission) {
+            // Always-on gyro listener driving the pre-tap stability indicator — separate from the
+            // recording-time gyro capture (BarPathVideoRecorder.startRecording), which only runs
+            // once RECORD is pressed and serves a different purpose (offline shake compensation).
+            DisposableEffect(Unit) {
+                stabilityMonitor.start(context)
+                onDispose { stabilityMonitor.stop() }
+            }
             Box(Modifier.fillMaxWidth().height(360.dp)) {
                 AndroidView(
                     factory = { ctx ->
@@ -306,14 +329,25 @@ private fun RecordingStep(
                         Modifier.fillMaxSize().pointerInput(Unit) {
                             detectTapGestures { offset ->
                                 val pv = previewViewRef
-                                if (pv != null && pv.width > 0 && pv.height > 0) {
-                                    val point = pv.meteringPointFactory.createPoint(offset.x, offset.y)
-                                    recorder.requestColorSample(point.x, point.y)
-                                    tapHighlightOffset = offset
-                                    coroutineScope.launch {
-                                        tapHighlightAlpha.snapTo(1f)
-                                        tapHighlightAlpha.animateTo(0f, animationSpec = tween(1500))
-                                    }
+                                if (pv == null || pv.width <= 0 || pv.height <= 0) return@detectTapGestures
+                                if (stabilityLevel == StabilityLevel.MOVING) {
+                                    // Gentle, not a hard block message — the user just tapped early.
+                                    snackbarMessage = "Hold the phone still, then tap"
+                                    return@detectTapGestures
+                                }
+                                val point = pv.meteringPointFactory.createPoint(offset.x, offset.y)
+                                recorder.requestColorSample(
+                                    point.x, point.y,
+                                    // SETTLING (not fully STABLE): a little motion blur may have
+                                    // shifted the true color slightly — widen the tolerance rather
+                                    // than fitting a tight band to a slightly-blurred patch.
+                                    widenTolerance = stabilityLevel == StabilityLevel.SETTLING,
+                                    angularVelocityMagnitudeAtTap = angularVelocityMagnitude
+                                )
+                                tapHighlightOffset = offset
+                                coroutineScope.launch {
+                                    tapHighlightAlpha.snapTo(1f)
+                                    tapHighlightAlpha.animateTo(0f, animationSpec = tween(1500))
                                 }
                             }
                         }
@@ -335,12 +369,16 @@ private fun RecordingStep(
                         }
                     }
                 }
-                LiveTrackingReadout(
-                    tracking = liveTracking,
-                    velocity = liveVelocity,
-                    phase = livePhase,
-                    modifier = Modifier.align(Alignment.TopStart).padding(8.dp)
-                )
+                Column(
+                    modifier = Modifier.align(Alignment.TopStart).padding(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    // Only needed pre-tap — disappears once locked on, per spec.
+                    if (!liveColorLockedOn) {
+                        StabilityIndicator(level = stabilityLevel)
+                    }
+                    LiveTrackingReadout(tracking = liveTracking, velocity = liveVelocity, phase = livePhase)
+                }
                 if (liveColorLockedOn) {
                     OutlinedButton(
                         onClick = {
@@ -391,6 +429,40 @@ private fun RecordingStep(
     }
 
         SnackbarHost(hostState = snackbarHostState, modifier = Modifier.align(Alignment.BottomCenter))
+    }
+}
+
+/**
+ * Pre-tap phone-stability hint, driven by [StabilityMonitor]'s raw gyroscope reading. Only shown
+ * before the user has locked onto a marker color — a tap during MOVING is rejected (patch would
+ * be blurred/mixed-color), SETTLING proceeds but widens the sampled tolerance (see
+ * [com.saiyanstrong.util.barpath.widened]).
+ */
+@Composable
+private fun StabilityIndicator(level: StabilityLevel, modifier: Modifier = Modifier) {
+    val (color, label) = when (level) {
+        StabilityLevel.MOVING -> DangerRed to "Hold still..."
+        StabilityLevel.SETTLING -> PowerAmber to "Almost..."
+        StabilityLevel.STABLE -> NeonGreen to "Tap the bar"
+    }
+    val dotAlpha = if (level == StabilityLevel.SETTLING) {
+        val transition = rememberInfiniteTransition(label = "stabilityPulse")
+        val alpha by transition.animateFloat(
+            initialValue = 0.4f, targetValue = 1f,
+            animationSpec = infiniteRepeatable(tween(600), repeatMode = RepeatMode.Reverse),
+            label = "stabilityPulseAlpha"
+        )
+        alpha
+    } else 1f
+    Row(
+        modifier = modifier
+            .background(Color.Black.copy(alpha = 0.55f), androidx.compose.foundation.shape.RoundedCornerShape(6.dp))
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(Modifier.size(10.dp).background(color.copy(alpha = dotAlpha), CircleShape))
+        Spacer(Modifier.width(6.dp))
+        Text(label, color = color, fontSize = 11.sp, fontWeight = FontWeight.Black)
     }
 }
 

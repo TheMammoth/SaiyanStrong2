@@ -74,4 +74,30 @@ class MarkerColorProfileTest {
         assertTrue(profile.matches(255, 0, 255))
         assertTrue(profile.matchScore(255, 0, 255) < 1.0)
     }
+
+    @Test
+    fun `widened scales all three tolerance bands by the given factor`() {
+        val profile = MarkerColorProfile.sample(230, 30, 200)
+        val widened = profile.widened(1.2)
+        assertEquals(profile.hueTolerance * 1.2, widened.hueTolerance, 0.0001)
+        assertEquals(profile.satTolerance * 1.2, widened.satTolerance, 0.0001)
+        assertEquals(profile.valTolerance * 1.2, widened.valTolerance, 0.0001)
+    }
+
+    @Test
+    fun `widened leaves the floor-based accept-reject fields untouched`() {
+        val profile = MarkerColorProfile.sample(230, 30, 200)
+        val widened = profile.widened(1.2)
+        assertEquals(profile.minSaturation, widened.minSaturation, 0.0001)
+        assertEquals(profile.minValue, widened.minValue, 0.0001)
+        assertEquals(profile.hueCenter, widened.hueCenter, 0.0001)
+    }
+
+    @Test
+    fun `widened tolerance scores a slightly-off pixel at least as well as the original`() {
+        val profile = MarkerColorProfile.sample(230, 30, 200)
+        val original = profile.matchScore(200, 60, 170)
+        val wider = profile.widened(1.2).matchScore(200, 60, 170)
+        assertTrue("widened tolerance should not score a near-boundary pixel worse", wider >= original)
+    }
 }

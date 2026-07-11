@@ -158,9 +158,17 @@ class BarPathVideoRecorder {
     /** User tapped the marker in the live preview — [normX]/[normY] must come from
      * `PreviewView.meteringPointFactory.createPoint(...)`, not raw view pixels (see
      * [BarPathLiveAnalyzer.pendingColorSample] for the coordinate-space assumption/caveat). A
-     * no-op if the live analysis loop isn't bound (e.g. the third camera stream failed to bind). */
-    fun requestColorSample(normX: Float, normY: Float) {
-        liveAnalyzer?.pendingColorSample = PendingColorSample(normX, normY)
+     * no-op if the live analysis loop isn't bound (e.g. the third camera stream failed to bind).
+     * [widenTolerance]/[angularVelocityMagnitudeAtTap] come from the stability indicator at the
+     * moment of the tap — see [PendingColorSample]. */
+    fun requestColorSample(
+        normX: Float,
+        normY: Float,
+        widenTolerance: Boolean = false,
+        angularVelocityMagnitudeAtTap: Float = 0f
+    ) {
+        liveAnalyzer?.pendingColorSample =
+            PendingColorSample(normX, normY, widenTolerance, angularVelocityMagnitudeAtTap)
     }
 
     fun startRecording(context: Context, onFinalized: (path: String?, gyroTimeline: GyroTimeline?, focalMm: Double, sensorWidthMm: Double, videoStartUptimeNs: Long) -> Unit) {
