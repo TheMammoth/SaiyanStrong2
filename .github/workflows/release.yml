@@ -30,14 +30,14 @@ jobs:
         run: chmod +x gradlew
 
       - name: Build debug APK
-        run: ./gradlew assembleDebug
+        run: ./gradlew assembleGithubDebug
 
       - name: Rename APK
         id: apk
         run: |
           TAG=${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.event.release.tag_name }}
           NAME="SaiyanStrong-${TAG}-debug.apk"
-          cp app/build/outputs/apk/debug/app-debug.apk "$NAME"
+          cp app/build/outputs/apk/github/debug/app-github-debug.apk "$NAME"
           echo "name=$NAME" >> $GITHUB_OUTPUT
           echo "tag=$TAG" >> $GITHUB_OUTPUT
 
