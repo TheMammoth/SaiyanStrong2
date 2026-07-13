@@ -70,6 +70,14 @@ class BarPathVideoRecorder {
      * exceeds the supported combination, so if that bind fails it falls back to preview + video
      * only — recording always survives, the live loop is what degrades. Null (the default) leaves
      * the recording path exactly as it was, with no live analysis.
+     *
+     * @param onBound fires once [videoCapture] is actually set and usable — this whole method
+     * runs async (`ProcessCameraProvider.getInstance` resolves on a later main-executor tick, not
+     * synchronously with this call), so a caller that enables RECORD on permission alone can call
+     * [startRecording] before [videoCapture] is non-null, hitting the
+     * `videoCapture ?: run { onFinalized(null, ...) }` guard below and surfacing "Recording
+     * failed" even though nothing actually went wrong — this callback lets the UI gate RECORD on
+     * real bind completion instead of just permission.
      */
     @OptIn(ExperimentalCamera2Interop::class)
     fun bindCamera(
@@ -79,6 +87,7 @@ class BarPathVideoRecorder {
         highSpeedEnabled: Boolean = false,
         onHighSpeedUnavailable: () -> Unit = {},
         onError: (String) -> Unit = {},
+        onBound: () -> Unit = {},
         onLiveResult: ((LiveFrameResult) -> Unit)? = null
     ) {
         val providerFuture = ProcessCameraProvider.getInstance(context)
@@ -131,15 +140,19 @@ class BarPathVideoRecorder {
                 liveAnalyzer = null
                 runCatching {
                     provider.bindToLifecycle(lifecycleOwner, CameraSelector.DEFAULT_BACK_CAMERA, preview, capture)
+                }.onSuccess {
+                    onBound()
                 }.onFailure { e ->
                     Log.e("BarPathVideoRecorder", "Camera bind failed", e)
                     if (tier != HighSpeedTier.STANDARD_30) {
                         onHighSpeedUnavailable()
-                        bindCamera(context, lifecycleOwner, previewView, highSpeedEnabled = false, onError = onError, onLiveResult = onLiveResult)
+                        bindCamera(context, lifecycleOwner, previewView, highSpeedEnabled = false, onError = onError, onBound = onBound, onLiveResult = onLiveResult)
                     } else {
                         onError("Camera unavailable on this device")
                     }
                 }
+            } else {
+                onBound()
             }
           } catch (t: Throwable) {
             // Last-resort guard: nothing on the camera provider callback may crash the app.

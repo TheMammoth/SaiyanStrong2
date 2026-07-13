@@ -2226,6 +2226,19 @@ _(Claude Code appends here after each completed task)_
   live VBT stack — now covering more surface area (continuous multi-rep cycling, the new trail
   overlay, the auto-startRep timing) than any single prior sprint.
   versionCode 61, versionName 0.46.0.
+- [x] Bug fix (v0.46.1): "Recording failed — try again" on the manual RECORD/STOP flow (the
+  offline record→calibrate→analyze path, not the continuous live session). Root cause: real race,
+  not a device flake. `BarPathVideoRecorder.bindCamera` runs async — `ProcessCameraProvider
+  .getInstance` resolves on a later main-executor tick, only then setting `videoCapture` — but the
+  RECORD button in `BarPathCaptureScreen` was enabled on `hasPermission` alone. A tap before bind
+  completed hit `videoCapture ?: run { onFinalized(null, ...) }` in `startRecording`, which
+  `BarPathCaptureViewModel.onRecordingFinished` surfaces as exactly this message.
+  Fix: `bindCamera` gained an `onBound: () -> Unit` callback, fired once `videoCapture` is
+  genuinely set (both the with-live-analysis and without-analysis bind paths, including the
+  high-speed-unavailable retry branch). `BarPathCaptureScreen` tracks `isCameraBound` from it and
+  gates the RECORD button on `hasPermission && (isRecording || isCameraBound)`, showing "STARTING
+  CAMERA…" in the brief window before bind completes instead of a tappable-but-doomed button.
+  versionCode 62, versionName 0.46.1.
 
 ## Release rules
 

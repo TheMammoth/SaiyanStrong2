@@ -274,6 +274,10 @@ private fun RecordingStep(
     LaunchedEffect(Unit) { if (!hasPermission) permissionLauncher.launch(Manifest.permission.CAMERA) }
 
     var isRecording by remember { mutableStateOf(false) }
+    // bindCamera() is async (ProcessCameraProvider resolves on a later tick) — gating RECORD on
+    // hasPermission alone let a fast tap fire startRecording() before videoCapture was set,
+    // producing a spurious "Recording failed — try again." Gate on real bind completion instead.
+    var isCameraBound by remember { mutableStateOf(false) }
     var showCamera by remember { mutableStateOf(!isStandalone) }
 
     val galleryLauncher = rememberLauncherForActivityResult(
@@ -392,6 +396,7 @@ private fun RecordingStep(
                                     snackbarMessage = "High-speed mode unavailable on this device, using 30fps"
                                 },
                                 onError = { msg -> snackbarMessage = msg },
+                                onBound = { isCameraBound = true },
                                 onLiveResult = onLiveResult
                             )
                         }
@@ -552,10 +557,13 @@ private fun RecordingStep(
                     recorder.stopRecording()
                 }
             },
-            enabled = hasPermission,
+            enabled = hasPermission && (isRecording || isCameraBound),
             colors = ButtonDefaults.outlinedButtonColors(contentColor = if (isRecording) DangerRed else NeonGreen)
         ) {
-            Text(if (isRecording) "STOP" else "RECORD", fontWeight = FontWeight.Black, letterSpacing = 1.sp)
+            Text(
+                if (isRecording) "STOP" else if (isCameraBound) "RECORD" else "STARTING CAMERA…",
+                fontWeight = FontWeight.Black, letterSpacing = 1.sp
+            )
         }
     }
 
