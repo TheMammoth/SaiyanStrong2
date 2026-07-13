@@ -18,16 +18,16 @@ class StickmanKinematicsTest {
         barRiseRatio = 0.04f, gripHalfRatio = 0.12f
     )
 
-    // Real archetype angle tables (v0.47.2), for depth/end-to-end checks.
+    // Real archetype angle tables (v0.48.1), for depth/end-to-end checks.
     private fun ratiosOf(thigh: Float, shank: Float, torso: Float, head: Float, hipHalf: Float) = LimbRatios(
         thighRatio = thigh, shankRatio = shank, torsoRatio = torso, headNeckRatio = head,
         footLenRatio = 0.10f, shoulderHalfRatio = 0.090f, hipHalfRatio = hipHalf,
         kneeHalfRatio = 0.050f, ankleHalfRatio = 0.045f, barRiseRatio = 0.04f, gripHalfRatio = 0.12f
     )
-    private val longFemurRatios = ratiosOf(thigh = 0.280f, shank = 0.220f, torso = 0.26f, head = 0.19f, hipHalf = 0.070f)
-    private val shortFemurRatios = ratiosOf(thigh = 0.220f, shank = 0.280f, torso = 0.32f, head = 0.13f, hipHalf = 0.070f)
-    private val proportionalRatios = ratiosOf(thigh = 0.250f, shank = 0.250f, torso = 0.29f, head = 0.16f, hipHalf = 0.070f)
-    private val wideHipRatios = ratiosOf(thigh = 0.250f, shank = 0.250f, torso = 0.29f, head = 0.16f, hipHalf = 0.105f)
+    private val longFemurRatios = ratiosOf(thigh = 0.260f, shank = 0.240f, torso = 0.26f, head = 0.19f, hipHalf = 0.070f)
+    private val shortFemurRatios = ratiosOf(thigh = 0.200f, shank = 0.300f, torso = 0.32f, head = 0.13f, hipHalf = 0.070f)
+    private val proportionalRatios = ratiosOf(thigh = 0.230f, shank = 0.270f, torso = 0.29f, head = 0.16f, hipHalf = 0.070f)
+    private val wideHipRatios = ratiosOf(thigh = 0.230f, shank = 0.270f, torso = 0.29f, head = 0.16f, hipHalf = 0.105f)
 
     private val archetypeBottomAngles = mapOf(
         "LONG_FEMUR" to (longFemurRatios to PoseAngles(75f, 58f, 62f)),

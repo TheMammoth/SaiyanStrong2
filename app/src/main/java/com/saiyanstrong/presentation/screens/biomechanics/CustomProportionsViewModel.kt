@@ -33,7 +33,7 @@ class CustomProportionsViewModel @Inject constructor(
     data class UiState(
         val ratios: LimbRatios = DEFAULT_RATIOS,
         val nodes: List<NodePosition> = emptyList(),
-        val sliderProgress: Float = 0f,
+        val sliderProgress: Float = INITIAL_PROGRESS,
         val isLoading: Boolean = true,
         val justSaved: Boolean = false
     )
@@ -49,7 +49,7 @@ class CustomProportionsViewModel @Inject constructor(
             keyframes = template.keyframes
             val savedRatios = userRepository.getCustomLimbRatios().first()
             _uiState.update { it.copy(ratios = savedRatios, isLoading = false) }
-            recompute(savedRatios, 0f)
+            recompute(savedRatios, INITIAL_PROGRESS)
         }
     }
 
@@ -82,8 +82,15 @@ class CustomProportionsViewModel @Inject constructor(
     }
 
     companion object {
+        /** Not 0f (standing): at standing, torso lean is near-vertical and thighLean sits at
+         * ~0° regardless of thighRatio's value, so dragging the thigh slider only moves the hip
+         * vertically — the torso angle and bar height barely change, making the slider feel
+         * inert. Starting mid/deep-descent means every ratio's effect on torso position and bar
+         * height is visible immediately, without the user having to scrub first. */
+        private const val INITIAL_PROGRESS = 0.65f
+
         val DEFAULT_RATIOS = LimbRatios(
-            thighRatio = 0.250f, shankRatio = 0.250f, torsoRatio = 0.29f, headNeckRatio = 0.16f,
+            thighRatio = 0.230f, shankRatio = 0.270f, torsoRatio = 0.29f, headNeckRatio = 0.16f,
             footLenRatio = 0.10f, shoulderHalfRatio = 0.090f, hipHalfRatio = 0.070f,
             kneeHalfRatio = 0.050f, ankleHalfRatio = 0.045f, barRiseRatio = 0.04f, gripHalfRatio = 0.12f
         )

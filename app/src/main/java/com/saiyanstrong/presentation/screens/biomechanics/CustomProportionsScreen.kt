@@ -35,10 +35,12 @@ import com.saiyanstrong.presentation.theme.NeonGreen
 import com.saiyanstrong.presentation.theme.SaiyanTheme
 
 /** Slider range for each ratio — a first-pass default centered on the 4 fixed archetypes'
- * existing values; adjust if it turns out too tight or too loose once tried. */
+ * existing values; adjust if it turns out too tight or too loose once tried. Thigh/shank widened
+ * (per user feedback that the default range felt too subtle) so a full drag visibly changes
+ * proportions rather than nudging them. */
 private object RatioRanges {
-    val thigh = 0.18f..0.32f
-    val shank = 0.18f..0.32f
+    val thigh = 0.14f..0.32f
+    val shank = 0.16f..0.34f
     val torso = 0.20f..0.36f
     val shoulderHalf = 0.06f..0.14f
     val hipHalf = 0.05f..0.14f

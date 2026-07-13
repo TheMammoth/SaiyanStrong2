@@ -2397,6 +2397,34 @@ _(Claude Code appends here after each completed task)_
   plausible"), and the slider-range defaults (§7 of SPEC.md) are a first pass flagged as
   adjustable — real device feedback is still the next step, per the same standing plan.
   versionCode 65, versionName 0.48.0.
+- [x] Femur length + slider feel (v0.48.1): user tried v0.48.0 — femurs still read too long, and
+  dragging a Custom slider didn't visibly move the torso/bar. Two separate, real causes.
+  (1) **Femurs too long**: the thigh:shank split (leg total held constant at 0.50 across every
+  archetype) had its center at thigh=0.250 — shifted the center to 0.230, keeping each
+  archetype's relative differentiation (LONG_FEMUR still noticeably longer-femured than
+  SHORT_FEMUR) but reading shorter overall: LONG_FEMUR 0.280→0.260, SHORT_FEMUR 0.220→0.200,
+  PROPORTIONAL/WIDE_HIP 0.250→0.230 (shank correspondingly 0.220→0.240, 0.280→0.300, 0.250→0.270
+  — leg total unchanged, so this doesn't disturb the already-verified depth guarantee, which is
+  angle-only and independent of ratio values). `DEFAULT_CUSTOM_RATIOS`
+  (`UserRepositoryImpl`)/`CustomProportionsViewModel.DEFAULT_RATIOS` updated to match. Widened
+  the Custom screen's thigh (0.18–0.32→0.14–0.32) and shank (0.18–0.32→0.16–0.34) slider ranges
+  so a full drag reads as a genuinely different build, not a nudge.
+  (2) **"Slider moves but torso/bar don't"**: not a wiring bug — `buildNodes` is a pure function,
+  every node always recomputed fresh from the current ratios, no caching. The real cause: the
+  screen defaulted to the STANDING pose (progress 0), where torso lean is already near-vertical
+  (angle-template-driven, so it doesn't depend on any ratio) and `thighLean ≈ 0°` regardless of
+  thighRatio's value — at that exact angle, `rotateUp(length, 0°)` has zero horizontal
+  component, so a thigh-ratio change at STANDING is *purely* vertical and easy to miss. Changed
+  `CustomProportionsViewModel`'s initial `sliderProgress` from 0f to 0.65 (mid/deep descent) so
+  every slider's effect on torso position and bar height is visible the moment the screen opens,
+  no manual scrub required first.
+  Flagged, not silently changed: the bar's *x*-position specifically is pinned to exactly
+  mid-foot by the v0.48.0 correction (an explicit, deliberate invariant from the user's own
+  earlier request) — no ratio change can move bar.x, by design. Bar *height* (y) and everything
+  above the knee still responds fully; only the horizontal bar-path component is intentionally
+  inert. Not resolved either way without asking, since undoing it would contradict the prior
+  explicit request.
+  versionCode 66, versionName 0.48.1.
 
 ## Release rules
 

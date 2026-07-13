@@ -3,7 +3,7 @@
     "archetype": "LONG_FEMUR",
     "lift": "SQUAT",
     "limbRatios": {
-      "thighRatio": 0.280, "shankRatio": 0.220, "torsoRatio": 0.26, "headNeckRatio": 0.19,
+      "thighRatio": 0.260, "shankRatio": 0.240, "torsoRatio": 0.26, "headNeckRatio": 0.19,
       "footLenRatio": 0.10, "shoulderHalfRatio": 0.090, "hipHalfRatio": 0.070,
       "kneeHalfRatio": 0.050, "ankleHalfRatio": 0.045, "barRiseRatio": 0.04, "gripHalfRatio": 0.12
     },
@@ -25,7 +25,7 @@
     "archetype": "SHORT_FEMUR",
     "lift": "SQUAT",
     "limbRatios": {
-      "thighRatio": 0.220, "shankRatio": 0.280, "torsoRatio": 0.32, "headNeckRatio": 0.13,
+      "thighRatio": 0.200, "shankRatio": 0.300, "torsoRatio": 0.32, "headNeckRatio": 0.13,
       "footLenRatio": 0.10, "shoulderHalfRatio": 0.090, "hipHalfRatio": 0.070,
       "kneeHalfRatio": 0.050, "ankleHalfRatio": 0.045, "barRiseRatio": 0.04, "gripHalfRatio": 0.12
     },
@@ -47,7 +47,7 @@
     "archetype": "PROPORTIONAL",
     "lift": "SQUAT",
     "limbRatios": {
-      "thighRatio": 0.250, "shankRatio": 0.250, "torsoRatio": 0.29, "headNeckRatio": 0.16,
+      "thighRatio": 0.230, "shankRatio": 0.270, "torsoRatio": 0.29, "headNeckRatio": 0.16,
       "footLenRatio": 0.10, "shoulderHalfRatio": 0.090, "hipHalfRatio": 0.070,
       "kneeHalfRatio": 0.050, "ankleHalfRatio": 0.045, "barRiseRatio": 0.04, "gripHalfRatio": 0.12
     },
@@ -69,7 +69,7 @@
     "archetype": "WIDE_HIP",
     "lift": "SQUAT",
     "limbRatios": {
-      "thighRatio": 0.250, "shankRatio": 0.250, "torsoRatio": 0.29, "headNeckRatio": 0.16,
+      "thighRatio": 0.230, "shankRatio": 0.270, "torsoRatio": 0.29, "headNeckRatio": 0.16,
       "footLenRatio": 0.10, "shoulderHalfRatio": 0.090, "hipHalfRatio": 0.105,
       "kneeHalfRatio": 0.050, "ankleHalfRatio": 0.045, "barRiseRatio": 0.04, "gripHalfRatio": 0.12
     },
