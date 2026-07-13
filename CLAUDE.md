@@ -2347,6 +2347,56 @@ _(Claude Code appends here after each completed task)_
   assumed) and the visual simplifications are straightforward, but "looks right on screen" is the
   user's call on the next real look, per the same "tune after seeing it render" plan as before.
   versionCode 64, versionName 0.47.1.
+- [x] Sprint — real squat mechanics + Custom Proportions (v0.48.0), per SPEC.md: user tried
+  v0.47.1 and asked for two more things via a `/spec` round (clarifying questions asked and
+  answered first): (1) the animation still didn't move like a real squat — the bar should stay
+  over mid-foot regardless of torso lean, and the hip should actually drop below the knee at
+  depth; (2) live, permanent, per-user sliders for each limb, not just JSON tuning.
+  (1) **Real depth bug found and fixed** (not just tuned): `StickmanKinematics`'s thigh-angle
+  formula damped the knee-driven deviation by ×0.5, which meant even a fully-flexed knee could
+  never rotate the thigh past horizontal — the hip could geometrically never drop below the knee
+  no matter what angles the JSON specified. This is why "movement isn't perfected" persisted
+  after v0.47.1's separate (correct) interpolation fix. Removed the damping (thigh now deviates
+  from the shank's angle by the *full* `180° - kneeAngleDeg`, the textbook 2-link hinge-chain
+  relationship) and deepened every archetype's PARALLEL/BOTTOM knee angles so real depth is
+  actually reached (verified numerically per archetype, not assumed — e.g. LONG_FEMUR BOTTOM
+  knee 80°→58°). `PoseAngles.hipAngleDeg` stays in the model (matches spec's authored table,
+  available for future use) but is deliberately not fed into this geometry — documented as a
+  stated simplification, not silently dropped.
+  (2) **Bar-over-mid-foot**: after the angle-driven chain builds the rig, every node from the hip
+  up (hip/torso/head/arms/bar) is shifted horizontally so the bar lands exactly on mid-foot — a
+  simple translation per the user's own explicit choice over a full IK solve. The foot itself
+  (ankle/knee/toe) is never shifted (planted the whole rep). Tradeoff, documented in code: the
+  rendered thigh segment can be a few percent off its ratio-defined length after this
+  correction — the *only* segment affected, since shank (neither endpoint shifts) and torso/
+  head-neck/arms (both endpoints shift by the identical amount, cancelling in the difference)
+  all stay provably exactly rigid, locked in by regression tests.
+  (3) **Custom Proportions**: new `Archetype.CUSTOM` (5th, permanent option, not a replacement).
+  `GetArchetypeAnimationUseCase` composes `BiomechanicsRepository` (PROPORTIONAL's angle
+  template + content) with `UserRepository` (the user's saved `LimbRatios`) for CUSTOM, rather
+  than either repository depending on the other — cross-repository resolution lives at the
+  use-case layer per Clean Architecture. New `customLimbRatiosJson` DataStore key (same
+  get/set-through-UserRepository precedent as `selectedArchetypeName`), defaulting to
+  PROPORTIONAL's own ratio values until saved. New `CustomProportionsScreen`/`ViewModel`: live
+  stickman + scrub slider + 6 sliders (femur/thigh, shin/shank, torso, shoulder width, hip
+  width, foot length ratios — `kneeHalfRatio`/`ankleHalfRatio`/`barRiseRatio`/`gripHalfRatio`
+  stay fixed, not user-facing proportions). Dragging updates the preview immediately, no
+  debounce (pure local computation). Tapping the "Custom" card (added to `archetypes.json`,
+  which is why it automatically got a live standing-pose thumbnail on the selection grid for
+  free via the existing generic `Archetype.entries` loop) navigates straight to this screen;
+  SAVE persists the ratios and opens the full visualizer. "Compare all four" explicitly excludes
+  CUSTOM (it's not one of the 4 fixed body types that feature was built to compare).
+  (4) Two real test bugs caught and fixed while re-deriving expected values after the shift:
+  comparing `L_ANKLE`-to-`L_KNEE` directly (or reading `L_ANKLE.x` alone as "mid-foot") is wrong
+  whenever two joints carry *different* half-widths (`ankleHalfRatio` ≠ `kneeHalfRatio`) — the
+  true centerline has to be recovered via the L/R midpoint, which is exact by symmetry. Both
+  `StickmanKinematicsTest` and `StickmanInterpolatorTest` had this bug; fixed with a shared
+  `centerline()` helper rather than papering over it with a looser tolerance.
+  KNOWN GAP unchanged: still not re-verified on a real device this session. The depth and
+  bar-over-midfoot fixes are proven by regression tests (exact equalities, not just "looks
+  plausible"), and the slider-range defaults (§7 of SPEC.md) are a first pass flagged as
+  adjustable — real device feedback is still the next step, per the same standing plan.
+  versionCode 65, versionName 0.48.0.
 
 ## Release rules
 

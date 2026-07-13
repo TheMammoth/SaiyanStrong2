@@ -78,6 +78,7 @@ fun Archetype.displayName(): String = when (this) {
     Archetype.SHORT_FEMUR -> "Short Femur"
     Archetype.PROPORTIONAL -> "Proportional"
     Archetype.WIDE_HIP -> "Wide Hip"
+    Archetype.CUSTOM -> "Custom"
 }
 
 fun LiftType.displayName(): String = when (this) {

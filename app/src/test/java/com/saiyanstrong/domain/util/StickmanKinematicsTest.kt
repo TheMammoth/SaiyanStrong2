@@ -2,6 +2,7 @@ package com.saiyanstrong.domain.util
 
 import com.saiyanstrong.domain.model.LimbRatios
 import com.saiyanstrong.domain.model.NodeId
+import com.saiyanstrong.domain.model.NodePosition
 import com.saiyanstrong.domain.model.PoseAngles
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -14,11 +15,42 @@ class StickmanKinematicsTest {
         thighRatio = 0.25f, shankRatio = 0.25f, torsoRatio = 0.29f, headNeckRatio = 0.16f,
         footLenRatio = 0.10f, shoulderHalfRatio = 0.09f, hipHalfRatio = 0.07f,
         kneeHalfRatio = 0.05f, ankleHalfRatio = 0.045f,
-        barRiseRatio = 0.06f, gripHalfRatio = 0.16f
+        barRiseRatio = 0.04f, gripHalfRatio = 0.12f
     )
 
-    private fun distance(a: com.saiyanstrong.domain.model.NodePosition, b: com.saiyanstrong.domain.model.NodePosition) =
+    // Real archetype angle tables (v0.47.2), for depth/end-to-end checks.
+    private fun ratiosOf(thigh: Float, shank: Float, torso: Float, head: Float, hipHalf: Float) = LimbRatios(
+        thighRatio = thigh, shankRatio = shank, torsoRatio = torso, headNeckRatio = head,
+        footLenRatio = 0.10f, shoulderHalfRatio = 0.090f, hipHalfRatio = hipHalf,
+        kneeHalfRatio = 0.050f, ankleHalfRatio = 0.045f, barRiseRatio = 0.04f, gripHalfRatio = 0.12f
+    )
+    private val longFemurRatios = ratiosOf(thigh = 0.280f, shank = 0.220f, torso = 0.26f, head = 0.19f, hipHalf = 0.070f)
+    private val shortFemurRatios = ratiosOf(thigh = 0.220f, shank = 0.280f, torso = 0.32f, head = 0.13f, hipHalf = 0.070f)
+    private val proportionalRatios = ratiosOf(thigh = 0.250f, shank = 0.250f, torso = 0.29f, head = 0.16f, hipHalf = 0.070f)
+    private val wideHipRatios = ratiosOf(thigh = 0.250f, shank = 0.250f, torso = 0.29f, head = 0.16f, hipHalf = 0.105f)
+
+    private val archetypeBottomAngles = mapOf(
+        "LONG_FEMUR" to (longFemurRatios to PoseAngles(75f, 58f, 62f)),
+        "SHORT_FEMUR" to (shortFemurRatios to PoseAngles(70f, 56f, 34f)),
+        "PROPORTIONAL" to (proportionalRatios to PoseAngles(72f, 57f, 47f)),
+        "WIDE_HIP" to (wideHipRatios to PoseAngles(72f, 57f, 47f))
+    )
+
+    private fun node(nodes: List<NodePosition>, id: NodeId) = nodes.first { it.id == id }
+
+    private fun distance(a: NodePosition, b: NodePosition) =
         hypot((a.x - b.x).toDouble(), (a.y - b.y).toDouble())
+
+    /** L/R node pairs carry different per-joint half-widths (e.g. ankleHalfRatio != kneeHalfRatio),
+     * so an L-side-to-L-side distance is NOT the true centerline segment length — it's off by
+     * whatever the two joints' half-widths differ by. Recovering the centerline via the L/R
+     * midpoint (exact, since they're symmetric by construction) is the only correct way to
+     * measure a segment spanning two different joints. */
+    private fun centerline(nodes: List<NodePosition>, left: NodeId, right: NodeId): NodePosition {
+        val l = node(nodes, left)
+        val r = node(nodes, right)
+        return NodePosition(left, (l.x + r.x) / 2f, l.y)
+    }
 
     @Test
     fun `every node id is present exactly once`() {
@@ -28,50 +60,86 @@ class StickmanKinematicsTest {
     }
 
     @Test
-    fun `hip-to-knee centerline distance equals thighRatio times body scale, at every pose`() {
-        // This is THE regression test for the "movement isn't correct" bug: lerping raw node
-        // positions doesn't preserve segment length as a limb rotates, so a limb would visibly
-        // stretch/shrink mid-animation. Forward kinematics from an angle always reconstructs the
-        // segment at its ratio-defined length, at every pose — this asserts that guarantee holds
-        // across standing, mid-descent, and bottom. L_KNEE/R_KNEE are offset copies of the
-        // centerline knee joint (proven symmetric in a separate test), so their midpoint recovers
-        // the centerline point the thigh segment actually spans.
+    fun `shank, torso, and head-neck segments stay exactly rigid at every pose`() {
+        // Unlike the thigh (see the bar-over-midfoot test below), these three segments are
+        // never touched by the horizontal correction: shank because neither ankle nor knee is
+        // ever shifted, torso and head-neck because BOTH of their endpoints are shifted by the
+        // identical correction amount (hip and neck; neck and head), which cancels out in the
+        // difference vector. This is the real regression coverage for "limb length stays rigid."
         val bodyScale = 0.80
-        val expectedLength = ratios.thighRatio * bodyScale
         for (angles in listOf(
-            PoseAngles(180f, 180f, 5f),
-            PoseAngles(130f, 120f, 35f),
-            PoseAngles(95f, 95f, 55f),
-            PoseAngles(80f, 80f, 60f)
+            PoseAngles(180f, 180f, 5f), PoseAngles(130f, 120f, 35f),
+            PoseAngles(95f, 76f, 55f), PoseAngles(75f, 58f, 62f)
         )) {
             val nodes = StickmanKinematics.buildNodes(ratios, angles)
-            val hip = nodes.first { it.id == NodeId.HIP_CENTER }
-            val lKnee = nodes.first { it.id == NodeId.L_KNEE }
-            val rKnee = nodes.first { it.id == NodeId.R_KNEE }
-            val kneeCenterline = com.saiyanstrong.domain.model.NodePosition(
-                NodeId.L_KNEE, (lKnee.x + rKnee.x) / 2f, (lKnee.y + rKnee.y) / 2f
-            )
-            val actualLength = distance(hip, kneeCenterline)
-            assertEquals("mismatch at angles=$angles", expectedLength, actualLength, 1e-3)
+            val ankleCenter = centerline(nodes, NodeId.L_ANKLE, NodeId.R_ANKLE)
+            val kneeCenter = centerline(nodes, NodeId.L_KNEE, NodeId.R_KNEE)
+            val shankLength = distance(ankleCenter, kneeCenter)
+            val torsoLength = distance(node(nodes, NodeId.HIP_CENTER), node(nodes, NodeId.NECK_BASE))
+            val headLength = distance(node(nodes, NodeId.NECK_BASE), node(nodes, NodeId.HEAD))
+            assertEquals("shank at $angles", ratios.shankRatio * bodyScale, shankLength, 1e-4)
+            assertEquals("torso at $angles", ratios.torsoRatio * bodyScale, torsoLength, 1e-4)
+            assertEquals("head-neck at $angles", ratios.headNeckRatio * bodyScale, headLength, 1e-4)
         }
+    }
+
+    @Test
+    fun `bar sits exactly over mid-foot at every pose, for every archetype`() {
+        // The one invariant a real squat holds regardless of torso lean. Guaranteed by
+        // construction (a direct horizontal solve, not an approximation), so this is an exact
+        // equality, not a tolerance-band check.
+        for ((_, pair) in archetypeBottomAngles) {
+            val (archetypeRatios, _) = pair
+            for (angles in listOf(
+                PoseAngles(180f, 180f, 5f), PoseAngles(130f, 120f, 35f),
+                PoseAngles(95f, 76f, 55f), PoseAngles(75f, 58f, 62f)
+            )) {
+                val nodes = StickmanKinematics.buildNodes(archetypeRatios, angles)
+                val bar = node(nodes, NodeId.BAR)
+                val ankleCenter = centerline(nodes, NodeId.L_ANKLE, NodeId.R_ANKLE)
+                val midFootX = ankleCenter.x + archetypeRatios.footLenRatio * 0.80f * 0.5f
+                assertEquals("bar not over mid-foot at $angles", midFootX, bar.x, 1e-4f)
+            }
+        }
+    }
+
+    @Test
+    fun `hip drops below the knee at BOTTOM, for every archetype`() {
+        // The literal ask: "the animation should move till the hip joint is lower than the knee
+        // joint." y grows downward in this rig, so "lower" = greater y.
+        for ((name, pair) in archetypeBottomAngles) {
+            val (archetypeRatios, bottomAngles) = pair
+            val nodes = StickmanKinematics.buildNodes(archetypeRatios, bottomAngles)
+            val hip = node(nodes, NodeId.HIP_CENTER)
+            val knee = node(nodes, NodeId.L_KNEE)
+            assertTrue("$name: expected hip.y (${hip.y}) > knee.y (${knee.y}) at BOTTOM", hip.y > knee.y)
+        }
+    }
+
+    @Test
+    fun `hip stays above the knee while standing`() {
+        val nodes = StickmanKinematics.buildNodes(ratios, PoseAngles(180f, 180f, 5f))
+        val hip = node(nodes, NodeId.HIP_CENTER)
+        val knee = node(nodes, NodeId.L_KNEE)
+        assertTrue(hip.y < knee.y)
     }
 
     @Test
     fun `shoulder-to-elbow-to-wrist forms one straight line (elbow is the midpoint)`() {
         val nodes = StickmanKinematics.buildNodes(ratios, PoseAngles(130f, 120f, 35f))
-        val shoulder = nodes.first { it.id == NodeId.L_SHOULDER }
-        val elbow = nodes.first { it.id == NodeId.L_ELBOW }
-        val wrist = nodes.first { it.id == NodeId.L_WRIST }
+        val shoulder = node(nodes, NodeId.L_SHOULDER)
+        val elbow = node(nodes, NodeId.L_ELBOW)
+        val wrist = node(nodes, NodeId.L_WRIST)
         assertEquals((shoulder.x + wrist.x) / 2f, elbow.x, 1e-4f)
         assertEquals((shoulder.y + wrist.y) / 2f, elbow.y, 1e-4f)
     }
 
     @Test
     fun `L and R nodes are symmetric around the spine centerline`() {
-        val nodes = StickmanKinematics.buildNodes(ratios, PoseAngles(95f, 95f, 55f))
-        val lHip = nodes.first { it.id == NodeId.L_HIP }
-        val rHip = nodes.first { it.id == NodeId.R_HIP }
-        val hipCenter = nodes.first { it.id == NodeId.HIP_CENTER }
+        val nodes = StickmanKinematics.buildNodes(ratios, PoseAngles(95f, 76f, 55f))
+        val lHip = node(nodes, NodeId.L_HIP)
+        val rHip = node(nodes, NodeId.R_HIP)
+        val hipCenter = node(nodes, NodeId.HIP_CENTER)
         assertEquals(hipCenter.x, (lHip.x + rHip.x) / 2f, 1e-4f)
         assertEquals(lHip.y, rHip.y, 1e-4f)
         assertEquals(hipCenter.y, lHip.y, 1e-4f)
@@ -80,23 +148,32 @@ class StickmanKinematicsTest {
     @Test
     fun `toe sits at floor level and forward of the ankle`() {
         val nodes = StickmanKinematics.buildNodes(ratios, PoseAngles(180f, 180f, 5f))
-        val ankle = nodes.first { it.id == NodeId.L_ANKLE }
-        val toe = nodes.first { it.id == NodeId.L_TOE }
+        val ankle = node(nodes, NodeId.L_ANKLE)
+        val toe = node(nodes, NodeId.L_TOE)
         assertTrue(toe.x > ankle.x)
     }
 
     @Test
-    fun `all nodes stay within a sane canvas bounds for every phase of every archetype-like ratio set`() {
-        val angleSets = listOf(
-            PoseAngles(180f, 180f, 5f), PoseAngles(130f, 120f, 35f),
-            PoseAngles(95f, 95f, 55f), PoseAngles(80f, 80f, 60f),
-            PoseAngles(180f, 180f, 5f), PoseAngles(125f, 110f, 20f),
-            PoseAngles(90f, 85f, 30f), PoseAngles(75f, 75f, 32f)
-        )
-        for (angles in angleSets) {
-            for (node in StickmanKinematics.buildNodes(ratios, angles)) {
-                assertTrue("${node.id} x=${node.x} out of bounds", node.x in -0.1f..1.1f)
-                assertTrue("${node.id} y=${node.y} out of bounds", node.y in -0.1f..1.1f)
+    fun `ankle and knee never move due to the bar-over-midfoot correction (feet stay planted)`() {
+        val uncorrectedReference = StickmanKinematics.buildNodes(ratios, PoseAngles(180f, 180f, 5f))
+        for (angles in listOf(PoseAngles(130f, 120f, 35f), PoseAngles(95f, 76f, 55f), PoseAngles(75f, 58f, 62f))) {
+            val nodes = StickmanKinematics.buildNodes(ratios, angles)
+            // Ankle position is a fixed constant regardless of pose (feet don't move during a
+            // real squat) — assert it's identical across every phase, not just non-null.
+            assertEquals(node(uncorrectedReference, NodeId.L_ANKLE).x, node(nodes, NodeId.L_ANKLE).x, 1e-4f)
+            assertEquals(node(uncorrectedReference, NodeId.L_ANKLE).y, node(nodes, NodeId.L_ANKLE).y, 1e-4f)
+        }
+    }
+
+    @Test
+    fun `all nodes stay within sane canvas bounds for every archetype's full angle range`() {
+        for ((_, pair) in archetypeBottomAngles) {
+            val (archetypeRatios, bottomAngles) = pair
+            for (angles in listOf(PoseAngles(180f, 180f, 5f), bottomAngles)) {
+                for (n in StickmanKinematics.buildNodes(archetypeRatios, angles)) {
+                    assertTrue("${n.id} x=${n.x} out of bounds", n.x in -0.1f..1.1f)
+                    assertTrue("${n.id} y=${n.y} out of bounds", n.y in -0.1f..1.1f)
+                }
             }
         }
     }

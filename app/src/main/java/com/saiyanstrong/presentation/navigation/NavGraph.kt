@@ -30,6 +30,7 @@ import com.saiyanstrong.presentation.screens.barpath.BarPathCaptureScreen
 import com.saiyanstrong.presentation.screens.biomechanics.ArchetypeSelectionScreen
 import com.saiyanstrong.presentation.screens.biomechanics.BiomechanicsCompareScreen
 import com.saiyanstrong.presentation.screens.biomechanics.BiomechanicsVisualizerScreen
+import com.saiyanstrong.presentation.screens.biomechanics.CustomProportionsScreen
 import com.saiyanstrong.presentation.screens.biomechanics.LiftSelectorScreen
 import com.saiyanstrong.domain.model.Archetype
 import com.saiyanstrong.domain.model.LiftType
@@ -80,7 +81,8 @@ fun NavGraph() {
             !currentRoute.startsWith("bar_path_capture") &&
             !currentRoute.startsWith("biomechanics_lift") &&
             !currentRoute.startsWith("biomechanics_visualizer") &&
-            !currentRoute.startsWith("biomechanics_compare")
+            !currentRoute.startsWith("biomechanics_compare") &&
+            !currentRoute.startsWith("biomechanics_custom")
 
     Scaffold(
         bottomBar = {
@@ -260,12 +262,33 @@ fun NavGraph() {
             composable(Screen.BiomechanicsSelection.route) {
                 ArchetypeSelectionScreen(
                     onArchetypeChosen = { archetype ->
-                        navController.navigate(Screen.BiomechanicsLiftSelector.createRoute(archetype.name))
+                        if (archetype == Archetype.CUSTOM) {
+                            navController.navigate(Screen.CustomProportions.route)
+                        } else {
+                            navController.navigate(Screen.BiomechanicsLiftSelector.createRoute(archetype.name))
+                        }
                     },
                     onCompareAll = {
+                        // "Compare all four" — CUSTOM isn't one of the 4 fixed body types this
+                        // was built to compare, so it's excluded here even though it's a 5th
+                        // Archetype.entries value.
+                        val fixedArchetypes = Archetype.entries.filter { it != Archetype.CUSTOM }.map { it.name }
                         navController.navigate(
-                            Screen.BiomechanicsCompare.createRoute(Archetype.entries.map { it.name }, LiftType.SQUAT.name)
+                            Screen.BiomechanicsCompare.createRoute(fixedArchetypes, LiftType.SQUAT.name)
                         )
+                    }
+                )
+            }
+
+            composable(Screen.CustomProportions.route) {
+                CustomProportionsScreen(
+                    onBack = { navController.popBackStack() },
+                    onSaved = {
+                        navController.navigate(
+                            Screen.BiomechanicsVisualizer.createRoute(Archetype.CUSTOM.name, LiftType.SQUAT.name)
+                        ) {
+                            popUpTo(Screen.BiomechanicsSelection.route)
+                        }
                     }
                 )
             }

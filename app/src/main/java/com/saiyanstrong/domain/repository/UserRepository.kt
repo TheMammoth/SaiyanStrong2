@@ -2,6 +2,7 @@ package com.saiyanstrong.domain.repository
 
 import com.saiyanstrong.domain.model.Archetype
 import com.saiyanstrong.domain.model.BodyWeightLog
+import com.saiyanstrong.domain.model.LimbRatios
 import kotlinx.coroutines.flow.Flow
 
 interface UserRepository {
@@ -38,4 +39,9 @@ interface UserRepository {
 
     fun getBiomechanicsDisclaimerShown(): Flow<Boolean>
     suspend fun setBiomechanicsDisclaimerShown(shown: Boolean)
+
+    /** Defaults to PROPORTIONAL's ratios (a sensible starting point for the sliders) until the
+     * user saves their own. */
+    fun getCustomLimbRatios(): Flow<LimbRatios>
+    suspend fun setCustomLimbRatios(ratios: LimbRatios)
 }

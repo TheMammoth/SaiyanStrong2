@@ -5,17 +5,30 @@ import com.saiyanstrong.data.local.dao.BodyWeightDao
 import com.saiyanstrong.data.local.entity.BodyWeightEntity
 import com.saiyanstrong.domain.model.Archetype
 import com.saiyanstrong.domain.model.BodyWeightLog
+import com.saiyanstrong.domain.model.LimbRatios
 import com.saiyanstrong.domain.repository.UserRepository
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import kotlinx.serialization.json.Json
 import javax.inject.Inject
 import javax.inject.Singleton
+
+/** Matches archetypes.json's PROPORTIONAL entry — the sensible starting point for the Custom
+ * sliders before the user has ever saved their own. Small, deliberate duplication of that JSON
+ * entry's numbers rather than a cross-repository dependency on BiomechanicsRepository. */
+private val DEFAULT_CUSTOM_RATIOS = LimbRatios(
+    thighRatio = 0.250f, shankRatio = 0.250f, torsoRatio = 0.29f, headNeckRatio = 0.16f,
+    footLenRatio = 0.10f, shoulderHalfRatio = 0.090f, hipHalfRatio = 0.070f,
+    kneeHalfRatio = 0.050f, ankleHalfRatio = 0.045f, barRiseRatio = 0.04f, gripHalfRatio = 0.12f
+)
 
 @Singleton
 class UserRepositoryImpl @Inject constructor(
     private val userPreferencesDataStore: UserPreferencesDataStore,
     private val bodyWeightDao: BodyWeightDao
 ) : UserRepository {
+
+    private val json = Json { ignoreUnknownKeys = true }
 
     override fun getLifetimePowerEarned(): Flow<Int> =
         userPreferencesDataStore.lifetimePowerEarned
@@ -102,5 +115,15 @@ class UserRepositoryImpl @Inject constructor(
 
     override suspend fun setBiomechanicsDisclaimerShown(shown: Boolean) {
         userPreferencesDataStore.setBiomechanicsDisclaimerShown(shown)
+    }
+
+    override fun getCustomLimbRatios(): Flow<LimbRatios> =
+        userPreferencesDataStore.customLimbRatiosJson.map { rawJson ->
+            rawJson?.let { runCatching { json.decodeFromString<LimbRatios>(it) }.getOrNull() }
+                ?: DEFAULT_CUSTOM_RATIOS
+        }
+
+    override suspend fun setCustomLimbRatios(ratios: LimbRatios) {
+        userPreferencesDataStore.setCustomLimbRatiosJson(json.encodeToString(ratios))
     }
 }

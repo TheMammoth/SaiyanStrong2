@@ -18,5 +18,10 @@
     "archetype": "WIDE_HIP",
     "name": "Wide Hip",
     "description": "Wider hip relative to shoulders"
+  },
+  {
+    "archetype": "CUSTOM",
+    "name": "Custom",
+    "description": "Set your own exact proportions"
   }
 ]

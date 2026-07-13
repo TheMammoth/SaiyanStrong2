@@ -77,22 +77,40 @@ class StickmanInterpolatorTest {
     // --- end-to-end: interpolate() feeds angles through kinematics ---
 
     @Test
-    fun `interpolate produces nodes with hip-to-knee length rigid at every progress step`() {
+    fun `interpolate produces nodes with shank length rigid at every progress step`() {
+        // The shank (ankle-to-knee) is never touched by the bar-over-midfoot correction (see
+        // StickmanKinematics' KDoc — only the thigh trades off exact rigidity for that fix), so
+        // this is the segment that should still be provably constant-length across the whole
+        // scrub, matching the v0.47.1 regression test's spirit.
         val bodyScale = 0.80
-        val expectedLength = ratios.thighRatio * bodyScale
+        val expectedLength = ratios.shankRatio * bodyScale
         for (step in 0..10) {
             val progress = step / 10f
             val nodes = StickmanInterpolator.interpolate(keyframes, ratios, progress)
-            val hip = nodes.first { it.id == NodeId.HIP_CENTER }
-            val lKnee = nodes.first { it.id == NodeId.L_KNEE }
-            val rKnee = nodes.first { it.id == NodeId.R_KNEE }
-            val kneeCenterX = (lKnee.x + rKnee.x) / 2f
-            val kneeCenterY = (lKnee.y + rKnee.y) / 2f
-            val actualLength = hypot((hip.x - kneeCenterX).toDouble(), (hip.y - kneeCenterY).toDouble())
+            val ankle = nodes.first { it.id == NodeId.L_ANKLE }
+            val knee = nodes.first { it.id == NodeId.L_KNEE }
+            val actualLength = hypot((ankle.x - knee.x).toDouble(), (ankle.y - knee.y).toDouble())
             assertTrue(
-                "thigh length drifted at progress=$progress: expected ~$expectedLength, got $actualLength",
+                "shank length drifted at progress=$progress: expected ~$expectedLength, got $actualLength",
                 Math.abs(actualLength - expectedLength) < 1e-3
             )
+        }
+    }
+
+    @Test
+    fun `interpolate keeps the bar over mid-foot at every progress step`() {
+        for (step in 0..10) {
+            val progress = step / 10f
+            val nodes = StickmanInterpolator.interpolate(keyframes, ratios, progress)
+            val bar = nodes.first { it.id == NodeId.BAR }
+            // L_ANKLE/R_ANKLE carry a symmetric x half-width offset from the true centerline —
+            // recover the centerline via their midpoint (exact by construction) rather than
+            // reading L_ANKLE.x directly, which would be off by ankleHalfRatio.
+            val lAnkle = nodes.first { it.id == NodeId.L_ANKLE }
+            val rAnkle = nodes.first { it.id == NodeId.R_ANKLE }
+            val ankleCenterX = (lAnkle.x + rAnkle.x) / 2f
+            val midFootX = ankleCenterX + ratios.footLenRatio * 0.80f * 0.5f
+            assertEquals("bar drifted off mid-foot at progress=$progress", midFootX, bar.x, 1e-4f)
         }
     }
 

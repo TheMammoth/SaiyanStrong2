@@ -10,8 +10,8 @@
     "keyframes": [
       { "phase": "STANDING",    "angles": { "hipAngleDeg": 180, "kneeAngleDeg": 180, "torsoAngleDeg": 5 } },
       { "phase": "DESCENT_MID", "angles": { "hipAngleDeg": 130, "kneeAngleDeg": 120, "torsoAngleDeg": 35 } },
-      { "phase": "PARALLEL",    "angles": { "hipAngleDeg": 95,  "kneeAngleDeg": 95,  "torsoAngleDeg": 55 } },
-      { "phase": "BOTTOM",      "angles": { "hipAngleDeg": 80,  "kneeAngleDeg": 80,  "torsoAngleDeg": 60 } }
+      { "phase": "PARALLEL",    "angles": { "hipAngleDeg": 100, "kneeAngleDeg": 76,  "torsoAngleDeg": 55 } },
+      { "phase": "BOTTOM",      "angles": { "hipAngleDeg": 75,  "kneeAngleDeg": 58,  "torsoAngleDeg": 62 } }
     ],
     "mechanicalFacts": [
       "Forward torso lean is greater than standard. This is structurally necessary, not a form error.",
@@ -32,8 +32,8 @@
     "keyframes": [
       { "phase": "STANDING",    "angles": { "hipAngleDeg": 180, "kneeAngleDeg": 180, "torsoAngleDeg": 5 } },
       { "phase": "DESCENT_MID", "angles": { "hipAngleDeg": 125, "kneeAngleDeg": 110, "torsoAngleDeg": 20 } },
-      { "phase": "PARALLEL",    "angles": { "hipAngleDeg": 90,  "kneeAngleDeg": 85,  "torsoAngleDeg": 30 } },
-      { "phase": "BOTTOM",      "angles": { "hipAngleDeg": 75,  "kneeAngleDeg": 75,  "torsoAngleDeg": 32 } }
+      { "phase": "PARALLEL",    "angles": { "hipAngleDeg": 95,  "kneeAngleDeg": 76,  "torsoAngleDeg": 30 } },
+      { "phase": "BOTTOM",      "angles": { "hipAngleDeg": 70,  "kneeAngleDeg": 56,  "torsoAngleDeg": 34 } }
     ],
     "mechanicalFacts": [
       "Torso stays closer to upright through the descent — short femurs need less forward lean to keep the bar over mid-foot.",
@@ -54,8 +54,8 @@
     "keyframes": [
       { "phase": "STANDING",    "angles": { "hipAngleDeg": 180, "kneeAngleDeg": 180, "torsoAngleDeg": 5 } },
       { "phase": "DESCENT_MID", "angles": { "hipAngleDeg": 128, "kneeAngleDeg": 115, "torsoAngleDeg": 27 } },
-      { "phase": "PARALLEL",    "angles": { "hipAngleDeg": 92,  "kneeAngleDeg": 90,  "torsoAngleDeg": 42 } },
-      { "phase": "BOTTOM",      "angles": { "hipAngleDeg": 78,  "kneeAngleDeg": 78,  "torsoAngleDeg": 45 } }
+      { "phase": "PARALLEL",    "angles": { "hipAngleDeg": 98,  "kneeAngleDeg": 76,  "torsoAngleDeg": 42 } },
+      { "phase": "BOTTOM",      "angles": { "hipAngleDeg": 72,  "kneeAngleDeg": 57,  "torsoAngleDeg": 47 } }
     ],
     "mechanicalFacts": [
       "Torso lean sits between the long- and short-femur extremes — a moderate forward angle keeps the bar over mid-foot.",
@@ -76,8 +76,8 @@
     "keyframes": [
       { "phase": "STANDING",    "angles": { "hipAngleDeg": 180, "kneeAngleDeg": 180, "torsoAngleDeg": 5 } },
       { "phase": "DESCENT_MID", "angles": { "hipAngleDeg": 128, "kneeAngleDeg": 115, "torsoAngleDeg": 27 } },
-      { "phase": "PARALLEL",    "angles": { "hipAngleDeg": 92,  "kneeAngleDeg": 90,  "torsoAngleDeg": 42 } },
-      { "phase": "BOTTOM",      "angles": { "hipAngleDeg": 78,  "kneeAngleDeg": 78,  "torsoAngleDeg": 45 } }
+      { "phase": "PARALLEL",    "angles": { "hipAngleDeg": 98,  "kneeAngleDeg": 76,  "torsoAngleDeg": 42 } },
+      { "phase": "BOTTOM",      "angles": { "hipAngleDeg": 72,  "kneeAngleDeg": 57,  "torsoAngleDeg": 47 } }
     ],
     "mechanicalFacts": [
       "A wider hip relative to shoulder width changes how the knees track outward through the descent.",

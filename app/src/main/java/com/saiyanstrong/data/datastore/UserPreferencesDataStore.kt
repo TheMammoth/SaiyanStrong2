@@ -27,6 +27,7 @@ private val BAR_PATH_TIPS_DISMISSED         = booleanPreferencesKey("bar_path_ti
 private val HIGH_SPEED_MODE_ENABLED         = booleanPreferencesKey("high_speed_mode_enabled")
 private val SELECTED_ARCHETYPE              = stringPreferencesKey("selected_archetype")
 private val BIOMECHANICS_DISCLAIMER_SHOWN   = booleanPreferencesKey("biomechanics_disclaimer_shown")
+private val CUSTOM_LIMB_RATIOS_JSON         = stringPreferencesKey("custom_limb_ratios_json")
 
 @Singleton
 class UserPreferencesDataStore @Inject constructor(
@@ -142,6 +143,17 @@ class UserPreferencesDataStore @Inject constructor(
     suspend fun setBiomechanicsDisclaimerShown(shown: Boolean) {
         context.userPreferencesDataStore.edit { preferences ->
             preferences[BIOMECHANICS_DISCLAIMER_SHOWN] = shown
+        }
+    }
+
+    /** Raw JSON text (or null if the user has never saved custom proportions) — encode/decode
+     * into a real LimbRatios happens in UserRepositoryImpl, keeping this file domain-free. */
+    val customLimbRatiosJson: Flow<String?> = context.userPreferencesDataStore.data
+        .map { preferences -> preferences[CUSTOM_LIMB_RATIOS_JSON] }
+
+    suspend fun setCustomLimbRatiosJson(json: String) {
+        context.userPreferencesDataStore.edit { preferences ->
+            preferences[CUSTOM_LIMB_RATIOS_JSON] = json
         }
     }
 }

@@ -35,6 +35,7 @@ sealed class Screen(val route: String) {
     }
 
     data object BiomechanicsSelection : Screen("biomechanics")
+    data object CustomProportions : Screen("biomechanics_custom")
     data object BiomechanicsLiftSelector : Screen("biomechanics_lift/{archetype}") {
         fun createRoute(archetype: String) = "biomechanics_lift/$archetype"
     }
