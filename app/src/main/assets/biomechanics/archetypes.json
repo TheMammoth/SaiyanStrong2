@@ -1,0 +1,22 @@
+[
+  {
+    "archetype": "LONG_FEMUR",
+    "name": "Long Femur",
+    "description": "Long legs, shorter torso"
+  },
+  {
+    "archetype": "SHORT_FEMUR",
+    "name": "Short Femur",
+    "description": "Compact legs, longer torso"
+  },
+  {
+    "archetype": "PROPORTIONAL",
+    "name": "Proportional",
+    "description": "Balanced proportions"
+  },
+  {
+    "archetype": "WIDE_HIP",
+    "name": "Wide Hip",
+    "description": "Wider hip relative to shoulders"
+  }
+]

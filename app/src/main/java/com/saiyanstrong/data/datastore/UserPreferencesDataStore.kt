@@ -25,6 +25,8 @@ private val ONBOARDING_COMPLETE             = booleanPreferencesKey("onboarding_
 private val REST_TIMER_SOUNDS_ENABLED       = booleanPreferencesKey("rest_timer_sounds_enabled")
 private val BAR_PATH_TIPS_DISMISSED         = booleanPreferencesKey("bar_path_tips_dismissed")
 private val HIGH_SPEED_MODE_ENABLED         = booleanPreferencesKey("high_speed_mode_enabled")
+private val SELECTED_ARCHETYPE              = stringPreferencesKey("selected_archetype")
+private val BIOMECHANICS_DISCLAIMER_SHOWN   = booleanPreferencesKey("biomechanics_disclaimer_shown")
 
 @Singleton
 class UserPreferencesDataStore @Inject constructor(
@@ -120,6 +122,26 @@ class UserPreferencesDataStore @Inject constructor(
     suspend fun setHighSpeedModeEnabled(enabled: Boolean) {
         context.userPreferencesDataStore.edit { preferences ->
             preferences[HIGH_SPEED_MODE_ENABLED] = enabled
+        }
+    }
+
+    /** Stored as the enum's name (not the enum itself, matching this file's domain-free style) —
+     * "PROPORTIONAL" default per spec section 12 Prompt 4. Caller converts via Archetype.valueOf(). */
+    val selectedArchetypeName: Flow<String> = context.userPreferencesDataStore.data
+        .map { preferences -> preferences[SELECTED_ARCHETYPE] ?: "PROPORTIONAL" }
+
+    suspend fun setSelectedArchetypeName(name: String) {
+        context.userPreferencesDataStore.edit { preferences ->
+            preferences[SELECTED_ARCHETYPE] = name
+        }
+    }
+
+    val biomechanicsDisclaimerShown: Flow<Boolean> = context.userPreferencesDataStore.data
+        .map { preferences -> preferences[BIOMECHANICS_DISCLAIMER_SHOWN] ?: false }
+
+    suspend fun setBiomechanicsDisclaimerShown(shown: Boolean) {
+        context.userPreferencesDataStore.edit { preferences ->
+            preferences[BIOMECHANICS_DISCLAIMER_SHOWN] = shown
         }
     }
 }

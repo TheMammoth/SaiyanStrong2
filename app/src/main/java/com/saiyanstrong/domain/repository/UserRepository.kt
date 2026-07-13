@@ -1,5 +1,6 @@
 package com.saiyanstrong.domain.repository
 
+import com.saiyanstrong.domain.model.Archetype
 import com.saiyanstrong.domain.model.BodyWeightLog
 import kotlinx.coroutines.flow.Flow
 
@@ -31,4 +32,10 @@ interface UserRepository {
     /** Null = user hasn't explicitly chosen — caller defaults to "on if the device supports it." */
     fun getHighSpeedModeEnabled(): Flow<Boolean?>
     suspend fun setHighSpeedModeEnabled(enabled: Boolean)
+
+    fun getSelectedArchetype(): Flow<Archetype>
+    suspend fun setSelectedArchetype(archetype: Archetype)
+
+    fun getBiomechanicsDisclaimerShown(): Flow<Boolean>
+    suspend fun setBiomechanicsDisclaimerShown(shown: Boolean)
 }

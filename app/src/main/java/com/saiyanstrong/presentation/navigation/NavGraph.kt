@@ -1,6 +1,7 @@
 package com.saiyanstrong.presentation.navigation
 
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Accessibility
 import androidx.compose.material.icons.filled.FitnessCenter
 import androidx.compose.material.icons.filled.FormatListBulleted
 import androidx.compose.material.icons.filled.History
@@ -26,6 +27,12 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.saiyanstrong.presentation.screens.barpath.BarPathCaptureScreen
+import com.saiyanstrong.presentation.screens.biomechanics.ArchetypeSelectionScreen
+import com.saiyanstrong.presentation.screens.biomechanics.BiomechanicsCompareScreen
+import com.saiyanstrong.presentation.screens.biomechanics.BiomechanicsVisualizerScreen
+import com.saiyanstrong.presentation.screens.biomechanics.LiftSelectorScreen
+import com.saiyanstrong.domain.model.Archetype
+import com.saiyanstrong.domain.model.LiftType
 import com.saiyanstrong.presentation.screens.coach.AthleteDetailScreen
 import com.saiyanstrong.presentation.screens.coach.CoachDashboardScreen
 import com.saiyanstrong.presentation.screens.coach.CoachSettingsScreen
@@ -52,6 +59,7 @@ private val TABS = listOf(
     BottomTab(Screen.History.route,   "History",   Icons.Default.History),
     BottomTab(Screen.WorkoutLanding.route, "Workout", Icons.Default.FitnessCenter),
     BottomTab(Screen.Exercises.route, "Exercises", Icons.Default.FormatListBulleted),
+    BottomTab(Screen.BiomechanicsSelection.route, "Body", Icons.Default.Accessibility),
     BottomTab(Screen.Settings.route,  "Settings",  Icons.Default.Settings)
 )
 
@@ -69,7 +77,10 @@ fun NavGraph() {
     val showBottomBar = currentRoute != Screen.ActiveWorkout.route &&
             currentRoute != Screen.Onboarding.route &&
             !currentRoute.startsWith("session_complete") &&
-            !currentRoute.startsWith("bar_path_capture")
+            !currentRoute.startsWith("bar_path_capture") &&
+            !currentRoute.startsWith("biomechanics_lift") &&
+            !currentRoute.startsWith("biomechanics_visualizer") &&
+            !currentRoute.startsWith("biomechanics_compare")
 
     Scaffold(
         bottomBar = {
@@ -244,6 +255,64 @@ fun NavGraph() {
                 arguments = listOf(navArgument("athleteId") { type = NavType.StringType })
             ) {
                 AthleteDetailScreen(onBack = { navController.popBackStack() })
+            }
+
+            composable(Screen.BiomechanicsSelection.route) {
+                ArchetypeSelectionScreen(
+                    onArchetypeChosen = { archetype ->
+                        navController.navigate(Screen.BiomechanicsLiftSelector.createRoute(archetype.name))
+                    },
+                    onCompareAll = {
+                        navController.navigate(
+                            Screen.BiomechanicsCompare.createRoute(Archetype.entries.map { it.name }, LiftType.SQUAT.name)
+                        )
+                    }
+                )
+            }
+
+            composable(
+                route = Screen.BiomechanicsLiftSelector.route,
+                arguments = listOf(navArgument("archetype") { type = NavType.StringType })
+            ) { backStackEntry ->
+                val archetype = Archetype.valueOf(backStackEntry.arguments?.getString("archetype") ?: Archetype.PROPORTIONAL.name)
+                LiftSelectorScreen(
+                    archetype = archetype,
+                    onLiftChosen = { lift ->
+                        navController.navigate(Screen.BiomechanicsVisualizer.createRoute(archetype.name, lift.name))
+                    }
+                )
+            }
+
+            composable(
+                route = Screen.BiomechanicsVisualizer.route,
+                arguments = listOf(
+                    navArgument("archetype") { type = NavType.StringType },
+                    navArgument("lift") { type = NavType.StringType }
+                )
+            ) { backStackEntry ->
+                val archetype = backStackEntry.arguments?.getString("archetype") ?: Archetype.PROPORTIONAL.name
+                val lift = backStackEntry.arguments?.getString("lift") ?: LiftType.SQUAT.name
+                BiomechanicsVisualizerScreen(
+                    onBack = { navController.popBackStack() },
+                    onCompare = {
+                        navController.navigate(
+                            Screen.BiomechanicsCompare.createRoute(
+                                listOf(archetype, Archetype.entries.first { it.name != archetype }.name),
+                                lift
+                            )
+                        )
+                    }
+                )
+            }
+
+            composable(
+                route = Screen.BiomechanicsCompare.route,
+                arguments = listOf(
+                    navArgument("archetypes") { type = NavType.StringType },
+                    navArgument("lift") { type = NavType.StringType }
+                )
+            ) {
+                BiomechanicsCompareScreen(onBack = { navController.popBackStack() })
             }
         }
     }

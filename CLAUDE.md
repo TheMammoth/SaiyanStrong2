@@ -2239,6 +2239,74 @@ _(Claude Code appends here after each completed task)_
   gates the RECORD button on `hasPermission && (isRecording || isCameraBound)`, showing "STARTING
   CAMERA…" in the brief window before bind completes instead of a tappable-but-doomed button.
   versionCode 62, versionName 0.46.1.
+- [x] Sprint — Biomechanics Visualizer Phase 1 (v0.47.0), per `docs/biomechanics-spec.md`: a
+  proportion-aware stickman animator showing how 4 fixed body archetypes (LONG_FEMUR/
+  SHORT_FEMUR/PROPORTIONAL/WIDE_HIP) move differently through a squat. Two real deviations from
+  the spec's literal prompts, flagged before building: (1) Compose-only, not Fragments/custom
+  `View` — `StickmanCanvasView` became a Compose `Canvas` composable ([StickmanCanvas]), with
+  the pure/testable topology (segment groups, draw order, floor-line logic) split into
+  [StickmanRenderer], a genuinely Android-free object, same "pure core + thin Compose wrapper"
+  shape as the VBT work. (2) domain/model, domain/repository, domain/usecase are FLAT in this
+  project (confirmed via directory listing, not the spec's suggested nested
+  `domain/biomechanics/`) — followed the established convention instead.
+  (1) **Placeholder geometry**: rather than the spec's literal "all nodes at (0.5,0.5)" (would
+  render nothing recognizable), wrote a one-time forward-kinematics generator
+  (scratchpad `gen_biomechanics.py`, not shipped) converting spec section 7's hand-authored
+  hip/knee/torso angle table into real normalized (x,y) node positions per archetype/phase — a
+  single sagittal spine centerline (ankle→knee→hip→neck→head) with L/R nodes offset
+  symmetrically at each joint height (the standard simplification stylized exercise-form
+  diagrams use for depicting forward lean as a centerline shift). WIDE_HIP has no separate
+  angle table in the spec (defined by hip width, not femur ratio) — reuses PROPORTIONAL's
+  sagittal angles, widened hip half-width only. All 288 node coordinates bounds-checked by the
+  generator before being written to the JSON assets. Explicitly a first pass — user chose
+  "placeholder now, tune after seeing it render" over hand-authoring angles/ratios upfront.
+  (2) **Domain layer**: `Archetype`/`LiftType`/`NodeId`/`NodePosition`/`StickmanKeyframe`/
+  `ArchetypeAnimation`/`ArchetypeInfo` — all `@Serializable` directly (no separate DTO/mapper
+  layer; these are pure value objects loaded once and cached, matching kotlinx.serialization's
+  existing use in `BackupPayload`). Renamed the spec's "LiftPhase" enum to `BiomechanicsPhase`
+  — [com.saiyanstrong.domain.util.LiftPhase] already exists (the VBT rep-timing state machine,
+  IDLE/SETTLING/READY/MOVING/COMPLETE) — a same-simple-name collision that would force an
+  import alias the moment a screen needs both, which Phase 2B (VBT bar-path overlay) explicitly
+  will. `BiomechanicsRepository`/`Impl` mirror `ExerciseMediaRepositoryImpl`'s load-once-
+  Mutex-cache shape, reading from bundled assets (always present, no network/cache-file
+  fallback chain needed) via `kotlinx.serialization.json.Json { ignoreUnknownKeys = true }`
+  (matching `BackupSerializer`'s existing convention). `getAnimation` throws
+  `IllegalStateException` for the (currently unreachable) DEADLIFT case — Phase 1 ships SQUAT
+  only, per the spec's own acceptance criteria; the Lift Selector shows DEADLIFT disabled
+  ("SOON") rather than omitting it.
+  (3) **Persistence**: `UserPreferencesDataStore` gains `selectedArchetypeName` (String, default
+  "PROPORTIONAL") and `biomechanicsDisclaimerShown` (Boolean) — same key/method precedent as
+  every other DataStore-backed preference in this file; `UserRepository`/`Impl` convert
+  String↔`Archetype` at that boundary (invalid/corrupt names fall back to PROPORTIONAL rather
+  than crash).
+  (4) **UI**: `ArchetypeSelectionScreen` (2×2 grid, live standing-pose stickman per card,
+  first-run disclaimer `AlertDialog`, selection persists, "Compare all four →") →
+  `LiftSelectorScreen` → `BiomechanicsVisualizerScreen` (stickman + scrub slider +
+  mechanical-facts/irrelevant-cue/stance-cue cards, "Compare with another build") →
+  `BiomechanicsCompareScreen` (one screen backs both the 2-up and 4-up entry points, grid
+  column count adapts to entry count, one synced slider). `StickmanInterpolator` (new,
+  `domain/util/`) is the pure linear keyframe blend from spec section 12's literal formula —
+  unit-tested including exact segment-boundary landings and out-of-range clamping. Content
+  copy (mechanical facts/stance cue/irrelevant cue) follows spec section 3's mechanical-not-
+  prescriptive language policy throughout; LONG_FEMUR's copy is verbatim from the spec's own
+  Screen 3 mockup, the other 3 archetypes composed analogously.
+  (5) **Nav**: 4 new routes (`biomechanics`, `biomechanics_lift/{archetype}`,
+  `biomechanics_visualizer/{archetype}/{lift}`, `biomechanics_compare/{archetypes}/{lift}` —
+  comma-joined archetype names in one path segment); new 6th bottom-nav tab "Body"
+  (`Icons.Default.Accessibility`) between Exercises and Settings; the 3 non-selection routes
+  hide the bottom bar like `bar_path_capture` already does.
+  (6) **Tests**: `StickmanRendererTest` (segment-pair coverage matches the spec's literal list
+  exactly, draw-order grouping, floor-line placement including the no-foot-node fallback) +
+  `StickmanInterpolatorTest` (7 tests: boundary landings, clamping, single/empty-keyframe
+  edge cases) — both fully pure, no Robolectric needed, following this project's established
+  "pure core, untested Compose shell" split.
+  KNOWN GAPS, explicitly deferred: (a) the placeholder geometry has never been seen rendered on
+  a device or emulator this session — angles/ratios are a defensible first pass per the forward-
+  kinematics model, not a validated one; tune after a real look, per the user's own chosen plan.
+  (b) Deadlift keyframes, the Phase 2A femur-ratio continuous slider, and the Phase 2B VBT
+  bar-path overlay are all out of scope, per spec sections 10-11 — not started. (c) Coach-tier
+  per-athlete archetype assignment (Phase 2C) not started.
+  versionCode 63, versionName 0.47.0.
 
 ## Release rules
 

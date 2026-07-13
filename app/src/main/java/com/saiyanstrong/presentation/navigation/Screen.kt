@@ -33,4 +33,18 @@ sealed class Screen(val route: String) {
         fun createStandaloneRoute(exerciseId: Int) =
             "bar_path_capture?exerciseId=$exerciseId&setLogId=-1&weightKg=-1"
     }
+
+    data object BiomechanicsSelection : Screen("biomechanics")
+    data object BiomechanicsLiftSelector : Screen("biomechanics_lift/{archetype}") {
+        fun createRoute(archetype: String) = "biomechanics_lift/$archetype"
+    }
+    data object BiomechanicsVisualizer : Screen("biomechanics_visualizer/{archetype}/{lift}") {
+        fun createRoute(archetype: String, lift: String) = "biomechanics_visualizer/$archetype/$lift"
+    }
+    data object BiomechanicsCompare : Screen("biomechanics_compare/{archetypes}/{lift}") {
+        /** [archetypes] is a comma-separated enum-name list (2 for the visualizer's "Compare
+         * with another build", 4 for selection's "Compare all four"). */
+        fun createRoute(archetypes: List<String>, lift: String) =
+            "biomechanics_compare/${archetypes.joinToString(",")}/$lift"
+    }
 }

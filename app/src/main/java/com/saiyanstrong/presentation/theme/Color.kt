@@ -8,3 +8,9 @@ val MatteBlack = Color(0xFF0D0D0D)
 val SaiyanGray = Color(0xFF1A1A1A)
 val TelemetryGreen = Color(0xFF00FF41)
 val DangerRed = Color(0xFFFF3B3B)
+
+// Biomechanics visualizer stickman — light grey body reads clearly against the dark theme;
+// the bar/floor tones are deliberately muted so the (amber-highlighted) active joint pops.
+val StickmanBody = Color(0xFFE0E0E0)
+val StickmanBar = Color(0xFF888888)
+val StickmanFloor = Color(0xFF444444)

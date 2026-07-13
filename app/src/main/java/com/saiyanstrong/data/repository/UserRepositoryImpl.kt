@@ -3,6 +3,7 @@ package com.saiyanstrong.data.repository
 import com.saiyanstrong.data.datastore.UserPreferencesDataStore
 import com.saiyanstrong.data.local.dao.BodyWeightDao
 import com.saiyanstrong.data.local.entity.BodyWeightEntity
+import com.saiyanstrong.domain.model.Archetype
 import com.saiyanstrong.domain.model.BodyWeightLog
 import com.saiyanstrong.domain.repository.UserRepository
 import kotlinx.coroutines.flow.Flow
@@ -85,5 +86,21 @@ class UserRepositoryImpl @Inject constructor(
 
     override suspend fun setHighSpeedModeEnabled(enabled: Boolean) {
         userPreferencesDataStore.setHighSpeedModeEnabled(enabled)
+    }
+
+    override fun getSelectedArchetype(): Flow<Archetype> =
+        userPreferencesDataStore.selectedArchetypeName.map { name ->
+            runCatching { Archetype.valueOf(name) }.getOrDefault(Archetype.PROPORTIONAL)
+        }
+
+    override suspend fun setSelectedArchetype(archetype: Archetype) {
+        userPreferencesDataStore.setSelectedArchetypeName(archetype.name)
+    }
+
+    override fun getBiomechanicsDisclaimerShown(): Flow<Boolean> =
+        userPreferencesDataStore.biomechanicsDisclaimerShown
+
+    override suspend fun setBiomechanicsDisclaimerShown(shown: Boolean) {
+        userPreferencesDataStore.setBiomechanicsDisclaimerShown(shown)
     }
 }
