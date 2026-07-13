@@ -24,13 +24,16 @@ class StickmanRendererTest {
     }
 
     @Test
-    fun `limb segment groups cover the exact spec segment pairs, no more no less`() {
+    fun `limb segment groups cover the simplified segment pairs, no wrist-to-BAR stubs`() {
+        // Deliberately simplified from the spec's literal list: arms stop at the wrist, since
+        // StickmanCanvas draws a single dedicated bar line that the wrist already sits on by
+        // construction — a wrist-to-BAR stub would just double-draw part of that line.
         val expectedPairs = setOf(
             NodeId.NECK_BASE to NodeId.HEAD,
             NodeId.NECK_BASE to NodeId.L_SHOULDER, NodeId.NECK_BASE to NodeId.R_SHOULDER,
             NodeId.NECK_BASE to NodeId.HIP_CENTER,
-            NodeId.L_SHOULDER to NodeId.L_ELBOW, NodeId.L_ELBOW to NodeId.L_WRIST, NodeId.L_WRIST to NodeId.BAR,
-            NodeId.R_SHOULDER to NodeId.R_ELBOW, NodeId.R_ELBOW to NodeId.R_WRIST, NodeId.R_WRIST to NodeId.BAR,
+            NodeId.L_SHOULDER to NodeId.L_ELBOW, NodeId.L_ELBOW to NodeId.L_WRIST,
+            NodeId.R_SHOULDER to NodeId.R_ELBOW, NodeId.R_ELBOW to NodeId.R_WRIST,
             NodeId.HIP_CENTER to NodeId.L_HIP, NodeId.HIP_CENTER to NodeId.R_HIP,
             NodeId.L_HIP to NodeId.L_KNEE, NodeId.L_KNEE to NodeId.L_ANKLE, NodeId.L_ANKLE to NodeId.L_TOE,
             NodeId.R_HIP to NodeId.R_KNEE, NodeId.R_KNEE to NodeId.R_ANKLE, NodeId.R_ANKLE to NodeId.R_TOE

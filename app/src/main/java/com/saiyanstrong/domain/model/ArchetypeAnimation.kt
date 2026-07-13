@@ -11,6 +11,7 @@ import kotlinx.serialization.Serializable
 data class ArchetypeAnimation(
     val archetype: Archetype,
     val lift: LiftType,
+    val limbRatios: LimbRatios,
     val keyframes: List<StickmanKeyframe>,
     val mechanicalFacts: List<String>,
     val stanceCue: String,

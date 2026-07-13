@@ -1,7 +1,6 @@
 package com.saiyanstrong.presentation.screens.biomechanics
 
 import com.saiyanstrong.domain.model.NodeId
-import com.saiyanstrong.domain.model.NodeId.BAR
 import com.saiyanstrong.domain.model.NodeId.HEAD
 import com.saiyanstrong.domain.model.NodeId.HIP_CENTER
 import com.saiyanstrong.domain.model.NodeId.L_ANKLE
@@ -31,7 +30,7 @@ import com.saiyanstrong.domain.model.NodePosition
 object StickmanRenderer {
 
     /** Every joint that gets a dot in the final "joint dots (all, on top)" pass. HEAD is drawn
-     * larger (r=12dp vs 8dp) — see [isHeadNode]. BAR is excluded: it's a line, not a joint. */
+     * larger — see [isHeadNode]. BAR is excluded: it's a line, not a joint. */
     val jointDotNodes: List<NodeId> = listOf(
         HEAD, NECK_BASE,
         L_SHOULDER, R_SHOULDER, L_ELBOW, R_ELBOW, L_WRIST, R_WRIST,
@@ -43,8 +42,12 @@ object StickmanRenderer {
     private val rightLegSegments = listOf(HIP_CENTER to R_HIP, R_HIP to R_KNEE, R_KNEE to R_ANKLE, R_ANKLE to R_TOE)
     private val leftLegSegments = listOf(HIP_CENTER to L_HIP, L_HIP to L_KNEE, L_KNEE to L_ANKLE, L_ANKLE to L_TOE)
     private val torsoSegments = listOf(NECK_BASE to HIP_CENTER)
-    private val rightArmSegments = listOf(NECK_BASE to R_SHOULDER, R_SHOULDER to R_ELBOW, R_ELBOW to R_WRIST, R_WRIST to BAR)
-    private val leftArmSegments = listOf(NECK_BASE to L_SHOULDER, L_SHOULDER to L_ELBOW, L_ELBOW to L_WRIST, L_WRIST to BAR)
+    // Arms stop at the wrist — no separate wrist-to-BAR limb stub. The wrist sits exactly on the
+    // bar line by construction (StickmanKinematics places it there), so a stub would just
+    // double-draw a few px of what the dedicated bar line in StickmanCanvas already covers. This
+    // deliberately simplifies away from the spec's literal "L_WRIST->BAR" segment pair.
+    private val rightArmSegments = listOf(NECK_BASE to R_SHOULDER, R_SHOULDER to R_ELBOW, R_ELBOW to R_WRIST)
+    private val leftArmSegments = listOf(NECK_BASE to L_SHOULDER, L_SHOULDER to L_ELBOW, L_ELBOW to L_WRIST)
     private val headSegments = listOf(NECK_BASE to HEAD)
 
     /** Draw order (back to front): right leg, left leg, torso, right arm, left arm, head-neck

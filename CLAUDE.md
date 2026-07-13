@@ -2307,6 +2307,46 @@ _(Claude Code appends here after each completed task)_
   bar-path overlay are all out of scope, per spec sections 10-11 — not started. (c) Coach-tier
   per-athlete archetype assignment (Phase 2C) not started.
   versionCode 63, versionName 0.47.0.
+- [x] Bug fix + simplification (v0.47.1): first real-device look at v0.47.0 surfaced a genuine
+  bug plus a clunky-visuals complaint. Fixed both at the root rather than patching symptoms.
+  **Root cause of "movement isn't correct"**: `StickmanInterpolator` was lerping the 18 baked
+  (x,y) `NodePosition`s between keyframes directly. Linearly interpolating the two ENDPOINTS of a
+  rotating rigid segment does not trace the segment rotating — it traces a straight line between
+  those two endpoints, which means the segment visibly SHRINKS through the middle of any rotation
+  and only regains its true length at the keyframes themselves. Every limb was doing this on every
+  scrub frame, which is exactly what "movement isn't correct" looks like.
+  Real fix, not a patch: geometry is now driven by 3 angles (`PoseAngles`: hip/knee/torso, straight
+  from spec section 7's table) run through a proper forward-kinematics engine
+  (`domain/util/StickmanKinematics.kt`, ported from the old one-time Python generator into real
+  runtime Kotlin) instead of 18 baked coordinates per keyframe. `StickmanInterpolator` now lerps
+  the 3 angle scalars (safe — no geometry to distort) and calls kinematics fresh at every progress
+  value, so a limb's on-screen length is always exactly `ratio × bodyScale` at every point in the
+  animation — it can't warp. Locked in with a real regression test
+  (`StickmanKinematicsTest`/`StickmanInterpolatorTest`: hip-to-knee distance asserted constant
+  across 11 sampled progress steps, not just the 4 keyframes).
+  **"make each limb adjustable"**: new `LimbRatios` data class (thighRatio, shankRatio,
+  torsoRatio, headNeckRatio, footLenRatio, shoulderHalfRatio, hipHalfRatio, kneeHalfRatio,
+  ankleHalfRatio, barRiseRatio, gripHalfRatio), one per archetype, each a plain named number in
+  the JSON asset — this IS what makes "long femur" mean something concrete (bigger thighRatio,
+  smaller shankRatio) and what makes every limb independently tunable without touching code.
+  `ArchetypeAnimation` gained a `limbRatios` field; `keyframes_squat.json` rewritten to the new
+  angles+ratios shape (much smaller file — ~4 numbers/phase instead of 18 coordinate pairs).
+  **"simplify... too clunky"**: joint dots shrunk 8dp/12dp → 3dp/5dp; limb stroke 4dp → 3dp; floor
+  line changed from dashed to plain solid; removed the redundant wrist-to-BAR limb stub segments
+  (the dedicated bar line already terminates exactly at the wrist by construction, so the stub was
+  double-drawing a few px under it) — a deliberate simplification away from the spec's literal
+  segment list, called out in `StickmanRenderer`'s topology comment and the updated test. Arms
+  simplified to a straight shoulder→wrist line with the elbow placed at the exact midpoint (no
+  independent upper-arm/forearm ratio, no kink) — the bar itself is now modeled as rigidly
+  attached to the upper back via `barRiseRatio`, rotating with torso lean the way a racked bar
+  actually does, with the two wrists positioned symmetrically around it via `gripHalfRatio`.
+  Removed the now-dead `armRatio` field from `LimbRatios` (the straight-line/midpoint elbow design
+  made it unused) rather than ship an unread parameter.
+  KNOWN GAP unchanged: still not re-verified on a real device this session — the fix is
+  algebraically guaranteed to eliminate the warping (proven by the regression test, not just
+  assumed) and the visual simplifications are straightforward, but "looks right on screen" is the
+  user's call on the next real look, per the same "tune after seeing it render" plan as before.
+  versionCode 64, versionName 0.47.1.
 
 ## Release rules
 

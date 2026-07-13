@@ -10,6 +10,7 @@ import com.saiyanstrong.domain.model.NodePosition
 import com.saiyanstrong.domain.repository.UserRepository
 import com.saiyanstrong.domain.usecase.GetArchetypeAnimationUseCase
 import com.saiyanstrong.domain.usecase.GetArchetypeInfoListUseCase
+import com.saiyanstrong.domain.util.StickmanKinematics
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -46,7 +47,8 @@ class ArchetypeSelectionViewModel @Inject constructor(
             val infos = getArchetypeInfoListUseCase.execute()
             val standing = Archetype.entries.associateWith { archetype ->
                 val animation = getArchetypeAnimationUseCase.execute(archetype, LiftType.SQUAT)
-                animation.keyframes.first { it.phase == BiomechanicsPhase.STANDING }.nodes
+                val standingAngles = animation.keyframes.first { it.phase == BiomechanicsPhase.STANDING }.angles
+                StickmanKinematics.buildNodes(animation.limbRatios, standingAngles)
             }
             _uiState.update { it.copy(archetypes = infos, standingNodes = standing, isLoading = false) }
         }

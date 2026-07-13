@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.saiyanstrong.domain.model.Archetype
 import com.saiyanstrong.domain.model.LiftType
+import com.saiyanstrong.domain.model.LimbRatios
 import com.saiyanstrong.domain.model.NodePosition
 import com.saiyanstrong.domain.model.StickmanKeyframe
 import com.saiyanstrong.domain.usecase.GetArchetypeAnimationUseCase
@@ -40,11 +41,13 @@ class BiomechanicsVisualizerViewModel @Inject constructor(
     private val archetype = Archetype.valueOf(checkNotNull(savedStateHandle.get<String>("archetype")))
     private val lift = LiftType.valueOf(checkNotNull(savedStateHandle.get<String>("lift")))
     private var keyframes = emptyList<StickmanKeyframe>()
+    private var ratios: LimbRatios? = null
 
     init {
         viewModelScope.launch {
             val animation = getArchetypeAnimationUseCase.execute(archetype, lift)
             keyframes = animation.keyframes
+            ratios = animation.limbRatios
             _uiState.update {
                 it.copy(
                     archetypeName = archetype.displayName(),
@@ -60,7 +63,8 @@ class BiomechanicsVisualizerViewModel @Inject constructor(
     }
 
     fun onSliderChanged(progress: Float) {
-        val nodes = StickmanInterpolator.interpolate(keyframes, progress)
+        val currentRatios = ratios ?: return
+        val nodes = StickmanInterpolator.interpolate(keyframes, currentRatios, progress)
         _uiState.update { it.copy(nodes = nodes, sliderProgress = progress) }
     }
 }

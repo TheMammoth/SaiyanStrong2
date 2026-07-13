@@ -55,7 +55,10 @@ class BiomechanicsCompareViewModel @Inject constructor(
 
     fun onSliderChanged(progress: Float) {
         val entries = animations.map { animation ->
-            CompareEntry(animation.archetype, StickmanInterpolator.interpolate(animation.keyframes, progress))
+            CompareEntry(
+                animation.archetype,
+                StickmanInterpolator.interpolate(animation.keyframes, animation.limbRatios, progress)
+            )
         }
         _uiState.update { it.copy(entries = entries, sliderProgress = progress) }
     }
