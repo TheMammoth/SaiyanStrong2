@@ -404,30 +404,38 @@ class BarPathCaptureViewModel @Inject constructor(
     }
 
     /**
-     * PLAYER — the user tapped the bar at playback time [atMs]. Grab a small image patch around that
-     * point and start streaming markerless template tracking (see [BarPathFrameTracker.trackTemplate])
-     * from [atMs] to the end — no coloured marker needed, it follows whatever distinctive point was
-     * tapped. The dot follows as samples arrive. Cancels any prior track. [videoX]/[videoY] are in
-     * full-resolution video-pixel space (mapped by the UI via screenToVideoPx).
+     * PLAYER — the user tapped the bright marker on the bar at playback time [atMs]. Sample the
+     * marker's colour from that exact frame/point and start streaming COLOUR tracking
+     * ([BarPathFrameTracker.trackMarker]) from [atMs] to the end, seeded with the tap so it locks
+     * onto the marker the user tapped (not the largest same-colour blob). The dot follows as samples
+     * arrive. Cancels any prior track. [videoX]/[videoY] are in full-resolution video-pixel space.
      */
     fun onMarkTap(videoX: Float, videoY: Float, atMs: Long) {
         val state = _uiState.value
         val videoPath = state.videoPath ?: return
-        val vw = state.videoWidthPx
-        val vh = state.videoHeightPx
         trackJob?.cancel()
         _liveSamples.value = emptyList()
         _uiState.update { it.copy(markMs = atMs, markerSamplePoint = TapPoint(videoX, videoY), errorMessage = null) }
 
         trackJob = viewModelScope.launch(Dispatchers.Default) {
+            val frame = runCatching { barPathFrameTracker.extractFrameAt(videoPath, atMs) }.getOrNull()
+            val profile = sampleMarkerColor(frame, TapPoint(videoX, videoY))
+            if (profile == null) {
+                _uiState.update { it.copy(errorMessage = "Couldn't read the marker there — tap the bright marker on the bar.") }
+                return@launch
+            }
+
             val samples = runCatching {
-                barPathFrameTracker.trackTemplate(
+                barPathFrameTracker.trackMarker(
                     videoPath = videoPath,
-                    tapVideoX = videoX.toDouble(),
-                    tapVideoY = videoY.toDouble(),
-                    videoWidthPx = vw,
-                    videoHeightPx = vh,
+                    colorProfile = profile,
+                    gyroTimeline = state.gyroTimeline,
+                    focalMm = state.focalMm,
+                    sensorWidthMm = state.sensorWidthMm,
+                    videoStartUptimeNs = state.videoStartUptimeNs,
                     startMs = atMs,
+                    initialVideoX = videoX.toDouble(),
+                    initialVideoY = videoY.toDouble(),
                     onSample = { s -> _liveSamples.update { it + s } }
                 )
             }.getOrElse { emptyList() }
@@ -436,7 +444,7 @@ class BarPathCaptureViewModel @Inject constructor(
             // the player so they can re-mark rather than bouncing to a dead-end error screen.
             if (samples.size < 2) {
                 _uiState.update {
-                    it.copy(errorMessage = "Couldn't track that point — tap a more distinctive spot (a plate edge, a collar, a marking).")
+                    it.copy(errorMessage = "Couldn't track the marker — use a brighter, more distinct colour that stands out from the background.")
                 }
             } else {
                 _uiState.update { it.copy(trackedSamples = samples) }

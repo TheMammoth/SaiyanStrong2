@@ -2743,6 +2743,29 @@ _(Claude Code appends here after each completed task)_
   KNOWN GAP: unverified on device this session; the low accept threshold + template update trade some
   drift risk for follow-through - if it now drifts onto background, tighten the threshold or gate the
   template update harder. versionCode 76, versionName 0.54.1.
+- [x] VBT: colored-marker tracking as the foundation (v0.55.0), per SPEC.md /spec round: after the
+  hand-rolled markerless CV (colour blobs, then NCC template matching) kept failing on a bare bar,
+  the user asked what the most common/reliable approach actually is. Honest answer: a bright colour
+  marker + colour tracking is the standard, most-reliable VIDEO-ONLY method (hardware IMU/encoder is
+  the gold standard but not app-only; markerless needs a heavy real library like OpenCV CSRT and is
+  still imperfect). And we already BUILT colour tracking - the failures were because the user tapped
+  the bare bar with no marker. User committed to using a bright marker, so this validates the cheap
+  reliable path before anything heavier. Small, high-confidence change:
+  (1) BarPathCaptureViewModel.onMarkTap swapped back from trackTemplate to COLOUR: samples the marker
+  colour at the tapped frame/point (existing sampleMarkerColor/MarkerColorProfile) and runs
+  trackMarker - which already had startMs + onSample streaming (v0.53.0) - so the whole live-player
+  UX (play now, dot follows, RE-MARK, GET VELOCITY NUMBERS, smoothed trace, tap-offset fix) is
+  unchanged; only the tracker swapped. trackTemplate/TemplateMatcher left dormant, not removed.
+  (2) trackMarker gained optional initialVideoX/initialVideoY - seeds the first frame's blob choice
+  with the TAP position so it locks onto the marker the user tapped (nearest blob) rather than the
+  largest same-colour blob (robust to a reflection / second marker). Reuses the existing
+  nearest-neighbor chooseTrackedBlob (already tested: "nearest blob wins even if smaller").
+  (3) Guidance updated to the marker method: player prompt "tap the bright marker on the bar", retry
+  message points at marker brightness/contrast. The v0.54 tap-offset fix + trace smoothing stay.
+  KNOWN GAP: unverified on device this session, but this is the method that SHOULD work with a real
+  bright marker (the whole reason to choose it). If a real marker tracks cleanly, the tracking
+  problem is solved with no OpenCV. If the user later insists on markerless, OpenCV becomes its own
+  dependency-heavy sprint. versionCode 77, versionName 0.55.0.
 
 ## Release rules
 

@@ -1,135 +1,117 @@
-# SaiyanStrong — VBT: Markerless Template Tracking
+# SaiyanStrong — VBT: Colored-Marker Tracking as the Foundation
 
 ## Status: Draft — awaiting confirmation before implementation.
 
-(Replaces the previous "Live Tracked Playback" spec — that shipped as v0.53.0. The live player works
-and the user can now see the tracking, and it's inaccurate: the dot lands offset from the tap and
-the trace jumps around / jitters / drifts. Root cause, confirmed via the user's answers: they tap
-the bar/plate itself with no coloured marker, and the current tracker follows *colour* — which can't
-lock onto a bare grey metal bar, so it grabs whatever grey-ish blob is biggest and wanders. Fix:
-track a small image PATCH around the tapped point by its appearance, not by colour.)
+(Replaces the "Markerless Template Tracking" spec — v0.54.0/v0.54.1. After repeated accuracy
+failures tracking a bare bar, the user asked what the most common/reliable approach actually is.
+Answer: a bright colored marker + color tracking is the standard, most-reliable *video-only* method
+— and we already built it. The template/color-blob hand-rolled CV was fragile precisely because it
+was doing a hard job without a marker. User committed to using a bright marker. This spec makes the
+already-built color tracking the primary path, hardens it, and adds clear marker guidance — the
+cheapest, most-likely-to-work step before anything heavier.)
 
 ---
 
 ## 0. Decisions locked in via clarifying questions
 
-- **Markerless: track whatever the user taps.** Replace colour-blob tracking (in the capture flow)
-  with template/patch tracking: sample a small grayscale patch of the image around the tap and, each
-  frame, find where that patch best matches nearby. This tracks a plate edge / bar collar / bolt
-  directly — no coloured marker required, matching what the user is actually doing (tapping the bar).
-- **Smooth the drawn trace.** The live trail currently draws raw per-frame positions (inherently
-  jittery). Apply light smoothing to the drawn path so it reads as a clean line. Velocity numbers
-  already smooth separately (Savitzky-Golay in the analyzer); this is purely the visual trail.
-- **Fix the tap offset.** The dot must land exactly where the user tapped. Ensure the PlayerView
-  renders the video aspect-fit (so the existing letterbox mapping is correct), and the template is
-  extracted at exactly the tapped pixel — so the first tracked point equals the tap point.
+- **Colored marker + color tracking is the foundation.** The user will attach a bright,
+  distinctly-colored marker (neon tape / sticker / colored cap) to the plate or collar. We re-enable
+  the color tracking already in the codebase (`trackMarker` + `MarkerColorProfile` + blob detection +
+  nearest-neighbor, Sprints 26–31) as the live player's tracking method. Template tracking
+  (`trackTemplate`) is left dormant, not removed.
+- **Validate the reliable method first.** Before adding heavy dependencies (OpenCV) for markerless,
+  prove the marker path works — it's what reliable camera bar-path apps require anyway.
 
 ---
 
 ## 1. Objective
 
-Make the bar-path tracking actually follow the bar when the user taps it directly, no coloured
-marker needed. Tap a distinctive point on the bar (plate edge, collar, end cap), and the dot sticks
-to that point through the lift with a clean traced path — accurate enough to trust the shape of the
-bar path and, with the scale step, the velocity numbers.
+Make bar tracking actually reliable by using it the way it's designed: the user puts a bright marker
+on the bar, taps it in the live player, and the dot follows that marker cleanly through the rep.
+Everything downstream (streaming live overlay, concentric detection, velocity numbers, replay, save)
+already works on the produced samples — this only changes what produces them, back to color.
 
-Target users: unchanged — anyone tapping their own lift video, now able to tap the bar itself.
+Target users: unchanged — anyone filming their lift, now with a bright marker on the bar.
 
 ---
 
-## 2. Root causes → fixes
+## 2. What changes
 
-### 2.1 Colour tracking can't follow a bare bar → markerless template tracking
-- **New pure `util/barpath/TemplateMatcher.kt`**: normalized cross-correlation (NCC) matching over a
-  grayscale search window. `bestMatch(frameGray, frameW, frameH, template, tW, tH, centerX, centerY,
-  searchRadius)` returns the (x, y) of the best template match near the centre plus its NCC score.
-  NCC (not raw SSD) so brightness changes between frames don't break the match. Pure, unit-tested.
-- **New `BarPathFrameTracker.trackTemplate(...)`** (mirrors `trackMarker`'s frame-extraction +
-  streaming + startMs + MAX_SAMPLES cap, which all stay): extracts a grayscale, downscaled patch
-  around the tapped point at the mark frame, then for each subsequent frame searches a window around
-  the previous position for the best NCC match. **Rejects poor matches** (NCC below a threshold →
-  keep the previous position instead of jumping) — this is what stops the "teleports all over the
-  place." Emits a `BarPathSample` per frame; streams via `onSample` exactly like the live path today.
-- The capture flow (`onMarkTap`) switches from sampling a colour to extracting a template patch and
-  calling `trackTemplate`. Everything downstream is unchanged — it still produces a
-  `List<BarPathSample>`, so the overlay, `ConcentricDetector`, and `AnalyzeBarPathUseCase` all work
-  as-is. Colour tracking (`trackMarker`/`MarkerColorProfile`) stays in the codebase but dormant
-  (not called from the flow) — removing it is a separate cleanup.
-- **Acceptance**: on a real recording, tapping a distinctive point on the bar makes the dot follow
-  that point through the rep without teleporting to unrelated objects; a low-confidence frame holds
-  position rather than jumping.
+### 2.1 Live player tracks by color again (from the mark point, streaming)
+- `BarPathCaptureViewModel.onMarkTap` samples the marker's color from the tapped frame/point (the
+  existing `sampleMarkerColor` → `MarkerColorProfile.sample`) and runs `trackMarker` — which already
+  supports `startMs` + `onSample` streaming (added v0.53.0) — from the mark point onward, streaming
+  into `_liveSamples` exactly like the template path did. So the whole live-player experience (play
+  now, dot follows, RE-MARK, GET VELOCITY NUMBERS, smoothed trace) is unchanged; only the tracker
+  swaps back to color.
+- **Acceptance**: with a bright marker on the bar, tapping it makes the dot follow the marker
+  through the full rep (down and up), drawing a clean path — the failure mode from template tracking
+  (stuck at the top) is gone.
 
-### 2.2 Tap offset → correct, verified mapping
-- Set the ExoPlayer `PlayerView` resize mode explicitly to **fit** (aspect-preserving letterbox), so
-  `computeFittedVideoRect`/`screenToVideoPx` (which assume fit) match what's actually on screen.
-- Extract the template at exactly the tapped pixel: map the tap (video-pixel space, from
-  `screenToVideoPx`) into the extracted frame's own pixel space (scale by the frame bitmap's actual
-  width/height in case `getFrameAtTime` returns a different size than the metadata dimensions), so
-  the patch is centred on what the user tapped.
-- **Acceptance**: the first tracked dot appears on the exact point tapped (not offset); drawn back
-  via the same mapping, tap-in and dot-out round-trip to the same on-screen location.
+### 2.2 Seed tracking with the tap position (robust to multiple same-color objects)
+- `trackMarker` currently seeds its first frame with the *largest* blob of the matched color. Add an
+  optional initial position (the tap point, in video pixels) so the first frame instead picks the
+  blob *nearest the tap* (reusing the existing nearest-neighbor `chooseTrackedBlob`). This makes it
+  robust when there's more than one object of the marker's color in frame (a second marker, a
+  reflection, a same-colored item) — it locks onto the one the user actually tapped.
+- **Acceptance**: with two same-colored objects in frame, tracking follows the tapped one, not
+  whichever is biggest.
 
-### 2.3 Jittery trace → smoothing
-- **New pure `smoothedPathPoints(samples, window)`** (moving average over the position series),
-  used by the overlay to draw a clean trail + dot. Applied to display only; the raw samples still
-  feed the analysis (which does its own SG smoothing).
-- **Acceptance**: the drawn trail reads as a smooth line rather than a scatter of jittery points,
-  without materially lagging the true path.
+### 2.3 Clear marker guidance
+- The player's pre-mark prompt and the tips make it explicit: attach a bright, distinct-colored
+  marker and tap it (not the bare bar). Update the "couldn't track" retry message to point at the
+  marker (brightness/contrast), not "tap a distinctive point" (which was template-era wording).
+- **Acceptance**: a first-time user is told to use a marker before they tap; the guidance matches
+  the color method.
+
+### 2.4 Keep the v0.54 wins
+- The tap-offset fix (`PlayerView` RESIZE_MODE_FIT + exact tap→pixel mapping) and the smoothed trace
+  stay — they help regardless of tracker.
 
 ---
 
 ## 3. Tech stack additions
 
-None. Pure Kotlin for `TemplateMatcher` + `smoothedPathPoints`; `BarPathFrameTracker` extended;
-grayscale conversion via the existing bulk `getPixels()`. No new dependencies.
+None. Reuses existing color tracking, blob detection, streaming, and the live player. No OpenCV, no
+new dependencies — that's the whole point of validating the cheap reliable path first.
 
 ---
 
-## 4. Project structure (new/changed)
+## 4. Project structure (changed)
 
 ```
 app/src/main/java/com/saiyanstrong/
-├── util/barpath/
-│   ├── TemplateMatcher.kt              ← NEW: pure NCC template matching (bestMatch)
-│   └── BarPathFrameTracker.kt          ← + trackTemplate (grayscale patch + NCC search + streaming,
-│                                          reuses startMs/onSample/MAX_SAMPLES) + gray-patch extract
+├── util/barpath/BarPathFrameTracker.kt      ← trackMarker gains an optional initial (seed) position
+│                                               so frame 1 picks the blob nearest the tap
 ├── presentation/screens/barpath/
-│   ├── BarPathCaptureViewModel.kt      ← onMarkTap extracts a template patch (not a colour) and
-│   │                                       calls trackTemplate; rest of the flow unchanged
-│   └── BarPathTrackPlaybackContent.kt  ← PlayerView resize=fit; smoothed trail via smoothedPathPoints
+│   ├── BarPathCaptureViewModel.kt           ← onMarkTap samples color + trackMarker (was trackTemplate)
+│   └── BarPathTrackPlaybackContent.kt        ← marker-focused prompt/guidance text
 ```
 
-New pure helpers get unit tests (`TemplateMatcherTest`, and a smoothing test alongside the existing
-`BarPathTrackPlaybackContentTest`). `screenToVideoPx`/`currentSampleIndex`/`computeFittedVideoRect`
-stay and keep their tests.
+`trackTemplate`/`TemplateMatcher` stay (dormant); `screenToVideoPx`/`smoothedPathPoints`/
+`currentSampleIndex`/color-tracking tests all stay and keep passing.
 
 ---
 
 ## 5. Code style (extends existing CLAUDE.md rules)
 
-- Matching + smoothing math stays pure (`util/barpath`, no Android/Compose), unit-tested; the
-  Compose/ExoPlayer shell stays untested — same split as the rest of this feature.
-- Named constants for patch size, search radius, downscale, and the NCC accept threshold, each with a
-  one-line rationale (matching the existing `MAX_SAMPLES`/`MIN_MARKER_PIXELS` precedent), so they're
-  easy to tune after a real-footage look.
-- No new persistence; no hardcoded colours.
+- Reuse the existing color-tracking pipeline as-is; the only logic change is seeding the first-frame
+  blob choice with the tap position (a small, testable addition to the existing nearest-neighbor).
+- No hardcoded colors; no new persistence; keep the pure/tested vs Compose-shell split.
 
 ---
 
 ## 6. Testing strategy
 
-- **`TemplateMatcher.bestMatch`**: synthetic grayscale images — a template placed at a known offset
-  is found there (exact); a shifted template is found at the shifted location within the search
-  radius; a brightness-scaled copy still matches (NCC invariance); a pure-noise search returns a low
-  score (so the reject-threshold works). 
-- **`smoothedPathPoints`**: a jittery series is smoothed toward its trend; endpoints handled; a
-  short series returns unchanged.
-- **`trackTemplate` behaviour**: covered indirectly (the pure matcher + the shared frame-extraction
-  it reuses are each tested); the extraction loop itself needs a device, same as `trackMarker`.
-- **Existing suite green**: all current barpath/domain tests must still pass.
-- **On-device (the real check)**: tap the bar → dot lands on it and follows through the rep; the
-  trace is a clean line; low-confidence frames hold rather than jump. This is the self-verifying
-  step — the honest unverified-on-device caveat stays until the user confirms.
+- **Seed selection**: a `chooseTrackedBlob`-level test that, given a seed position, the nearest blob
+  to the seed is chosen on the first frame (not the largest) — the existing `chooseTrackedBlob`
+  already picks nearest-to-previous, so this verifies the seed is passed through as the initial
+  "previous."
+- **Existing color-tracking tests stay green** (`BarPathFrameTrackerTest`, `MarkerColorProfileTest`,
+  etc.), plus all the live-player/domain tests.
+- **On-device (the real validation)**: attach a bright marker, tap it, watch it track the full rep.
+  This is the whole point of choosing the reliable method — it should work where the bare-bar
+  template tracking didn't. Honest caveat stays until confirmed.
 - Full `assembleGithubDebug` + unit-test run before shipping; version bump before build; badging
   verified local + downloaded release asset; explicit file staging.
 
@@ -138,22 +120,20 @@ stay and keep their tests.
 ## 7. Boundaries
 
 **Always do:**
-- Keep matching/smoothing pure and tested; reuse the existing streaming/startMs/cap infrastructure.
-- Reject low-confidence matches (hold position) rather than letting the point jump — this is the
-  core of "not all over the place."
-- Keep the tap→pixel mapping exact so the dot lands where tapped.
-- Preserve the analysis/results/velocity-replay/save path (it consumes `BarPathSample` regardless of
-  how tracking produced it).
+- Keep the live-player UX identical; only swap the tracker back to color + add the seed + guidance.
+- Keep the tap-offset fix and trace smoothing.
+- Reuse the existing streaming/startMs/cap/blob/nearest-neighbor code.
 
 **Ask first about:**
-- Whether to periodically update the template as it tracks (handles appearance change but can drift)
-  — default: keep the original template (no update) this pass, simplest and driftless; revisit if it
-  loses lock on real footage.
-- Removing the now-dormant colour-tracking code (default: leave it, cleanup later).
+- Whether to *remove* the dormant template/OpenCV-less markerless code (default: leave it — if the
+  marker path proves reliable it can be cleaned up; if the user later wants markerless we revisit
+  OpenCV as its own effort).
+- Tightening the color tolerance defaults (default: leave as-is; a bright marker matches fine — only
+  revisit if a real marker still picks up background).
 
 **Never do:**
-- Don't require a coloured marker (the whole point is tracking the bar directly).
-- Don't smooth so hard the trace stops reflecting the real path.
+- Don't add OpenCV / a heavy tracking dependency in this pass — the decision was to validate the
+  marker path first.
 - Don't reintroduce dual-marker / live-camera-session / high-speed paths.
 - Don't touch unrelated features (biomechanics, Coach, updater).
 
@@ -161,9 +141,9 @@ stay and keep their tests.
 
 ## 8. Notes
 
-This finally addresses the accuracy at its root: the feature was always colour-tracking, which needs
-a bright marker the user didn't have. Template tracking follows whatever distinctive point they tap,
-which is what "tap the bar" has meant all along. It won't be flawless — template tracking can lose
-lock on a featureless patch, heavy motion blur, or big appearance change — so the accept-threshold
-(hold-on-low-confidence) and the tap-a-distinctive-point guidance matter. But it's the correct
-technique for markerless point tracking, and the live player makes its quality immediately visible.
+This is deliberately a *small, high-confidence* change: it uses code we already have, the way the
+industry actually does reliable video bar-path tracking (with a marker), and it's the honest "do
+the simple reliable thing before the complex thing" move after a run of fragile hand-rolled CV. If
+a real bright marker tracks cleanly (it should), the tracking problem is solved and OpenCV/markerless
+never needs to be built. If the user later insists on markerless, that becomes its own dependency-
+heavy sprint — but we'll know the reliable baseline works first.

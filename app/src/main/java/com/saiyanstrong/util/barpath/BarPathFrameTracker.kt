@@ -173,6 +173,8 @@ class BarPathFrameTracker @Inject constructor(
         sensorWidthMm: Double = 0.0,
         videoStartUptimeNs: Long = 0L,
         startMs: Long = 0L,
+        initialVideoX: Double? = null,
+        initialVideoY: Double? = null,
         onProgress: ((Float) -> Unit)? = null,
         onSample: ((BarPathSample) -> Unit)? = null
     ): List<BarPathSample> {
@@ -192,7 +194,11 @@ class BarPathFrameTracker @Inject constructor(
         // [onSample] for the live overlay (the dot follows as tracking progresses).
         fun collect(drive: (onFrame: (Bitmap, Long) -> Unit) -> Unit): List<BarPathSample> {
             val samples = mutableListOf<BarPathSample>()
-            var previousCentroid: Pair<Double, Double>? = null
+            // Seed with the tapped point so frame 1 picks the blob NEAREST the tap (via the existing
+            // nearest-neighbor chooseTrackedBlob), not just the largest — robust when there's more
+            // than one object of the marker's colour in frame (a reflection, a second marker).
+            var previousCentroid: Pair<Double, Double>? =
+                if (initialVideoX != null && initialVideoY != null) initialVideoX to initialVideoY else null
             var focalLengthPx = 0.0
             drive { frame, timestampMs ->
                 if (trackedSpanMs > 0L) {
