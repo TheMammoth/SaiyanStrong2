@@ -266,7 +266,7 @@ class BarPathFrameTracker @Inject constructor(
         val half = TEMPLATE_PATCH / 2
         val cx0 = (tapVideoX / videoWidthPx * sgw).toInt().coerceIn(half, sgw - half - 1)
         val cy0 = (tapVideoY / videoHeightPx * sgh).toInt().coerceIn(half, sgh - half - 1)
-        val template = extractPatch(startGray, sgw, sgh, cx0, cy0, TEMPLATE_PATCH) ?: return emptyList()
+        var template = extractPatch(startGray, sgw, sgh, cx0, cy0, TEMPLATE_PATCH) ?: return emptyList()
 
         val samples = mutableListOf<BarPathSample>()
         var prevX = cx0
@@ -276,11 +276,17 @@ class BarPathFrameTracker @Inject constructor(
             val fgh = (frame.height * TEMPLATE_DOWNSCALE).toInt().coerceAtLeast(1)
             val gray = toGray(frame, fgw, fgh)
             val match = TemplateMatcher.bestMatch(
-                gray, fgw, fgh, template, TEMPLATE_PATCH, TEMPLATE_PATCH, prevX, prevY, TEMPLATE_SEARCH
+                gray, fgw, fgh, template, TEMPLATE_PATCH, TEMPLATE_PATCH,
+                prevX, prevY, TEMPLATE_SEARCH_X, TEMPLATE_SEARCH_Y
             )
             if (match != null && match.score >= TEMPLATE_NCC_THRESHOLD) {
                 prevX = match.x
                 prevY = match.y
+                // Refresh the template on a strong match so it follows appearance change through the
+                // rep (lighting/angle) without drifting on the weak, blur-driven matches.
+                if (match.score >= TEMPLATE_UPDATE_THRESHOLD) {
+                    extractPatch(gray, fgw, fgh, prevX, prevY, TEMPLATE_PATCH)?.let { template = it }
+                }
             }
             val xPx = prevX.toDouble() / fgw * videoWidthPx
             val yPx = prevY.toDouble() / fgh * videoHeightPx
@@ -555,12 +561,20 @@ class BarPathFrameTracker @Inject constructor(
         const val DEFAULT_SAMPLE_INTERVAL_MS = 33L
         const val MIN_SAMPLE_INTERVAL_MS = 5L // sanity floor, ~200fps worst case
 
-        // Markerless template tracking (trackTemplate) — all in downscaled working pixels. First-pass
-        // defaults, tune after a real-footage look.
+        // Markerless template tracking (trackTemplate) — all in downscaled working pixels.
         const val TEMPLATE_DOWNSCALE = 0.5   // work at half-res: precise enough, ~4× faster than full
         const val TEMPLATE_PATCH = 24        // patch side (px @ downscale) ~= 48px full-res
-        const val TEMPLATE_SEARCH = 32       // per-frame search radius (px @ downscale) ~= 64px full-res
-        const val TEMPLATE_NCC_THRESHOLD = 0.4 // below this the match is rejected and the point holds
+        // Asymmetric per-frame search: a barbell moves mostly VERTICALLY, so allow far more travel in
+        // y than x. Wide-y also lets it re-acquire after a blurred stretch. (@downscale px.)
+        const val TEMPLATE_SEARCH_X = 28     // ~56px full-res
+        const val TEMPLATE_SEARCH_Y = 60     // ~120px full-res — covers fast descent/ascent per frame
+        // Accept threshold kept LOW so motion-blurred frames (which drop NCC) are still followed
+        // rather than held — the bounded search window keeps a weak match from running off to
+        // background. Holding through blur was why the dot stuck at the top and never followed down.
+        const val TEMPLATE_NCC_THRESHOLD = 0.25
+        // Only refresh the template from a STRONG match, so it follows gradual appearance/lighting
+        // change through the rep without drifting onto whatever a weak match happened to land on.
+        const val TEMPLATE_UPDATE_THRESHOLD = 0.6
 
         // Upper bound on sampled frames per clip — each is a slow getFrameAtTime seek+decode, so
         // this caps worst-case tracking time (and the "stuck on Tracking…" perception) regardless

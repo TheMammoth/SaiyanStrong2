@@ -2725,6 +2725,24 @@ _(Claude Code appends here after each completed task)_
   constants are first-pass, tunable after a real-footage look. Not re-verified on device this session -
   but the live player makes tracking quality immediately visible, which is the whole point.
   versionCode 75, versionName 0.54.0.
+- [x] VBT template-tracking follow-through fix (v0.54.1): first real-footage test of v0.54.0
+  (screenshots) showed the dot correctly ON the plate while standing but STUCK near the top - it did
+  not follow the plate down through the squat, and there was no vertical trail. Diagnosis: the
+  tracker lost lock during the movement and held. Most likely motion blur - the sharp template stops
+  matching a blurred moving plate, NCC drops below the 0.4 accept gate, so it holds; by the time the
+  plate is sharp again at the bottom it's far outside the (symmetric, small) search window and can't
+  re-acquire. Three targeted fixes: (1) accept threshold lowered 0.4 -> 0.25 so blurred frames are
+  FOLLOWED (accepted) rather than held - the bounded search window keeps a weak match from running
+  off to background, so "follow through blur" is safe. (2) Asymmetric search window - a barbell moves
+  mostly vertically, so TEMPLATE_SEARCH split into X=28 / Y=60 (@downscale; ~56 / ~120px full-res):
+  far more vertical travel allowed per frame, cheaply, which also re-acquires after a blurred stretch.
+  bestMatch(...) now takes searchRadiusX/searchRadiusY. (3) Template update on strong matches
+  (TEMPLATE_UPDATE_THRESHOLD=0.6) - refresh the patch from the current frame when NCC is high, so it
+  follows gradual lighting/angle change through the rep without drifting on the weak blur-driven
+  matches. All existing TemplateMatcher tests updated to the two-radius signature and still green.
+  KNOWN GAP: unverified on device this session; the low accept threshold + template update trade some
+  drift risk for follow-through - if it now drifts onto background, tighten the threshold or gate the
+  template update harder. versionCode 76, versionName 0.54.1.
 
 ## Release rules
 

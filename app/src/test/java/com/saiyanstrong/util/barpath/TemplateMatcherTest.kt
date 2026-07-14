@@ -36,7 +36,7 @@ class TemplateMatcherTest {
         // gradient would NOT be: NCC ignores a constant offset, so a shifted gradient still scores 1.)
         val img = imageWithPatch(w, h, 20, 20, 8)
         val template = patchOf(img, w, 20, 20, 12) // includes the square's edges → has variance
-        val match = TemplateMatcher.bestMatch(img, w, h, template, 12, 12, 20, 20, 4)!!
+        val match = TemplateMatcher.bestMatch(img, w, h, template, 12, 12, 20, 20, 4, 4)!!
         assertEquals(20, match.x)
         assertEquals(20, match.y)
         assertTrue("perfect match should score ~1", match.score > 0.99)
@@ -48,7 +48,7 @@ class TemplateMatcherTest {
         val template = imageWithPatch(30, 30, 15, 15, 6).let { patchOf(it, 30, 15, 15, 10) }
         // Real frame: the same bright square, now centered at (32, 28).
         val frame = imageWithPatch(w, h, 32, 28, 6)
-        val match = TemplateMatcher.bestMatch(frame, w, h, template, 10, 10, 30, 30, 8)!!
+        val match = TemplateMatcher.bestMatch(frame, w, h, template, 10, 10, 30, 30, 8, 8)!!
         assertEquals(32, match.x)
         assertEquals(28, match.y)
     }
@@ -60,7 +60,7 @@ class TemplateMatcherTest {
         val template = patchOf(img, w, 20, 20, 12)
         // Same structure/position, uniformly darker-contrast + brighter (a linear v -> 0.5v+100).
         val brighter = IntArray(w * h) { (img[it] / 2 + 100).coerceIn(0, 255) }
-        val match = TemplateMatcher.bestMatch(brighter, w, h, template, 12, 12, 20, 20, 3)!!
+        val match = TemplateMatcher.bestMatch(brighter, w, h, template, 12, 12, 20, 20, 3, 3)!!
         assertEquals(20, match.x)
         assertEquals(20, match.y)
         assertTrue("a linear brightness change should still match strongly", match.score > 0.95)
@@ -71,14 +71,14 @@ class TemplateMatcherTest {
         val w = 30; val h = 30
         val flat = IntArray(w * h) { 128 }
         val template = IntArray(64) { 128 } // 8x8 flat
-        assertNull(TemplateMatcher.bestMatch(flat, w, h, template, 8, 8, 15, 15, 4))
+        assertNull(TemplateMatcher.bestMatch(flat, w, h, template, 8, 8, 15, 15, 4, 4))
     }
 
     @Test
     fun `a template larger than the frame returns null`() {
         val frame = IntArray(4 * 4) { 10 }
         val template = IntArray(64) { 10 }
-        assertNull(TemplateMatcher.bestMatch(frame, 4, 4, template, 8, 8, 2, 2, 1))
+        assertNull(TemplateMatcher.bestMatch(frame, 4, 4, template, 8, 8, 2, 2, 1, 1))
     }
 
     @Test
@@ -88,7 +88,7 @@ class TemplateMatcherTest {
         val template = IntArray(10 * 10) { idx -> if ((idx % 10) < 5) 20 else 230 }
         // Frame: a horizontal edge (very different structure) everywhere.
         val frame = IntArray(w * h) { idx -> if ((idx / w) < h / 2) 20 else 230 }
-        val match = TemplateMatcher.bestMatch(frame, w, h, template, 10, 10, 25, 25, 6)
+        val match = TemplateMatcher.bestMatch(frame, w, h, template, 10, 10, 25, 25, 6, 6)
         // It returns *a* best position, but the correlation should be weak — below a sane accept gate.
         assertTrue("a mismatched structure should score below the 0.4 accept threshold", (match?.score ?: 0.0) < 0.4)
     }

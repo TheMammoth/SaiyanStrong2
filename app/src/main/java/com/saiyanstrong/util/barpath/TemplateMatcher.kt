@@ -18,15 +18,19 @@ object TemplateMatcher {
     data class MatchResult(val x: Int, val y: Int, val score: Double)
 
     /**
-     * Best match for [template] (tW×tH) within [searchRadius] px of ([centerX],[centerY]) in [frame]
-     * (frameW×frameH), by maximum NCC. Returns the best-match CENTRE + its NCC score in [-1, 1]
-     * (1 = perfect). Null if degenerate (template bigger than frame, featureless template, or no
-     * candidate centre keeps the patch fully inside the frame).
+     * Best match for [template] (tW×tH) within [searchRadiusX]×[searchRadiusY] px of
+     * ([centerX],[centerY]) in [frame] (frameW×frameH), by maximum NCC. Returns the best-match CENTRE
+     * + its NCC score in [-1, 1] (1 = perfect). Null if degenerate (template bigger than frame,
+     * featureless template, or no candidate centre keeps the patch fully inside the frame).
+     *
+     * The search window is asymmetric so a caller can allow more travel along one axis cheaply — a
+     * barbell moves mostly vertically, so a tall/narrow window covers the real motion without the
+     * quadratic cost of a big square.
      */
     fun bestMatch(
         frame: IntArray, frameW: Int, frameH: Int,
         template: IntArray, tW: Int, tH: Int,
-        centerX: Int, centerY: Int, searchRadius: Int
+        centerX: Int, centerY: Int, searchRadiusX: Int, searchRadiusY: Int
     ): MatchResult? {
         if (tW <= 0 || tH <= 0 || tW > frameW || tH > frameH) return null
         if (frame.size < frameW * frameH || template.size < tW * tH) return null
@@ -42,10 +46,10 @@ object TemplateMatcher {
         if (tVar <= 1e-9) return null // featureless template — nothing to lock onto
 
         // Candidate centres, kept so the patch stays fully inside the frame.
-        val minCx = (centerX - searchRadius).coerceAtLeast(halfW)
-        val maxCx = (centerX + searchRadius).coerceAtMost(frameW - (tW - halfW))
-        val minCy = (centerY - searchRadius).coerceAtLeast(halfH)
-        val maxCy = (centerY + searchRadius).coerceAtMost(frameH - (tH - halfH))
+        val minCx = (centerX - searchRadiusX).coerceAtLeast(halfW)
+        val maxCx = (centerX + searchRadiusX).coerceAtMost(frameW - (tW - halfW))
+        val minCy = (centerY - searchRadiusY).coerceAtLeast(halfH)
+        val maxCy = (centerY + searchRadiusY).coerceAtMost(frameH - (tH - halfH))
         if (minCx > maxCx || minCy > maxCy) return null
 
         var bestX = -1; var bestY = -1; var bestScore = Double.NEGATIVE_INFINITY
