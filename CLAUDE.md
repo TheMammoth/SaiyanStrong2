@@ -2593,6 +2593,21 @@ _(Claude Code appends here after each completed task)_
   If it still fails, the on-screen "code N: …" string is the next diagnostic; USB logcat would give
   the full stack if it comes to that.
   versionCode 70, versionName 0.51.1.
+- [x] VBT recording crash FIXED — root cause confirmed (v0.51.2): the v0.51.1 diagnostic worked —
+  user's error screen read "start failed: SecurityException To use the sampling rate of 0
+  microseconds, app needs to declare the normal permission HIGH_SAMPLING_RATE_SENSORS." Not a video
+  problem at all: `BarPathVideoRecorder.startRecording` registers the gyroscope (for offline shake
+  compensation) at `SENSOR_DELAY_FASTEST` (0 µs), which on Android 12+ (API 31+) requires the
+  `HIGH_SAMPLING_RATE_SENSORS` normal permission. `registerListener` threw `SecurityException`,
+  which propagated to the outer catch and aborted the whole recording — an optional nice-to-have
+  (gyro) was a hard dependency of recording. This had been failing every recording since gyro
+  capture was added (Sprint 41, v0.39–0.41). Two-layer fix: (1) declared
+  `HIGH_SAMPLING_RATE_SENSORS` in the main manifest (a normal permission — auto-granted, no runtime
+  prompt, no privacy surface) so the intended fast gyro works; (2) wrapped the entire gyro
+  setup/registration in its own try/catch so any future sensor failure (or a device that still
+  rejects it, or has no gyro) disables shake compensation and continues recording rather than
+  aborting — `trackMarker` already handles a null `gyroTimeline`. The v0.51.1 quality fallback
+  (HD→SD) stays as complementary robustness. versionCode 71, versionName 0.51.2.
 
 ## Release rules
 

@@ -199,29 +199,40 @@ class BarPathVideoRecorder {
         val outputDir = File(context.cacheDir, "bar_path").apply { mkdirs() }
         val outputFile = File(outputDir, "recording_${System.currentTimeMillis()}.mp4")
 
-        sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
-        gyroSensor = sensorManager?.getDefaultSensor(Sensor.TYPE_GYROSCOPE_UNCALIBRATED)
-            ?: sensorManager?.getDefaultSensor(Sensor.TYPE_GYROSCOPE)
-        
-        currentGyroTimeline = GyroTimeline()
-        cumulativeGyroX = 0.0
-        cumulativeGyroY = 0.0
-        lastGyroTimestampNs = 0L
+        // Gyro capture drives OFFLINE shake compensation — it is strictly optional. Registering at
+        // SENSOR_DELAY_FASTEST needs HIGH_SAMPLING_RATE_SENSORS (declared in the manifest on 12+),
+        // but a device that still rejects it (or has no gyro) must NOT block recording. Any failure
+        // here disables shake comp and continues — trackMarker handles a null gyroTimeline.
+        try {
+            sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
+            gyroSensor = sensorManager?.getDefaultSensor(Sensor.TYPE_GYROSCOPE_UNCALIBRATED)
+                ?: sensorManager?.getDefaultSensor(Sensor.TYPE_GYROSCOPE)
 
-        gyroListener = object : SensorEventListener {
-            override fun onSensorChanged(event: SensorEvent) {
-                if (lastGyroTimestampNs != 0L) {
-                    val dt = (event.timestamp - lastGyroTimestampNs) / 1e9
-                    cumulativeGyroX += event.values[0] * dt
-                    cumulativeGyroY += event.values[1] * dt
-                    currentGyroTimeline?.addSample(event.timestamp, cumulativeGyroX, cumulativeGyroY)
+            currentGyroTimeline = GyroTimeline()
+            cumulativeGyroX = 0.0
+            cumulativeGyroY = 0.0
+            lastGyroTimestampNs = 0L
+
+            gyroListener = object : SensorEventListener {
+                override fun onSensorChanged(event: SensorEvent) {
+                    if (lastGyroTimestampNs != 0L) {
+                        val dt = (event.timestamp - lastGyroTimestampNs) / 1e9
+                        cumulativeGyroX += event.values[0] * dt
+                        cumulativeGyroY += event.values[1] * dt
+                        currentGyroTimeline?.addSample(event.timestamp, cumulativeGyroX, cumulativeGyroY)
+                    }
+                    lastGyroTimestampNs = event.timestamp
                 }
-                lastGyroTimestampNs = event.timestamp
+                override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
             }
-            override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
-        }
-        gyroSensor?.let {
-            sensorManager?.registerListener(gyroListener, it, SensorManager.SENSOR_DELAY_FASTEST)
+            gyroSensor?.let {
+                sensorManager?.registerListener(gyroListener, it, SensorManager.SENSOR_DELAY_FASTEST)
+            }
+        } catch (t: Throwable) {
+            Log.w("BarPathVideoRecorder", "Gyro capture unavailable; recording without shake compensation", t)
+            runCatching { gyroListener?.let { sensorManager?.unregisterListener(it) } }
+            gyroListener = null
+            currentGyroTimeline = null
         }
 
         var videoStartUptimeNs = 0L
