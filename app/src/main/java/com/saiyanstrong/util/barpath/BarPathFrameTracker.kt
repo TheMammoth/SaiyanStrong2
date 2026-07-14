@@ -166,10 +166,16 @@ class BarPathFrameTracker @Inject constructor(
         gyroTimeline: GyroTimeline? = null,
         focalMm: Double = 0.0,
         sensorWidthMm: Double = 0.0,
-        videoStartUptimeNs: Long = 0L
+        videoStartUptimeNs: Long = 0L,
+        onProgress: ((Float) -> Unit)? = null
     ): List<BarPathSample> {
-        val (intervalMs, durationMs) = readTiming(videoPath, sampleIntervalMs)
+        val (rawIntervalMs, durationMs) = readTiming(videoPath, sampleIntervalMs)
         if (durationMs <= 0L) return emptyList()
+        // Each frame is a slow getFrameAtTime seek+decode, so an uncapped interval (a long clip, or
+        // a high-fps recording reporting a tiny interval) means hundreds/thousands of seeks and a
+        // "stuck on Tracking…" screen. Cap the frame count: widen the interval so no clip produces
+        // more than MAX_SAMPLES samples. ~150 over a rep is ample temporal resolution for velocity.
+        val intervalMs = maxOf(rawIntervalMs, durationMs / MAX_SAMPLES).coerceAtLeast(MIN_SAMPLE_INTERVAL_MS)
 
         // Builds a FRESH sample list from whatever frame source drives it — so a failed streaming
         // attempt's partial list is discarded (local to that call), and the retriever fallback
@@ -179,6 +185,7 @@ class BarPathFrameTracker @Inject constructor(
             var previousCentroid: Pair<Double, Double>? = null
             var focalLengthPx = 0.0
             drive { frame, timestampMs ->
+                if (durationMs > 0L) onProgress?.invoke((timestampMs.toFloat() / durationMs).coerceIn(0f, 1f))
                 if (focalLengthPx == 0.0 && focalMm > 0.0 && sensorWidthMm > 0.0) {
                     focalLengthPx = ShakeCompensator.focalLengthPx(focalMm, sensorWidthMm, frame.width)
                 }
@@ -403,17 +410,19 @@ class BarPathFrameTracker @Inject constructor(
         val scaledWidth = scaled.width
         val scaledHeight = scaled.height
 
-        val mask = BooleanArray(scaledWidth * scaledHeight)
-        val weights = DoubleArray(scaledWidth * scaledHeight)
-        for (y in 0 until scaledHeight) {
-            for (x in 0 until scaledWidth) {
-                val pixel = scaled.getPixel(x, y)
-                val r = Color.red(pixel); val g = Color.green(pixel); val b = Color.blue(pixel)
-                val idx = y * scaledWidth + x
-                val isMatch = colorProfile.matches(r, g, b)
-                mask[idx] = isMatch
-                if (isMatch) weights[idx] = colorProfile.matchScore(r, g, b).coerceAtLeast(MIN_WEIGHT)
-            }
+        // Bulk getPixels() (one array copy) instead of per-pixel getPixel() (a JNI call each) —
+        // at ~50k+ pixels/frame × 150 frames that's the difference between snappy and "frozen".
+        val pixelCount = scaledWidth * scaledHeight
+        val pixels = IntArray(pixelCount)
+        scaled.getPixels(pixels, 0, scaledWidth, 0, 0, scaledWidth, scaledHeight)
+        val mask = BooleanArray(pixelCount)
+        val weights = DoubleArray(pixelCount)
+        for (idx in 0 until pixelCount) {
+            val pixel = pixels[idx]
+            val r = Color.red(pixel); val g = Color.green(pixel); val b = Color.blue(pixel)
+            val isMatch = colorProfile.matches(r, g, b)
+            mask[idx] = isMatch
+            if (isMatch) weights[idx] = colorProfile.matchScore(r, g, b).coerceAtLeast(MIN_WEIGHT)
         }
 
         val blobs = findBlobs(mask, weights, scaledWidth, scaledHeight).filter { it.size >= MIN_MARKER_PIXELS }
@@ -439,5 +448,10 @@ class BarPathFrameTracker @Inject constructor(
 
         const val DEFAULT_SAMPLE_INTERVAL_MS = 33L
         const val MIN_SAMPLE_INTERVAL_MS = 5L // sanity floor, ~200fps worst case
+
+        // Upper bound on sampled frames per clip — each is a slow getFrameAtTime seek+decode, so
+        // this caps worst-case tracking time (and the "stuck on Tracking…" perception) regardless
+        // of clip length or reported frame rate. Plenty of temporal resolution for one rep.
+        const val MAX_SAMPLES = 150L
     }
 }

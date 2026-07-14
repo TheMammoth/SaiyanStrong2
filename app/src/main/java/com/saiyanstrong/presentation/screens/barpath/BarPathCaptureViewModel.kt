@@ -67,6 +67,9 @@ data class BarPathCaptureUiState(
     /** True while importing/reading the video before the calibration frame is ready — the
      * recording/picker UI otherwise gives no feedback during this gap. */
     val isPreparingVideo: Boolean = false,
+    /** 0f..1f progress of the marker-tracking pass (frame extraction is slow — without this the
+     * PROCESSING screen looks frozen). Only meaningful during the track step. */
+    val trackingProgress: Float = 0f,
     val gyroTimeline: GyroTimeline? = null,
     val focalMm: Double = 0.0,
     val sensorWidthMm: Double = 0.0,
@@ -460,7 +463,7 @@ class BarPathCaptureViewModel @Inject constructor(
         }
         if (videoPath == null) return
 
-        _uiState.update { it.copy(step = CaptureStep.PROCESSING, errorMessage = null) }
+        _uiState.update { it.copy(step = CaptureStep.PROCESSING, trackingProgress = 0f, errorMessage = null) }
         viewModelScope.launch(Dispatchers.Default) {
             val samples = runCatching {
                 barPathFrameTracker.trackMarker(
@@ -469,7 +472,8 @@ class BarPathCaptureViewModel @Inject constructor(
                     gyroTimeline = state.gyroTimeline,
                     focalMm = state.focalMm,
                     sensorWidthMm = state.sensorWidthMm,
-                    videoStartUptimeNs = state.videoStartUptimeNs
+                    videoStartUptimeNs = state.videoStartUptimeNs,
+                    onProgress = { p -> _uiState.update { it.copy(trackingProgress = p) } }
                 )
             }.getOrElse { emptyList() }
 

@@ -2644,6 +2644,20 @@ _(Claude Code appends here after each completed task)_
   KNOWN GAP: the marker->screen coordinate mapping and ExoPlayer sync are the same unverified-on-device
   pieces as the existing replay - but watching the dot track the bar is exactly the check that closes
   that gap, so this feature is self-verifying on a real device. versionCode 72, versionName 0.52.0.
+- [x] VBT tracking performance + progress (v0.52.1): user tested v0.52.0 — recording worked and they
+  reached TRACK & PLAY, but the app sat on "Tracking the marker…" (screenshot) looking frozen. Root
+  cause: frame extraction is slow (each sample is a getFrameAtTime seek+decode) and there was no
+  progress feedback, so a normal-but-slow track pass looked hung. Three fixes: (1) cap the sampled
+  frame count — `BarPathFrameTracker.trackMarker` widens the interval so no clip yields more than
+  `MAX_SAMPLES=150` samples (a long clip or a high-fps recording reporting a tiny interval could
+  otherwise mean hundreds/thousands of seeks); ~150 over a rep is ample for velocity. (2) real
+  progress — `trackMarker` gained an `onProgress: ((Float)->Unit)?` reporting timestampMs/durationMs
+  per frame; `BarPathCaptureUiState.trackingProgress` threads it to a determinate ring + "Tracking
+  the marker… N%" on the PROCESSING screen (indeterminate before the first frame / for the fast
+  analyze pass). (3) bulk pixel read — `findMarkerCentroidInScaledBitmap` swapped per-pixel
+  `getPixel()` (a JNI call each, ~50k+/frame) for one `getPixels()` array copy, a large real speedup
+  of the pixel-scan portion. Blob/centroid logic unchanged (all findBlobs tests still green).
+  versionCode 73, versionName 0.52.1.
 
 ## Release rules
 

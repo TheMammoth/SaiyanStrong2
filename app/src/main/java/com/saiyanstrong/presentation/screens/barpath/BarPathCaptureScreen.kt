@@ -143,7 +143,7 @@ fun BarPathCaptureScreen(
                     onConfirm = viewModel::onConfirmScale
                 )
                 CaptureStep.PLAYBACK -> Unit // handled full-screen above
-                CaptureStep.PROCESSING -> ProcessingStep()
+                CaptureStep.PROCESSING -> ProcessingStep(progress = uiState.trackingProgress)
                 CaptureStep.RESULTS -> ResultsStep(
                     analysis = uiState.analysis,
                     calibrationFrame = uiState.calibrationFrame,
@@ -497,15 +497,24 @@ private fun ScaleStep(
 }
 
 @Composable
-private fun ProcessingStep() {
+private fun ProcessingStep(progress: Float = 0f) {
     Column(
         Modifier.fillMaxSize().padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        CircularProgressIndicator(color = NeonGreen)
+        // A determinate ring once tracking reports progress, so a slow extraction never looks
+        // frozen; indeterminate before the first frame lands (and for the fast analyze pass).
+        if (progress > 0f) {
+            CircularProgressIndicator(progress = { progress }, color = NeonGreen)
+        } else {
+            CircularProgressIndicator(color = NeonGreen)
+        }
         Spacer(Modifier.height(16.dp))
-        Text("Tracking the marker…", color = Color.White.copy(alpha = 0.6f), fontSize = 13.sp)
+        Text(
+            if (progress > 0f) "Tracking the marker… ${(progress * 100).toInt()}%" else "Tracking the marker…",
+            color = Color.White.copy(alpha = 0.6f), fontSize = 13.sp
+        )
     }
 }
 
