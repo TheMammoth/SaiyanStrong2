@@ -3,17 +3,11 @@ package com.saiyanstrong.presentation.screens.barpath
 import android.Manifest
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
+import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
-import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -29,10 +23,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -41,27 +33,18 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
@@ -76,6 +59,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.saiyanstrong.domain.model.BarPathAnalysis
 import com.saiyanstrong.domain.model.BarPathSample
+import com.saiyanstrong.domain.util.GyroTimeline
 import com.saiyanstrong.presentation.components.SaiyanButton
 import com.saiyanstrong.presentation.theme.DangerRed
 import com.saiyanstrong.presentation.theme.MatteBlack
@@ -83,20 +67,15 @@ import com.saiyanstrong.presentation.theme.NeonGreen
 import com.saiyanstrong.presentation.theme.PowerAmber
 import com.saiyanstrong.presentation.theme.SaiyanGray
 import com.saiyanstrong.util.barpath.BarPathVideoRecorder
-import com.saiyanstrong.domain.util.CameraStability
-import com.saiyanstrong.domain.util.LiftPhase
-import com.saiyanstrong.domain.util.ReticleState
-import com.saiyanstrong.domain.util.StabilityLevel
-import com.saiyanstrong.util.barpath.HighSpeedCapabilityChecker
-import com.saiyanstrong.util.barpath.HighSpeedTier
-import com.saiyanstrong.util.barpath.LiveFrameResult
-import com.saiyanstrong.util.barpath.StabilityMonitor
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 
 private val MarkerGreen = Color(0xFF39FF14)
-private val MarkerBlue = Color(0xFF2E9EFF)
 
+/**
+ * The one VBT flow: record (or import) a set → tap the marker + a known-length reference to scale
+ * → track the marker offline → analyze the concentric (upward) phase → save. The dual-marker,
+ * high-speed, and live-uncalibrated-session paths were removed (v0.51.0) to make this single path
+ * reliable; see SPEC.md.
+ */
 @Composable
 fun BarPathCaptureScreen(
     onDone: () -> Unit,
@@ -104,18 +83,6 @@ fun BarPathCaptureScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val tipsDismissed by viewModel.tipsDismissed.collectAsStateWithLifecycle()
-    val highSpeedPreference by viewModel.highSpeedModeEnabled.collectAsStateWithLifecycle()
-    val liveTracking by viewModel.liveTracking.collectAsStateWithLifecycle()
-    val liveVelocity by viewModel.liveVelocity.collectAsStateWithLifecycle()
-    val livePhase by viewModel.livePhase.collectAsStateWithLifecycle()
-    val liveColorLockedOn by viewModel.liveColorLockedOn.collectAsStateWithLifecycle()
-    val reticleState by viewModel.reticleState.collectAsStateWithLifecycle()
-    val reticleConfidence by viewModel.reticleConfidence.collectAsStateWithLifecycle()
-    val liveMarkerFrame by viewModel.liveMarkerFrame.collectAsStateWithLifecycle()
-    val lockLost by viewModel.lockLost.collectAsStateWithLifecycle()
-    val currentRepSummary by viewModel.currentRepSummary.collectAsStateWithLifecycle()
-    val liveTrailPoints by viewModel.liveTrailPoints.collectAsStateWithLifecycle()
-    val liveSessionReps by viewModel.liveSessionReps.collectAsStateWithLifecycle()
 
     LaunchedEffect(uiState.isSaved) { if (uiState.isSaved) onDone() }
 
@@ -143,25 +110,6 @@ fun BarPathCaptureScreen(
                     isStandalone = viewModel.isStandalone,
                     tipsDismissed = tipsDismissed,
                     onDismissTips = viewModel::onDismissTips,
-                    highSpeedPreference = highSpeedPreference,
-                    onHighSpeedPreferenceChanged = viewModel::onHighSpeedModeChanged,
-                    liveTracking = liveTracking,
-                    liveVelocity = liveVelocity,
-                    livePhase = livePhase,
-                    liveColorLockedOn = liveColorLockedOn,
-                    reticleState = reticleState,
-                    reticleConfidence = reticleConfidence,
-                    liveMarkerFrame = liveMarkerFrame,
-                    lockLost = lockLost,
-                    currentRepSummary = currentRepSummary,
-                    liveTrailPoints = liveTrailPoints,
-                    repCount = liveSessionReps.size,
-                    onLiveResult = viewModel::onLiveResult,
-                    onRetapColor = viewModel::onRetapColor,
-                    onSaveRep = viewModel::onSaveRep,
-                    onDiscardRep = viewModel::onDiscardRep,
-                    onShareLiveRep = viewModel::onShareLiveRep,
-                    onEndLiveSession = viewModel::onEndLiveSession,
                     onFinished = viewModel::onRecordingFinished,
                     onGalleryVideoPicked = viewModel::onGalleryVideoPicked
                 )
@@ -170,8 +118,6 @@ fun BarPathCaptureScreen(
                     isStandalone = viewModel.isStandalone,
                     onTap = viewModel::onCalibrationTap,
                     onResetPoints = viewModel::onResetCalibrationPoints,
-                    onDualMarkerModeChanged = viewModel::onDualMarkerModeChanged,
-                    onReferenceDistanceChanged = viewModel::onReferenceDistanceChanged,
                     onReferenceLengthChanged = viewModel::onReferenceLengthChanged,
                     onWeightKgChanged = viewModel::onWeightKgChanged,
                     onConfirm = viewModel::onConfirmCalibration
@@ -212,55 +158,12 @@ private fun RecordingStep(
     isStandalone: Boolean,
     tipsDismissed: Boolean,
     onDismissTips: () -> Unit,
-    highSpeedPreference: Boolean?,
-    onHighSpeedPreferenceChanged: (Boolean) -> Unit,
-    liveTracking: Boolean = false,
-    liveVelocity: Float = 0f,
-    livePhase: LiftPhase = LiftPhase.IDLE,
-    liveColorLockedOn: Boolean = false,
-    reticleState: ReticleState = ReticleState.SEARCHING,
-    reticleConfidence: Float = 0f,
-    liveMarkerFrame: BarPathCaptureViewModel.LiveMarkerFrame? = null,
-    lockLost: Boolean = false,
-    currentRepSummary: BarPathCaptureViewModel.LiveRepSummary? = null,
-    liveTrailPoints: List<BarPathCaptureViewModel.TrailPoint> = emptyList(),
-    repCount: Int = 0,
-    onLiveResult: (LiveFrameResult) -> Unit = {},
-    onRetapColor: () -> Unit = {},
-    onSaveRep: () -> Unit = {},
-    onDiscardRep: () -> Unit = {},
-    onShareLiveRep: (onExplain: (String) -> Unit) -> Unit = { _ -> },
-    onEndLiveSession: () -> Unit = {},
-    onFinished: (String?, com.saiyanstrong.domain.util.GyroTimeline?, Double, Double, Long) -> Unit,
-    onGalleryVideoPicked: (android.net.Uri) -> Unit = {}
+    onFinished: (String?, GyroTimeline?, Double, Double, Long) -> Unit,
+    onGalleryVideoPicked: (Uri) -> Unit
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val recorder = remember { BarPathVideoRecorder() }
-    var previewViewRef by remember { mutableStateOf<PreviewView?>(null) }
-    var tapHighlightOffset by remember { mutableStateOf<Offset?>(null) }
-    val tapHighlightAlpha = remember { Animatable(0f) }
-    val coroutineScope = rememberCoroutineScope()
-
-    var angularVelocityMagnitude by remember { mutableFloatStateOf(0f) }
-    val stabilityMonitor = remember { StabilityMonitor { mag -> angularVelocityMagnitude = mag } }
-    val stabilityLevel = CameraStability.classify(angularVelocityMagnitude)
-
-    var previewBoxSizePx by remember { mutableStateOf(Size.Zero) }
-    var lastTapAnchor by remember { mutableStateOf<Offset?>(null) }
-
-    // Live-session elapsed timer -- counts time since lock-on, not video-file recording (Option A
-    // saves no video per rep; the pre-existing manual RECORD/STOP button below is unrelated).
-    var liveSessionElapsedSeconds by remember { mutableIntStateOf(0) }
-    LaunchedEffect(liveColorLockedOn) {
-        liveSessionElapsedSeconds = 0
-        if (liveColorLockedOn) {
-            while (true) {
-                delay(1000)
-                liveSessionElapsedSeconds++
-            }
-        }
-    }
 
     var hasPermission by remember {
         mutableStateOf(
@@ -270,36 +173,17 @@ private fun RecordingStep(
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted -> hasPermission = granted }
-
     LaunchedEffect(Unit) { if (!hasPermission) permissionLauncher.launch(Manifest.permission.CAMERA) }
 
     var isRecording by remember { mutableStateOf(false) }
-    // bindCamera() is async (ProcessCameraProvider resolves on a later tick) — gating RECORD on
-    // hasPermission alone let a fast tap fire startRecording() before videoCapture was set,
-    // producing a spurious "Recording failed — try again." Gate on real bind completion instead.
+    // bindCamera() is async — gate RECORD on real bind completion, not permission alone, so a fast
+    // tap can't fire startRecording() before videoCapture is set and hit a spurious "failed".
     var isCameraBound by remember { mutableStateOf(false) }
     var showCamera by remember { mutableStateOf(!isStandalone) }
 
     val galleryLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.PickVisualMedia()
     ) { uri -> uri?.let(onGalleryVideoPicked) }
-
-    // CameraConstrainedHighSpeedCaptureSession (raw Camera2) isn't reachable through this app's
-    // CameraX pipeline — this checks CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES instead, to see if a
-    // high frame rate can be requested via Camera2Interop on a normal session. See
-    // HighSpeedCapabilityChecker/BarPathVideoRecorder for the full tradeoff.
-    var highSpeedTier by remember { mutableStateOf<HighSpeedTier?>(null) }
-    LaunchedEffect(Unit) {
-        val providerFuture = ProcessCameraProvider.getInstance(context)
-        providerFuture.addListener({
-            highSpeedTier = HighSpeedCapabilityChecker.check(providerFuture.get())
-        }, ContextCompat.getMainExecutor(context))
-    }
-    val deviceSupportsHighSpeed = highSpeedTier != null && highSpeedTier != HighSpeedTier.STANDARD_30
-    // Defaults to OFF: forcing a fixed high frame rate via Camera2Interop is the most device-fragile
-    // part of the capture path and a suspected crash source on devices that only advertise a
-    // *variable* fps range. Opt-in only — the user must flip the toggle to enable it.
-    val effectiveHighSpeedEnabled = highSpeedPreference ?: false
 
     val snackbarHostState = remember { SnackbarHostState() }
     var snackbarMessage by remember { mutableStateOf<String?>(null) }
@@ -313,358 +197,81 @@ private fun RecordingStep(
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             Text(
-            "Attach a bright, distinctly-colored marker to the bar. Point the camera so the full range of motion stays in frame.",
-            color = Color.White.copy(alpha = 0.6f), fontSize = 12.sp,
-            modifier = Modifier.padding(bottom = 12.dp)
-        )
-        if (!tipsDismissed) {
-            BarPathTipsCard(onDismiss = onDismissTips, modifier = Modifier.padding(bottom = 12.dp))
-        }
-        if (isStandalone) {
-            Row(Modifier.fillMaxWidth().padding(bottom = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(
-                    onClick = { showCamera = true },
-                    modifier = Modifier.weight(1f),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = if (showCamera) NeonGreen else Color.White.copy(alpha = 0.6f))
-                ) { Text("RECORD", fontSize = 12.sp, fontWeight = FontWeight.Black) }
-                OutlinedButton(
-                    onClick = {
-                        showCamera = false
-                        galleryLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly))
-                    },
-                    modifier = Modifier.weight(1f),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = if (!showCamera) NeonGreen else Color.White.copy(alpha = 0.6f))
-                ) { Text("IMPORT FROM GALLERY", fontSize = 12.sp, fontWeight = FontWeight.Black) }
-            }
-        }
-        if (!showCamera) return@Column
-
-        if (deviceSupportsHighSpeed) {
-            HighSpeedToggleRow(
-                tier = highSpeedTier!!,
-                enabled = effectiveHighSpeedEnabled,
-                onToggle = onHighSpeedPreferenceChanged,
+                "Attach a bright, distinctly-colored marker to the bar. Point the camera so the full range of motion stays in frame.",
+                color = Color.White.copy(alpha = 0.6f), fontSize = 12.sp,
                 modifier = Modifier.padding(bottom = 12.dp)
             )
-        }
-
-        if (hasPermission) {
-            // Always-on gyro listener driving the pre-tap stability indicator — separate from the
-            // recording-time gyro capture (BarPathVideoRecorder.startRecording), which only runs
-            // once RECORD is pressed and serves a different purpose (offline shake compensation).
-            DisposableEffect(Unit) {
-                stabilityMonitor.start(context)
-                onDispose { stabilityMonitor.stop() }
+            if (!tipsDismissed) {
+                BarPathTipsCard(onDismiss = onDismissTips, modifier = Modifier.padding(bottom = 12.dp))
             }
-            // Auto-arms the settling window the moment a tap locks the color — LiftPhaseDetector's
-            // COMPLETE->READY transition already re-arms itself automatically every rep (verified
-            // in LiftPhaseDetector.kt: READY actively watches for the next onset with no external
-            // call needed), so this one auto-trigger, not a per-rep manual button, is genuinely all
-            // that's needed to satisfy "don't require a tap between reps" -- including the FIRST
-            // rep. Supersedes the old manual START REP button, removed below.
-            LaunchedEffect(liveColorLockedOn) {
-                if (liveColorLockedOn) recorder.startRep()
-            }
-            if (liveColorLockedOn) {
-                LiveSessionTopBar(
-                    elapsedSeconds = liveSessionElapsedSeconds,
-                    repCount = repCount,
-                    onRetap = {
-                        onRetapColor()
-                        tapHighlightOffset = null
-                        lastTapAnchor = null
-                    },
-                    onEndSession = {
-                        onEndLiveSession()
-                        tapHighlightOffset = null
-                        lastTapAnchor = null
-                    }
-                )
-            }
-            Box(
-                Modifier.fillMaxWidth().height(360.dp)
-                    .onSizeChanged { size -> previewBoxSizePx = Size(size.width.toFloat(), size.height.toFloat()) }
-            ) {
-                AndroidView(
-                    factory = { ctx ->
-                        PreviewView(ctx).also { previewView ->
-                            previewViewRef = previewView
-                            recorder.bindCamera(
-                                ctx, lifecycleOwner, previewView,
-                                highSpeedEnabled = effectiveHighSpeedEnabled,
-                                onHighSpeedUnavailable = {
-                                    snackbarMessage = "High-speed mode unavailable on this device, using 30fps"
-                                },
-                                onError = { msg -> snackbarMessage = msg },
-                                onBound = { isCameraBound = true },
-                                onLiveResult = onLiveResult
-                            )
-                        }
-                    },
-                    modifier = Modifier.fillMaxSize()
-                )
-                // Tap-to-lock marker color: only listens while not yet locked on, so an accidental
-                // tap mid-recording can't silently re-sample. RE-TAP re-arms it explicitly.
-                if (!liveColorLockedOn) {
-                    Box(
-                        Modifier.fillMaxSize().pointerInput(Unit) {
-                            detectTapGestures { offset ->
-                                val pv = previewViewRef
-                                if (pv == null || pv.width <= 0 || pv.height <= 0) return@detectTapGestures
-                                if (stabilityLevel == StabilityLevel.MOVING) {
-                                    // Gentle, not a hard block message — the user just tapped early.
-                                    snackbarMessage = "Hold the phone still, then tap"
-                                    return@detectTapGestures
-                                }
-                                val point = pv.meteringPointFactory.createPoint(offset.x, offset.y)
-                                recorder.requestColorSample(
-                                    point.x, point.y,
-                                    // SETTLING (not fully STABLE): a little motion blur may have
-                                    // shifted the true color slightly — widen the tolerance rather
-                                    // than fitting a tight band to a slightly-blurred patch.
-                                    widenTolerance = stabilityLevel == StabilityLevel.SETTLING,
-                                    angularVelocityMagnitudeAtTap = angularVelocityMagnitude
-                                )
-                                tapHighlightOffset = offset
-                                // Persists past the fade -- SEARCHING draws its reticle here until
-                                // a real centroid is detected, unlike tapHighlightOffset which is
-                                // purely a transient "you tapped here" confirmation flash.
-                                lastTapAnchor = offset
-                                coroutineScope.launch {
-                                    // 200ms fade-in, 500ms hold, 500ms fade-out -- the patch
-                                    // boundary flash confirming where the color was sampled.
-                                    tapHighlightAlpha.snapTo(0f)
-                                    tapHighlightAlpha.animateTo(1f, animationSpec = tween(200))
-                                    delay(500)
-                                    tapHighlightAlpha.animateTo(0f, animationSpec = tween(500))
-                                }
-                            }
-                        }
-                    )
-                }
-                tapHighlightOffset?.let { point ->
-                    if (tapHighlightAlpha.value > 0f) {
-                        Canvas(Modifier.fillMaxSize()) {
-                            val half = 15.dp.toPx()
-                            drawRect(
-                                color = Color.White.copy(alpha = tapHighlightAlpha.value),
-                                topLeft = Offset(point.x - half, point.y - half),
-                                size = Size(half * 2, half * 2),
-                                style = Stroke(
-                                    width = 2.dp.toPx(),
-                                    pathEffect = PathEffect.dashPathEffect(floatArrayOf(8f, 6f))
-                                )
-                            )
-                        }
-                    }
-                }
-                Column(
-                    modifier = Modifier.align(Alignment.TopStart).padding(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    // Only needed pre-tap — disappears once locked on, per spec.
-                    if (!liveColorLockedOn) {
-                        StabilityIndicator(level = stabilityLevel)
-                    }
-                    LiveTrackingReadout(tracking = liveTracking, velocity = liveVelocity, phase = livePhase)
-                }
-                // STEP 1 prompt -- only before the first successful tap of this lock-on cycle.
-                if (!liveColorLockedOn) {
-                    Text(
-                        "Hold still, then tap the bar",
-                        color = Color.White.copy(alpha = 0.85f),
-                        fontSize = 14.sp, fontWeight = FontWeight.Black,
-                        modifier = Modifier
-                            .align(Alignment.Center)
-                            .background(Color.Black.copy(alpha = 0.4f), androidx.compose.foundation.shape.RoundedCornerShape(6.dp))
-                            .padding(horizontal = 12.dp, vertical = 6.dp)
-                    )
-                }
-                // The lock-on reticle: rendered unconditionally (not just post-tap) -- reticleState
-                // defaults to SEARCHING before any tap too, so this doubles as the subtle ambient
-                // "aim here" hint STEP 1 asks for, falling back to the box center with no tap anchor
-                // yet, and continues seamlessly into real ACQUIRING/LOCKED tracking once a tap lands.
-                LockOnReticle(
-                    state = reticleState,
-                    confidence = reticleConfidence,
-                    markerFrame = liveMarkerFrame,
-                    tapAnchor = lastTapAnchor,
-                    boxSize = previewBoxSizePx,
-                    liftPhase = livePhase
-                )
-                // Velocity-colored trail: invisible until MOVING, frozen (not cleared) through
-                // COMPLETE so the user can see what they just lifted, per spec.
-                if (livePhase == LiftPhase.MOVING || livePhase == LiftPhase.COMPLETE) {
-                    LiveTrailOverlay(
-                        points = liveTrailPoints,
-                        frameWidthPx = liveMarkerFrame?.frameWidthPx ?: 0,
-                        frameHeightPx = liveMarkerFrame?.frameHeightPx ?: 0,
-                        boxSize = previewBoxSizePx
-                    )
-                }
-                if (livePhase == LiftPhase.MOVING) {
-                    Text(
-                        "~%.2f".format(liveVelocity),
-                        color = NeonGreen, fontSize = 22.sp, fontWeight = FontWeight.Black,
-                        fontFamily = FontFamily.Monospace,
-                        modifier = Modifier
-                            .align(Alignment.TopEnd)
-                            .padding(8.dp)
-                            .background(Color.Black.copy(alpha = 0.55f), androidx.compose.foundation.shape.RoundedCornerShape(6.dp))
-                            .padding(horizontal = 10.dp, vertical = 6.dp)
-                    )
-                }
-                if (lockLost) {
-                    LockLostBanner(
-                        onRetap = {
-                            onRetapColor()
-                            tapHighlightOffset = null
-                            lastTapAnchor = null
+            if (isStandalone) {
+                Row(Modifier.fillMaxWidth().padding(bottom = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(
+                        onClick = { showCamera = true },
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = if (showCamera) NeonGreen else Color.White.copy(alpha = 0.6f))
+                    ) { Text("RECORD", fontSize = 12.sp, fontWeight = FontWeight.Black) }
+                    OutlinedButton(
+                        onClick = {
+                            showCamera = false
+                            galleryLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly))
                         },
-                        modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 80.dp)
-                    )
-                }
-                currentRepSummary?.let { summary ->
-                    RepSummaryCard(
-                        summary = summary,
-                        onSave = onSaveRep,
-                        onDiscard = onDiscardRep,
-                        onShare = { onShareLiveRep { msg -> snackbarMessage = msg } },
-                        modifier = Modifier.align(Alignment.BottomCenter)
-                    )
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = if (!showCamera) NeonGreen else Color.White.copy(alpha = 0.6f))
+                    ) { Text("IMPORT FROM GALLERY", fontSize = 12.sp, fontWeight = FontWeight.Black) }
                 }
             }
-        } else {
-            Box(
-                Modifier.fillMaxWidth().height(360.dp).background(SaiyanGray),
-                contentAlignment = Alignment.Center
-            ) {
-                Text("Camera permission required", color = Color.White.copy(alpha = 0.6f), fontSize = 13.sp)
+            if (!showCamera) return@Column
+
+            if (hasPermission) {
+                Box(Modifier.fillMaxWidth().height(360.dp)) {
+                    AndroidView(
+                        factory = { ctx ->
+                            PreviewView(ctx).also { previewView ->
+                                recorder.bindCamera(
+                                    ctx, lifecycleOwner, previewView,
+                                    onError = { msg -> snackbarMessage = msg },
+                                    onBound = { isCameraBound = true }
+                                )
+                            }
+                        },
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
+            } else {
+                Box(
+                    Modifier.fillMaxWidth().height(360.dp).background(SaiyanGray),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("Camera permission required", color = Color.White.copy(alpha = 0.6f), fontSize = 13.sp)
+                }
             }
-        }
 
-        Spacer(Modifier.height(20.dp))
+            Spacer(Modifier.height(20.dp))
 
-        OutlinedButton(
-            onClick = {
-                if (!isRecording) {
-                    isRecording = true
-                    recorder.startRecording(context) { path, timeline, focal, sensor, startUptime ->
-                        onFinished(path, timeline, focal, sensor, startUptime)
-                        isRecording = false
+            OutlinedButton(
+                onClick = {
+                    if (!isRecording) {
+                        isRecording = true
+                        recorder.startRecording(context) { path, timeline, focal, sensor, startUptime ->
+                            onFinished(path, timeline, focal, sensor, startUptime)
+                            isRecording = false
+                        }
+                    } else {
+                        recorder.stopRecording()
                     }
-                } else {
-                    recorder.stopRecording()
-                }
-            },
-            enabled = hasPermission && (isRecording || isCameraBound),
-            colors = ButtonDefaults.outlinedButtonColors(contentColor = if (isRecording) DangerRed else NeonGreen)
-        ) {
-            Text(
-                if (isRecording) "STOP" else if (isCameraBound) "RECORD" else "STARTING CAMERA…",
-                fontWeight = FontWeight.Black, letterSpacing = 1.sp
-            )
+                },
+                enabled = hasPermission && (isRecording || isCameraBound),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = if (isRecording) DangerRed else NeonGreen)
+            ) {
+                Text(
+                    if (isRecording) "STOP" else if (isCameraBound) "RECORD" else "STARTING CAMERA…",
+                    fontWeight = FontWeight.Black, letterSpacing = 1.sp
+                )
+            }
         }
-    }
 
         SnackbarHost(hostState = snackbarHostState, modifier = Modifier.align(Alignment.BottomCenter))
-    }
-}
-
-/**
- * Pre-tap phone-stability hint, driven by [StabilityMonitor]'s raw gyroscope reading. Only shown
- * before the user has locked onto a marker color — a tap during MOVING is rejected (patch would
- * be blurred/mixed-color), SETTLING proceeds but widens the sampled tolerance (see
- * [com.saiyanstrong.util.barpath.widened]).
- */
-@Composable
-private fun StabilityIndicator(level: StabilityLevel, modifier: Modifier = Modifier) {
-    val (color, label) = when (level) {
-        StabilityLevel.MOVING -> DangerRed to "Hold still..."
-        StabilityLevel.SETTLING -> PowerAmber to "Almost..."
-        StabilityLevel.STABLE -> NeonGreen to "Tap the bar"
-    }
-    val dotAlpha = if (level == StabilityLevel.SETTLING) {
-        val transition = rememberInfiniteTransition(label = "stabilityPulse")
-        val alpha by transition.animateFloat(
-            initialValue = 0.4f, targetValue = 1f,
-            animationSpec = infiniteRepeatable(tween(600), repeatMode = RepeatMode.Reverse),
-            label = "stabilityPulseAlpha"
-        )
-        alpha
-    } else 1f
-    Row(
-        modifier = modifier
-            .background(Color.Black.copy(alpha = 0.55f), androidx.compose.foundation.shape.RoundedCornerShape(6.dp))
-            .padding(horizontal = 10.dp, vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Box(Modifier.size(10.dp).background(color.copy(alpha = dotAlpha), CircleShape))
-        Spacer(Modifier.width(6.dp))
-        Text(label, color = color, fontSize = 11.sp, fontWeight = FontWeight.Black)
-    }
-}
-
-/**
- * Live analysis readout during recording (slice 1 of the live loop). Shows whether the marker is
- * being tracked frame-to-frame and its smoothed speed. The speed is UNCALIBRATED — a relative
- * value, not true m/s, until pre-record scale calibration exists — so it's labelled "~" and
- * "rel", not "m/s", to avoid implying a real physical reading.
- */
-@Composable
-private fun LiveTrackingReadout(tracking: Boolean, velocity: Float, phase: LiftPhase, modifier: Modifier = Modifier) {
-    val (phaseLabel, phaseColor) = when (phase) {
-        LiftPhase.IDLE -> "TAP START REP" to Color.White.copy(alpha = 0.6f)
-        LiftPhase.SETTLING -> "SETTLING…" to PowerAmber
-        LiftPhase.READY -> "● READY" to NeonGreen
-        LiftPhase.MOVING -> "▲ MOVING" to NeonGreen
-        LiftPhase.COMPLETE -> "REP COMPLETE" to PowerAmber
-    }
-    Column(
-        modifier = modifier
-            .background(Color.Black.copy(alpha = 0.55f), androidx.compose.foundation.shape.RoundedCornerShape(6.dp))
-            .padding(horizontal = 10.dp, vertical = 6.dp)
-    ) {
-        Text(phaseLabel, color = phaseColor, fontSize = 12.sp, fontWeight = FontWeight.Black, letterSpacing = 1.sp)
-        Text(
-            if (tracking) "● tracking" else "○ searching",
-            color = if (tracking) NeonGreen.copy(alpha = 0.8f) else Color.White.copy(alpha = 0.5f),
-            fontSize = 9.sp, fontFamily = FontFamily.Monospace
-        )
-        // Velocity only meaningful in MOVING (gated by the phase machine). Uncalibrated → "rel".
-        if (phase == LiftPhase.MOVING) {
-            Text(
-                "~%.2f (rel. speed)".format(velocity),
-                color = Color.White.copy(alpha = 0.85f), fontSize = 11.sp, fontFamily = FontFamily.Monospace
-            )
-        }
-    }
-}
-
-@Composable
-private fun HighSpeedToggleRow(
-    tier: HighSpeedTier,
-    enabled: Boolean,
-    onToggle: (Boolean) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val targetFps = if (tier == HighSpeedTier.FPS_120) 120 else 60
-    Row(modifier = modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f)) {
-            Text(
-                "HIGH-SPEED MODE (${targetFps}FPS)", color = Color.White,
-                fontSize = 12.sp, fontWeight = FontWeight.Bold
-            )
-            Text(
-                "Requests a higher frame rate for finer velocity detail — not guaranteed on every device.",
-                color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp
-            )
-        }
-        Switch(
-            checked = enabled,
-            onCheckedChange = onToggle,
-            colors = SwitchDefaults.colors(checkedThumbColor = NeonGreen, checkedTrackColor = NeonGreen.copy(alpha = 0.5f))
-        )
     }
 }
 
@@ -673,7 +280,7 @@ private fun BarPathTipsCard(onDismiss: () -> Unit, modifier: Modifier = Modifier
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .background(SaiyanGray, androidx.compose.foundation.shape.RoundedCornerShape(6.dp))
+            .background(SaiyanGray, RoundedCornerShape(6.dp))
             .padding(horizontal = 12.dp, vertical = 10.dp)
     ) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -691,8 +298,8 @@ private fun BarPathTipsCard(onDismiss: () -> Unit, modifier: Modifier = Modifier
         Spacer(Modifier.height(6.dp))
         listOf(
             "Marker color should stand out from everything else in frame — avoid backgrounds with similar colors.",
-            "Calibrate against something rigid, in the same plane as the bar's travel (a plate diameter or bar sleeve).",
-            "Keep the camera still, perpendicular to the bar's path, with the full range of motion in frame."
+            "Film roughly side-on and perpendicular to the bar's path, camera still, full range of motion in frame.",
+            "You'll scale using a weight plate (about 45 cm across) in the recorded frame — keep one clearly visible."
         ).forEach { tip ->
             Text(
                 "•  $tip", color = Color.White.copy(alpha = 0.7f), fontSize = 11.sp,
@@ -708,8 +315,6 @@ private fun CalibrationStep(
     isStandalone: Boolean,
     onTap: (TapPoint) -> Unit,
     onResetPoints: () -> Unit,
-    onDualMarkerModeChanged: (Boolean) -> Unit,
-    onReferenceDistanceChanged: (String) -> Unit,
     onReferenceLengthChanged: (String) -> Unit,
     onWeightKgChanged: (String) -> Unit,
     onConfirm: () -> Unit
@@ -719,36 +324,17 @@ private fun CalibrationStep(
     var boxHeightPx by remember { mutableStateOf(1f) }
 
     val instruction = when {
-        uiState.markerSamplePoint == null -> "Tap the primary marker on the bar in this frame."
-        uiState.useDualMarkerMode && uiState.markerBSamplePoint == null ->
-            "Tap the second reference marker on the bar (other end of the sleeve)."
-        uiState.useDualMarkerMode -> "Ready — RESET POINTS to redo, or ANALYZE to continue."
-        uiState.calibrationPoint1 == null || uiState.calibrationPoint2 == null ->
-            "Now tap two points of known length (a plate diameter, the bar sleeve)."
+        uiState.markerSamplePoint == null -> "1. Tap the marker on the bar."
+        uiState.calibrationPoint1 == null -> "2. Tap one edge of a weight plate."
+        uiState.calibrationPoint2 == null -> "2. Now tap the opposite edge of that same plate."
         else -> "Ready — RESET POINTS to redo, or ANALYZE to continue."
     }
 
     Column(Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState())) {
-        Row(Modifier.fillMaxWidth().padding(bottom = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(
-                onClick = { onDualMarkerModeChanged(true) },
-                modifier = Modifier.weight(1f),
-                colors = ButtonDefaults.outlinedButtonColors(
-                    contentColor = if (uiState.useDualMarkerMode) NeonGreen else Color.White.copy(alpha = 0.6f)
-                )
-            ) { Text("DUAL-MARKER (RECOMMENDED)", fontSize = 10.sp, fontWeight = FontWeight.Black) }
-            OutlinedButton(
-                onClick = { onDualMarkerModeChanged(false) },
-                modifier = Modifier.weight(1f),
-                colors = ButtonDefaults.outlinedButtonColors(
-                    contentColor = if (!uiState.useDualMarkerMode) NeonGreen else Color.White.copy(alpha = 0.6f)
-                )
-            ) { Text("MANUAL CALIBRATION", fontSize = 10.sp, fontWeight = FontWeight.Black) }
-        }
-
         Text(
             instruction,
-            color = Color.White.copy(alpha = 0.6f), fontSize = 12.sp, modifier = Modifier.padding(bottom = 10.dp)
+            color = NeonGreen, fontSize = 13.sp, fontWeight = FontWeight.Black,
+            modifier = Modifier.padding(bottom = 10.dp)
         )
         if (frame != null) {
             Box(
@@ -772,9 +358,6 @@ private fun CalibrationStep(
                     uiState.markerSamplePoint?.let {
                         drawCircle(color = PowerAmber, radius = 14f, center = Offset(it.xPx * scaleX, it.yPx * scaleY))
                     }
-                    uiState.markerBSamplePoint?.let {
-                        drawCircle(color = MarkerBlue, radius = 14f, center = Offset(it.xPx * scaleX, it.yPx * scaleY))
-                    }
                     uiState.calibrationPoint1?.let {
                         drawCircle(color = MarkerGreen, radius = 12f, center = Offset(it.xPx * scaleX, it.yPx * scaleY))
                     }
@@ -787,35 +370,19 @@ private fun CalibrationStep(
 
         Spacer(Modifier.height(12.dp))
 
-        if (uiState.useDualMarkerMode) {
-            OutlinedTextField(
-                value = uiState.referenceDistanceCm,
-                onValueChange = onReferenceDistanceChanged,
-                label = { Text("Distance between markers (cm)", fontSize = 12.sp) },
-                singleLine = true,
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = NeonGreen,
-                    unfocusedBorderColor = Color.White.copy(alpha = 0.2f),
-                    focusedTextColor = Color.White,
-                    unfocusedTextColor = Color.White
-                ),
-                modifier = Modifier.fillMaxWidth()
-            )
-        } else {
-            OutlinedTextField(
-                value = uiState.referenceLengthCm,
-                onValueChange = onReferenceLengthChanged,
-                label = { Text("Reference length (cm)", fontSize = 12.sp) },
-                singleLine = true,
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = NeonGreen,
-                    unfocusedBorderColor = Color.White.copy(alpha = 0.2f),
-                    focusedTextColor = Color.White,
-                    unfocusedTextColor = Color.White
-                ),
-                modifier = Modifier.fillMaxWidth()
-            )
-        }
+        OutlinedTextField(
+            value = uiState.referenceLengthCm,
+            onValueChange = onReferenceLengthChanged,
+            label = { Text("Reference length in cm (a plate is ~45)", fontSize = 12.sp) },
+            singleLine = true,
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = NeonGreen,
+                unfocusedBorderColor = Color.White.copy(alpha = 0.2f),
+                focusedTextColor = Color.White,
+                unfocusedTextColor = Color.White
+            ),
+            modifier = Modifier.fillMaxWidth()
+        )
 
         if (isStandalone) {
             Spacer(Modifier.height(12.dp))
@@ -879,7 +446,7 @@ private fun ResultsStep(
     Column(Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState())) {
         if (calibrationFrame != null && trackedSamples.size >= 2) {
             Text(
-                "TRACKED PATH", color = PowerAmber, fontSize = 11.sp,
+                "TRACKED PATH — should follow the bar in a clean line", color = PowerAmber, fontSize = 11.sp,
                 fontWeight = FontWeight.Black, letterSpacing = 1.sp, modifier = Modifier.padding(bottom = 6.dp)
             )
             TrackedPathPreview(
@@ -896,16 +463,6 @@ private fun ResultsStep(
         ResultRow("Mean power", "%.0f W".format(analysis.meanPowerWatts))
         ResultRow("Range of motion", "%.1f cm".format(analysis.rangeOfMotionCm))
         ResultRow("Bar path deviation", "%.1f cm".format(analysis.barPathDeviationCm))
-
-        val ppmPoints = trackedSamples.mapNotNull { it.perFramePixelsPerMeter }
-        if (ppmPoints.size >= 2) {
-            Spacer(Modifier.height(16.dp))
-            Text(
-                "SCALE (PX/M) OVER REP — FLAT = NO DEPTH DRIFT", color = PowerAmber, fontSize = 10.sp,
-                fontWeight = FontWeight.Black, letterSpacing = 0.5.sp, modifier = Modifier.padding(bottom = 6.dp)
-            )
-            PpmChart(points = ppmPoints, modifier = Modifier.fillMaxWidth().height(80.dp))
-        }
 
         Spacer(Modifier.height(20.dp))
         if (canReplay) {
@@ -926,30 +483,12 @@ private fun ResultsStep(
     }
 }
 
-/** Small line chart of dual-marker per-frame pixels-per-meter over the rep — a flat line means
- * no depth drift was detected; a curve means it was detected and corrected for. */
-@Composable
-private fun PpmChart(points: List<Double>, modifier: Modifier = Modifier) {
-    Canvas(
-        modifier
-            .background(SaiyanGray, androidx.compose.foundation.shape.RoundedCornerShape(4.dp))
-            .padding(8.dp)
-    ) {
-        if (points.size < 2) return@Canvas
-        val minVal = points.min()
-        val maxVal = points.max()
-        val range = (maxVal - minVal).takeIf { it > 0.0 } ?: 1.0
-        val stepX = size.width / (points.size - 1)
-
-        val offsets = points.mapIndexed { i, v ->
-            Offset(i * stepX, size.height - ((v - minVal) / range * size.height).toFloat())
-        }
-        for (i in 0 until offsets.size - 1) {
-            drawLine(color = NeonGreen, start = offsets[i], end = offsets[i + 1], strokeWidth = 3f)
-        }
-    }
-}
-
+/**
+ * The tracked marker path drawn over the calibration frame — the user's own at-a-glance check that
+ * tracking actually followed the bar. A clean, roughly-vertical line means good tracking; a jagged
+ * or teleporting line means the tracker latched onto the wrong thing and the numbers shouldn't be
+ * trusted. Start = green, end = red.
+ */
 @Composable
 private fun TrackedPathPreview(frame: Bitmap, samples: List<BarPathSample>, modifier: Modifier = Modifier) {
     var boxWidthPx by remember { mutableStateOf(1f) }

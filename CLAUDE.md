@@ -2514,6 +2514,62 @@ _(Claude Code appends here after each completed task)_
   `THIGH_TORSO_COMFORT_GAIN` value (1.5) and its `0.6..1.4` clamp are first-pass defaults, worth
   tuning once actually dragged on a phone, same as the turntable's drag sensitivity from v0.49.0.
   versionCode 68, versionName 0.50.0.
+- [x] VBT fix & simplify to one robust flow (v0.51.0), per SPEC.md `/spec` round: user reported the
+  camera bar-path feature broken across the board (nonsense numbers, crashes, confusing
+  calibration, tracking losing the bar) and chose "simplify to one robust flow + verify" over
+  targeted patches, deferring the marker approach to "pick what's most reliable." The feature had
+  accumulated ~17 files and four overlapping capture/calibration mechanisms across a dozen sprints,
+  none verified end-to-end against real footage.
+  (1) **The biggest wrong-numbers bug wasn't tracking — it was the analysis window.**
+  `AnalyzeBarPathUseCase` was called with `concentricStartMs=first`/`concentricEndMs=last`, i.e.
+  the WHOLE clip. For a full descend-then-ascend rep the bar starts and ends standing → net
+  vertical displacement ≈ 0 → mean concentric velocity ≈ 0, while peak velocity gets grabbed from
+  the eccentric (downward) phase. That exactly reproduces the "0.00 mean, implausible peak" nonsense
+  from the first real-footage test (v0.25.1), which had been misattributed entirely to a tracking
+  spike. Fix: new pure `domain/util/ConcentricDetector.kt` — finds the ascent (bottom = max yPx →
+  highest subsequent point = min yPx), falls back to the whole clip when no clear ascent exists
+  (pure descent, too-short window). `BarPathCaptureViewModel` feeds that window to
+  `execute`/`trackFrames`. The analyzer's internal physics is untouched; only its input window
+  changed. 7 unit tests (`ConcentricDetectorTest`): full squat returns the ascent, monotonic
+  deadlift returns ~whole clip, pure descent/too-short fall back, unordered input sorted, net
+  displacement genuinely upward, <2 samples null.
+  (2) **Killed the dual-marker default** — the single most fragile thing in the feature. It was the
+  default (`useDualMarkerMode=true`), needed two *distinct* colors a *precise* known distance apart,
+  and if the reference marker was ever mis-detected the scale fell back to `firstNotNullOfOrNull{}
+  ?: 0.0` → a zeroed analysis. Removed dual-marker mode entirely from the flow: the UiState fields
+  (`useDualMarkerMode`/`markerBSamplePoint`/`colorProfileB`/`referenceDistanceCm`), the confirm
+  branch, and the mode toggle are gone. Single-marker + tap-two-reference-points (a plate is ~45 cm
+  across) is now the only calibration path — scale is measured once from a still frame instead of
+  depending on a second marker tracked across every frame.
+  (3) **Crash hardening** — the confirm path wraps every native/IO boundary (`trackMarker`,
+  `execute`/`trackFrames`, `videoDimensions`) in `runCatching`, routing any failure to a clear
+  ERROR step instead of crashing; the recorder-level guards (v0.42.1/v0.46.1) and the
+  gallery-import/first-frame guards already existed and stay.
+  (4) **Simplified the recording screen** — stripped the live reticle, live velocity readout,
+  tap-to-color-during-recording, stability indicator, continuous live rep session
+  (summary/trail/session-bar), high-speed toggle, and START REP overlays. The recording step is now
+  just: camera preview + RECORD/STOP (gated on real bind completion) + IMPORT FROM GALLERY
+  (standalone) + tips + a snackbar. `bindCamera` is called with `onLiveResult = null`, so the
+  third (ImageAnalysis) camera stream — the most device-fragile bind and a suspected crash source —
+  is never bound in the default flow. The live-session/reticle/high-speed engine code remains
+  dormant (unreferenced) rather than deleted this pass, per the spec's "reliability first, code
+  purge later" boundary.
+  (5) **See-it-worked** — the RESULTS screen's tracked-path preview (full-clip `trackedSamples`
+  over the calibration frame, green start / red end) is retitled "should follow the bar in a clean
+  line" so a jagged/teleporting path is an obvious signal to distrust the numbers before saving.
+  The dual-marker-only PpmChart was removed from results.
+  (6) One linear calibration UX: numbered prompts (1. tap the marker → 2. tap each edge of a plate),
+  reference-length field prefilled to 45 with an inline "a plate is ~45" hint, weight field
+  (standalone), always-scrollable with ANALYZE reachable (the v0.28.0 scroll fix stays).
+  KNOWN GAP — unchanged and central: real-footage validation still needs a physical device, which
+  this session doesn't have. What changed is that the flow to validate is now ONE path instead of
+  four, the single biggest numeric bug (whole-clip window) is fixed and unit-tested, and the
+  on-results tracked-path preview makes the user's own device check a glance. The marker-tracking
+  core (blob detection + nearest-neighbor, Sprint 28) is unchanged and still the thing a real
+  recording must confirm. Not done: deleting the now-dormant dual-marker/live-session/high-speed
+  files (`LiveSessionUi`/`LockOnReticle`/`LiveTrailOverlay`/`BarPathLiveAnalyzer`/
+  `HighSpeedCapabilityChecker` and `trackMarkerPair`), a follow-up cleanup flagged in SPEC.md §3.
+  versionCode 69, versionName 0.51.0.
 
 ## Release rules
 

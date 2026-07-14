@@ -12,6 +12,7 @@ import com.saiyanstrong.domain.repository.BarPathRepository
 import com.saiyanstrong.domain.repository.ExerciseRepository
 import com.saiyanstrong.domain.repository.UserRepository
 import com.saiyanstrong.domain.usecase.AnalyzeBarPathUseCase
+import com.saiyanstrong.domain.util.ConcentricDetector
 import com.saiyanstrong.domain.util.GyroTimeline
 import com.saiyanstrong.domain.util.LiftPhase
 import com.saiyanstrong.domain.util.LockOnTracker
@@ -42,15 +43,8 @@ data class BarPathCaptureUiState(
     val step: CaptureStep = CaptureStep.RECORDING,
     val videoPath: String? = null,
     val calibrationFrame: Bitmap? = null,
-    /** True (the recommended default): two-marker calibration, per-frame depth-drift
-     * correction. False: the original manual tap-two-known-distance-points calibration. */
-    val useDualMarkerMode: Boolean = true,
     val markerSamplePoint: TapPoint? = null,
     val colorProfile: MarkerColorProfile? = null,
-    /** Dual-marker mode only — the reference marker, a known real-world distance from A. */
-    val markerBSamplePoint: TapPoint? = null,
-    val colorProfileB: MarkerColorProfile? = null,
-    val referenceDistanceCm: String = "130",
     val calibrationPoint1: TapPoint? = null,
     val calibrationPoint2: TapPoint? = null,
     val referenceLengthCm: String = "45",
@@ -374,6 +368,11 @@ class BarPathCaptureViewModel @Inject constructor(
         _uiState.update { it.copy(weightKgInput = kg) }
     }
 
+    /**
+     * One linear single-marker calibration: first tap samples the marker's color; the next two
+     * taps place the ends of a known-length reference (a plate is ~45 cm across). A tap after both
+     * reference points restarts the reference pair.
+     */
     fun onCalibrationTap(point: TapPoint) {
         _uiState.update { state ->
             when {
@@ -381,34 +380,11 @@ class BarPathCaptureViewModel @Inject constructor(
                     val profile = sampleMarkerColor(state.calibrationFrame, point)
                     state.copy(markerSamplePoint = point, colorProfile = profile)
                 }
-                state.useDualMarkerMode -> {
-                    // Second (or re-)tap always sets marker B in dual-marker mode -- there's
-                    // nothing else to tap once both markers are placed.
-                    val profile = sampleMarkerColor(state.calibrationFrame, point)
-                    state.copy(markerBSamplePoint = point, colorProfileB = profile)
-                }
                 state.calibrationPoint1 == null -> state.copy(calibrationPoint1 = point)
                 state.calibrationPoint2 == null -> state.copy(calibrationPoint2 = point)
                 else -> state.copy(calibrationPoint1 = point, calibrationPoint2 = null)
             }
         }
-    }
-
-    /** Switching modes changes what every tap means, so all existing taps are cleared. */
-    fun onDualMarkerModeChanged(enabled: Boolean) {
-        _uiState.update {
-            it.copy(
-                useDualMarkerMode = enabled,
-                markerSamplePoint = null, colorProfile = null,
-                markerBSamplePoint = null, colorProfileB = null,
-                calibrationPoint1 = null, calibrationPoint2 = null,
-                errorMessage = null
-            )
-        }
-    }
-
-    fun onReferenceDistanceChanged(cm: String) {
-        _uiState.update { it.copy(referenceDistanceCm = cm) }
     }
 
     /** Averages a small pixel neighborhood around the tap to reduce single-pixel noise. */
@@ -438,7 +414,6 @@ class BarPathCaptureViewModel @Inject constructor(
         _uiState.update {
             it.copy(
                 markerSamplePoint = null, colorProfile = null,
-                markerBSamplePoint = null, colorProfileB = null,
                 calibrationPoint1 = null, calibrationPoint2 = null
             )
         }
@@ -448,12 +423,15 @@ class BarPathCaptureViewModel @Inject constructor(
         _uiState.update { it.copy(referenceLengthCm = cm) }
     }
 
+    /**
+     * Single-marker calibration → track → analyze. Every native/IO boundary (frame tracking,
+     * analysis, video-dimension read) is wrapped so a failure surfaces as a clear ERROR step
+     * instead of crashing. The analysis window is the auto-detected concentric (ascent) phase —
+     * see [ConcentricDetector]; without this, a full descend-then-ascend clip nets ~0 vertical
+     * displacement and reports a ~0 mean velocity.
+     */
     fun onConfirmCalibration() {
         val state = _uiState.value
-        if (state.useDualMarkerMode) onConfirmDualMarkerCalibration(state) else onConfirmManualCalibration(state)
-    }
-
-    private fun onConfirmManualCalibration(state: BarPathCaptureUiState) {
         val colorProfile = state.colorProfile
         val p1 = state.calibrationPoint1
         val p2 = state.calibrationPoint2
@@ -466,7 +444,7 @@ class BarPathCaptureViewModel @Inject constructor(
             return
         }
         if (p1 == null || p2 == null) {
-            _uiState.update { it.copy(errorMessage = "Tap two points on a reference object of known length.") }
+            _uiState.update { it.copy(errorMessage = "Tap each end of a known-length reference (a plate is ~45 cm across).") }
             return
         }
         if (referenceCm == null || referenceCm <= 0.0) {
@@ -484,108 +462,58 @@ class BarPathCaptureViewModel @Inject constructor(
 
         _uiState.update { it.copy(step = CaptureStep.PROCESSING, errorMessage = null) }
         viewModelScope.launch(Dispatchers.Default) {
-            val samples = barPathFrameTracker.trackMarker(
-                videoPath = videoPath,
-                colorProfile = colorProfile,
-                gyroTimeline = state.gyroTimeline,
-                focalMm = state.focalMm,
-                sensorWidthMm = state.sensorWidthMm,
-                videoStartUptimeNs = state.videoStartUptimeNs
-            )
+            val samples = runCatching {
+                barPathFrameTracker.trackMarker(
+                    videoPath = videoPath,
+                    colorProfile = colorProfile,
+                    gyroTimeline = state.gyroTimeline,
+                    focalMm = state.focalMm,
+                    sensorWidthMm = state.sensorWidthMm,
+                    videoStartUptimeNs = state.videoStartUptimeNs
+                )
+            }.getOrElse { emptyList() }
+
             if (samples.size < 2) {
                 _uiState.update {
                     it.copy(
                         step = CaptureStep.ERROR,
                         errorMessage = "Couldn't track the marker across enough frames — check it's " +
-                            "visible and brightly lit against the background, then try again."
+                            "bright and well-lit against the background, then try again."
                     )
                 }
                 return@launch
             }
-            val analysis = analyzeBarPathUseCase.execute(
-                samples = samples,
-                pixelsPerMeter = pixelsPerMeter,
-                massKg = massKg ?: 0.0,
-                concentricStartMs = samples.first().timestampMs,
-                concentricEndMs = samples.last().timestampMs
-            )
-            val frames = analyzeBarPathUseCase.trackFrames(samples, pixelsPerMeter, samples.first().timestampMs, samples.last().timestampMs)
-            val (vw, vh) = barPathFrameTracker.videoDimensions(videoPath)
-            _uiState.update {
-                it.copy(
-                    step = CaptureStep.RESULTS, analysis = analysis, trackedSamples = samples,
-                    trackedFrames = frames, videoWidthPx = vw, videoHeightPx = vh
+
+            // Restrict the analysis to the ascent; fall back to the whole clip if no clear
+            // concentric is found (ConcentricDetector already handles that internally).
+            val (concentricStartMs, concentricEndMs) = ConcentricDetector.detect(samples)
+                ?: (samples.first().timestampMs to samples.last().timestampMs)
+
+            val result = runCatching {
+                val analysis = analyzeBarPathUseCase.execute(
+                    samples = samples,
+                    pixelsPerMeter = pixelsPerMeter,
+                    massKg = massKg ?: 0.0,
+                    concentricStartMs = concentricStartMs,
+                    concentricEndMs = concentricEndMs
                 )
-            }
-        }
-    }
+                val frames = analyzeBarPathUseCase.trackFrames(samples, pixelsPerMeter, concentricStartMs, concentricEndMs)
+                val (vw, vh) = barPathFrameTracker.videoDimensions(videoPath)
+                Triple(analysis, frames, vw to vh)
+            }.getOrNull()
 
-    private fun onConfirmDualMarkerCalibration(state: BarPathCaptureUiState) {
-        val colorProfileA = state.colorProfile
-        val colorProfileB = state.colorProfileB
-        val referenceCm = state.referenceDistanceCm.toDoubleOrNull()
-        val videoPath = state.videoPath
-        val massKg = if (isStandalone) state.weightKgInput.toDoubleOrNull() else knownWeightKg
-
-        if (colorProfileA == null) {
-            _uiState.update { it.copy(errorMessage = "Tap the primary marker on the bar in this frame first.") }
-            return
-        }
-        if (colorProfileB == null) {
-            _uiState.update { it.copy(errorMessage = "Tap the second reference marker on the bar.") }
-            return
-        }
-        if (referenceCm == null || referenceCm <= 0.0) {
-            _uiState.update { it.copy(errorMessage = "Enter a valid distance between the two markers in cm.") }
-            return
-        }
-        if (isStandalone && (massKg == null || massKg <= 0.0)) {
-            _uiState.update { it.copy(errorMessage = "Enter the weight lifted in this video (kg).") }
-            return
-        }
-        if (videoPath == null) return
-
-        val referenceDistanceMeters = referenceCm / 100.0
-
-        _uiState.update { it.copy(step = CaptureStep.PROCESSING, errorMessage = null) }
-        viewModelScope.launch(Dispatchers.Default) {
-            val samples = barPathFrameTracker.trackMarkerPair(
-                videoPath = videoPath,
-                primaryColorProfile = colorProfileA,
-                referenceColorProfile = colorProfileB,
-                referenceDistanceMeters = referenceDistanceMeters,
-                gyroTimeline = state.gyroTimeline,
-                focalMm = state.focalMm,
-                sensorWidthMm = state.sensorWidthMm,
-                videoStartUptimeNs = state.videoStartUptimeNs
-            )
-            if (samples.size < 2) {
+            if (result == null) {
                 _uiState.update {
-                    it.copy(
-                        step = CaptureStep.ERROR,
-                        errorMessage = "Couldn't track both markers across enough frames — check they're " +
-                            "visible and brightly lit against the background, then try again."
-                    )
+                    it.copy(step = CaptureStep.ERROR, errorMessage = "Couldn't analyze the recording — try again.")
                 }
                 return@launch
             }
-            // Safe fallback if perFramePixelsPerMeter somehow never populated (e.g. the reference
-            // marker was never found even once) — AnalyzeBarPathUseCase's own pixelsPerMeter<=0.0
-            // guard handles total failure by returning a zeroed result rather than crashing.
-            val fallbackPixelsPerMeter = samples.firstNotNullOfOrNull { it.perFramePixelsPerMeter } ?: 0.0
-            val analysis = analyzeBarPathUseCase.execute(
-                samples = samples,
-                pixelsPerMeter = fallbackPixelsPerMeter,
-                massKg = massKg ?: 0.0,
-                concentricStartMs = samples.first().timestampMs,
-                concentricEndMs = samples.last().timestampMs
-            )
-            val frames = analyzeBarPathUseCase.trackFrames(samples, fallbackPixelsPerMeter, samples.first().timestampMs, samples.last().timestampMs)
-            val (vw, vh) = barPathFrameTracker.videoDimensions(videoPath)
+
+            val (analysis, frames, dims) = result
             _uiState.update {
                 it.copy(
                     step = CaptureStep.RESULTS, analysis = analysis, trackedSamples = samples,
-                    trackedFrames = frames, videoWidthPx = vw, videoHeightPx = vh
+                    trackedFrames = frames, videoWidthPx = dims.first, videoHeightPx = dims.second
                 )
             }
         }
