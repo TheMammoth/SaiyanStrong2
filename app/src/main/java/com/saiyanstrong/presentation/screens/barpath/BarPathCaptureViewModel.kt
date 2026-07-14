@@ -322,9 +322,15 @@ class BarPathCaptureViewModel @Inject constructor(
         _liveSessionReps.value = emptyList()
     }
 
-    fun onRecordingFinished(path: String?, gyroTimeline: GyroTimeline?, focalMm: Double, sensorWidthMm: Double, videoStartUptimeNs: Long) {
+    fun onRecordingFinished(path: String?, gyroTimeline: GyroTimeline?, focalMm: Double, sensorWidthMm: Double, videoStartUptimeNs: Long, errorDetail: String? = null) {
         if (path == null) {
-            _uiState.update { it.copy(step = CaptureStep.ERROR, errorMessage = "Recording failed — try again.") }
+            val detail = errorDetail?.let { "\n($it)" } ?: ""
+            _uiState.update {
+                it.copy(
+                    step = CaptureStep.ERROR,
+                    errorMessage = "Recording failed — try again.$detail"
+                )
+            }
             return
         }
         _uiState.update { it.copy(

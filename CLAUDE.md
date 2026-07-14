@@ -2570,6 +2570,29 @@ _(Claude Code appends here after each completed task)_
   files (`LiveSessionUi`/`LockOnReticle`/`LiveTrailOverlay`/`BarPathLiveAnalyzer`/
   `HighSpeedCapabilityChecker` and `trackMarkerPair`), a follow-up cleanup flagged in SPEC.md §3.
   versionCode 69, versionName 0.51.0.
+- [x] VBT recording-failure diagnostics + quality fallback (v0.51.1): user reported recording
+  still fails with "try again" after v0.51.0. That message comes only from
+  `onRecordingFinished(path == null)`, and since the RECORD button is even tappable the camera
+  bound fine (isCameraBound gates it) — so the failure is CameraX's actual record start/finalize
+  on-device, and the app was discarding the real reason. No USB logcat available (user hasn't set
+  up debugging), so this is a diagnostic + probable-fix pass, not a confirmed fix.
+  (1) **Surface the real error**: `BarPathVideoRecorder.startRecording`'s `onFinalized` callback
+  gained a 6th `errorDetail: String?` param; a new `describeRecordError(code, cause)` maps the
+  `VideoRecordEvent.Finalize` error code (ENCODING_FAILED / RECORDER_ERROR / SOURCE_INACTIVE /
+  NO_VALID_DATA / INSUFFICIENT_STORAGE / INVALID_OUTPUT_OPTIONS / etc.) plus the cause message to
+  a short human string. The catch-branch and videoCapture-null branch pass their own details too.
+  `BarPathCaptureViewModel.onRecordingFinished` appends the detail to the ERROR screen ("Recording
+  failed — try again.\n(code 6: encoding failed — …)") so the user can read the exact reason back
+  without logcat. Threaded through the screen's `onFinished` lambda (now 6-arg).
+  (2) **Probable fix — quality fallback**: the recorder demanded a fixed `Quality.HD`; a bound
+  camera that can't satisfy HD is a common cause of an immediate finalize-error on some devices.
+  Changed to `QualitySelector.fromOrderedList([HD, SD], FallbackStrategy.lowerQualityOrHigherThan(SD))`
+  so it resolves to whatever the device actually supports.
+  KNOWN GAP: the actual failing error code on the user's device is still unknown until they run
+  this build and read the message back — the quality fallback is the leading suspect but unconfirmed.
+  If it still fails, the on-screen "code N: …" string is the next diagnostic; USB logcat would give
+  the full stack if it comes to that.
+  versionCode 70, versionName 0.51.1.
 
 ## Release rules
 

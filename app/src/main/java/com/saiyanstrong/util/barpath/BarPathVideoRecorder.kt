@@ -10,6 +10,7 @@ import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.camera.video.FallbackStrategy
 import androidx.camera.video.FileOutputOptions
 import androidx.camera.video.Quality
 import androidx.camera.video.QualitySelector
@@ -107,8 +108,16 @@ class BarPathVideoRecorder {
                 it.surfaceProvider = previewView.surfaceProvider
             }
 
+            // Resolve to whatever this device actually supports rather than demanding HD — a
+            // fixed HD selector that the bound camera can't satisfy is a common cause of an
+            // immediate "recording failed" at finalize on some devices.
             val recorder = Recorder.Builder()
-                .setQualitySelector(QualitySelector.from(Quality.HD))
+                .setQualitySelector(
+                    QualitySelector.fromOrderedList(
+                        listOf(Quality.HD, Quality.SD),
+                        FallbackStrategy.lowerQualityOrHigherThan(Quality.SD)
+                    )
+                )
                 .build()
             val capture = VideoCapture.withOutput(recorder)
             videoCapture = capture
@@ -184,9 +193,9 @@ class BarPathVideoRecorder {
             PendingColorSample(normX, normY, widenTolerance, angularVelocityMagnitudeAtTap)
     }
 
-    fun startRecording(context: Context, onFinalized: (path: String?, gyroTimeline: GyroTimeline?, focalMm: Double, sensorWidthMm: Double, videoStartUptimeNs: Long) -> Unit) {
+    fun startRecording(context: Context, onFinalized: (path: String?, gyroTimeline: GyroTimeline?, focalMm: Double, sensorWidthMm: Double, videoStartUptimeNs: Long, errorDetail: String?) -> Unit) {
       try {
-        val capture = videoCapture ?: run { onFinalized(null, null, 0.0, 0.0, 0L); return }
+        val capture = videoCapture ?: run { onFinalized(null, null, 0.0, 0.0, 0L, "camera not ready (bind incomplete)"); return }
         val outputDir = File(context.cacheDir, "bar_path").apply { mkdirs() }
         val outputFile = File(outputDir, "recording_${System.currentTimeMillis()}.mp4")
 
@@ -250,10 +259,11 @@ class BarPathVideoRecorder {
                     currentGyroTimeline = null
 
                     if (event.hasError()) {
-                        Log.e("BarPathVideoRecorder", "Recording error: ${event.error}")
-                        onFinalized(null, null, 0.0, 0.0, 0L)
+                        val detail = describeRecordError(event.error, event.cause)
+                        Log.e("BarPathVideoRecorder", "Recording error: $detail", event.cause)
+                        onFinalized(null, null, 0.0, 0.0, 0L, detail)
                     } else {
-                        onFinalized(outputFile.absolutePath, timeline, focalMm, sensorWidthMm, videoStartUptimeNs)
+                        onFinalized(outputFile.absolutePath, timeline, focalMm, sensorWidthMm, videoStartUptimeNs, null)
                     }
                 }
             }
@@ -263,8 +273,28 @@ class BarPathVideoRecorder {
         gyroListener?.let { sensorManager?.unregisterListener(it) }
         gyroListener = null
         currentGyroTimeline = null
-        onFinalized(null, null, 0.0, 0.0, 0L)
+        onFinalized(null, null, 0.0, 0.0, 0L, "start failed: ${t.javaClass.simpleName} ${t.message ?: ""}".trim())
       }
+    }
+
+    /** Turns a CameraX [VideoRecordEvent.Finalize] error code into a short human-readable reason,
+     * so the UI can show WHY a recording failed instead of a generic message — the only diagnostic
+     * available without USB logcat access. */
+    private fun describeRecordError(error: Int, cause: Throwable?): String {
+        val name = when (error) {
+            VideoRecordEvent.Finalize.ERROR_INSUFFICIENT_STORAGE -> "not enough storage"
+            VideoRecordEvent.Finalize.ERROR_FILE_SIZE_LIMIT_REACHED -> "file size limit"
+            VideoRecordEvent.Finalize.ERROR_INVALID_OUTPUT_OPTIONS -> "invalid output options"
+            VideoRecordEvent.Finalize.ERROR_ENCODING_FAILED -> "encoding failed"
+            VideoRecordEvent.Finalize.ERROR_RECORDER_ERROR -> "recorder error"
+            VideoRecordEvent.Finalize.ERROR_NO_VALID_DATA -> "no valid data (clip too short?)"
+            VideoRecordEvent.Finalize.ERROR_SOURCE_INACTIVE -> "camera source inactive"
+            VideoRecordEvent.Finalize.ERROR_DURATION_LIMIT_REACHED -> "duration limit"
+            VideoRecordEvent.Finalize.ERROR_RECORDING_GARBAGE_COLLECTED -> "recording was garbage-collected"
+            else -> "unknown"
+        }
+        val causeMsg = cause?.message?.takeIf { it.isNotBlank() }?.let { " — $it" } ?: ""
+        return "code $error: $name$causeMsg"
     }
 
     fun stopRecording() {

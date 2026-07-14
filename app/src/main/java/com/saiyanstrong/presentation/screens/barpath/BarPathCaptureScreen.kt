@@ -158,7 +158,7 @@ private fun RecordingStep(
     isStandalone: Boolean,
     tipsDismissed: Boolean,
     onDismissTips: () -> Unit,
-    onFinished: (String?, GyroTimeline?, Double, Double, Long) -> Unit,
+    onFinished: (String?, GyroTimeline?, Double, Double, Long, String?) -> Unit,
     onGalleryVideoPicked: (Uri) -> Unit
 ) {
     val context = LocalContext.current
@@ -253,8 +253,8 @@ private fun RecordingStep(
                 onClick = {
                     if (!isRecording) {
                         isRecording = true
-                        recorder.startRecording(context) { path, timeline, focal, sensor, startUptime ->
-                            onFinished(path, timeline, focal, sensor, startUptime)
+                        recorder.startRecording(context) { path, timeline, focal, sensor, startUptime, errorDetail ->
+                            onFinished(path, timeline, focal, sensor, startUptime, errorDetail)
                             isRecording = false
                         }
                     } else {
