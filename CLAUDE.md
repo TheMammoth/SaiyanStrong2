@@ -2608,6 +2608,42 @@ _(Claude Code appends here after each completed task)_
   rejects it, or has no gyro) disables shake compensation and continues recording rather than
   aborting — `trackMarker` already handles a null `gyroTimeline`. The v0.51.1 quality fallback
   (HD→SD) stays as complementary robustness. versionCode 71, versionName 0.51.2.
+- [x] Sprint - mark-then-watch tracked playback (v0.52.0), per SPEC.md /spec round: user asked to
+  upload a video, mark the bar's marker color, and "play the video while watching in real time the
+  marker move with the bar and highlight its path." The *rendering* for this already existed
+  (BarPathReplayContent, Sprint 38) but was buried at the very end of the flow (record - tap marker -
+  tap 2 scale points - enter weight - analyze - THEN a replay button). This sprint makes that visual,
+  tracked playback the immediate reward for marking the bar. Three clarifying questions answered
+  first: watch-first (numbers optional), single-color trail + dot, applies to both recorded and
+  uploaded videos.
+  (1) Flow restructured (BarPathCaptureViewModel): CaptureStep is now RECORDING -> MARKING ->
+  PROCESSING(track) -> PLAYBACK -> optional SCALE -> PROCESSING(analyze) -> RESULTS. After a video is
+  obtained the user lands on MARKING (tap the marker to sample its color, no scale/weight); TRACK &
+  PLAY runs trackMarker (color only, off-thread) ONCE and goes to PLAYBACK. The tracked samples are
+  kept in state and reused verbatim by the optional analysis, so "get velocity numbers" never
+  re-tracks. onCalibrationTap split into onMarkerTap/onScaleTap; onConfirmCalibration split into
+  onTrackAndPlay (track->playback) + onConfirmScale (analyze reused samples->results);
+  onGetVelocityNumbers (playback->scale), onReMark (playback BACK->re-mark).
+  (2) New BarPathTrackPlaybackContent.kt: ExoPlayer/PlayerView (reused pattern) plays the video
+  auto-playing/looping with a single-color (neon) growing trail + a white dot ringed neon sitting on
+  the tracked marker at the current playback moment, synced via a new pure currentSampleIndex(samples,
+  playbackMs) helper (4 unit tests). Reuses the existing pure computeFittedVideoRect for the letterbox
+  mapping. Deliberately single-color (NOT velocity-colored) since there's no scale in this mode - a
+  speed-colored trail would imply a real reading it doesn't have. GET VELOCITY NUMBERS button at the
+  bottom; RE-MARK back button. Architecture is pre-track-then-synced-overlay (not literal per-frame
+  analysis during playback) - smooth, and the dot never vanishes on a frame that failed to track;
+  looks identical to live tracking.
+  (3) Screen (BarPathCaptureScreen): CalibrationStep split into MarkingStep (frame + tap to sample
+  color + TRACK & PLAY, no scale/weight) and ScaleStep (the old two-plate-edge taps + ref length +
+  weight + ANALYZE, now optional/after). PLAYBACK renders BarPathTrackPlaybackContent full-screen
+  (like the existing replay branch). The velocity-colored BarPathReplayContent, results, save, and
+  share are unchanged, reached after GET VELOCITY NUMBERS -> ANALYZE.
+  Bonus: this is now the tracking-verification tool the feature has needed since Sprint 26 - the user
+  can see in two taps (mark -> TRACK & PLAY) whether the dot actually follows the bar, before trusting
+  any number.
+  KNOWN GAP: the marker->screen coordinate mapping and ExoPlayer sync are the same unverified-on-device
+  pieces as the existing replay - but watching the dot track the bar is exactly the check that closes
+  that gap, so this feature is self-verifying on a real device. versionCode 72, versionName 0.52.0.
 
 ## Release rules
 

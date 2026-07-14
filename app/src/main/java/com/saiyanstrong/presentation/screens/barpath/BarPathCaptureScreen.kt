@@ -71,10 +71,10 @@ import com.saiyanstrong.util.barpath.BarPathVideoRecorder
 private val MarkerGreen = Color(0xFF39FF14)
 
 /**
- * The one VBT flow: record (or import) a set → tap the marker + a known-length reference to scale
- * → track the marker offline → analyze the concentric (upward) phase → save. The dual-marker,
- * high-speed, and live-uncalibrated-session paths were removed (v0.51.0) to make this single path
- * reliable; see SPEC.md.
+ * The VBT flow: record (or import) a set → tap the marker → WATCH the marker tracked over playback
+ * with its path highlighted (no scale needed) → optionally add a plate-scale + weight for real
+ * velocity numbers → save. Watching the tracked playback is the immediate reward for marking the
+ * bar and doubles as the tracking-verification tool; see SPEC.md.
  */
 @Composable
 fun BarPathCaptureScreen(
@@ -86,6 +86,7 @@ fun BarPathCaptureScreen(
 
     LaunchedEffect(uiState.isSaved) { if (uiState.isSaved) onDone() }
 
+    // Velocity-coloured replay (reached from RESULTS after GET VELOCITY NUMBERS).
     if (uiState.showReplay && uiState.videoPath != null) {
         BarPathReplayContent(
             videoPath = uiState.videoPath!!,
@@ -94,6 +95,19 @@ fun BarPathCaptureScreen(
             videoHeightPx = uiState.videoHeightPx,
             analysis = uiState.analysis,
             onBack = viewModel::onHideReplay
+        )
+        return
+    }
+
+    // Mark-then-watch tracked playback — full-screen, single-colour trail, no scale/weight.
+    if (uiState.step == CaptureStep.PLAYBACK && uiState.videoPath != null) {
+        BarPathTrackPlaybackContent(
+            videoPath = uiState.videoPath!!,
+            samples = uiState.trackedSamples,
+            videoWidthPx = uiState.videoWidthPx,
+            videoHeightPx = uiState.videoHeightPx,
+            onBack = viewModel::onReMark,
+            onGetVelocityNumbers = viewModel::onGetVelocityNumbers
         )
         return
     }
@@ -113,15 +127,22 @@ fun BarPathCaptureScreen(
                     onFinished = viewModel::onRecordingFinished,
                     onGalleryVideoPicked = viewModel::onGalleryVideoPicked
                 )
-                CaptureStep.CALIBRATING -> CalibrationStep(
+                CaptureStep.MARKING -> MarkingStep(
+                    uiState = uiState,
+                    onTap = viewModel::onMarkerTap,
+                    onReMark = viewModel::onReMark,
+                    onTrackAndPlay = viewModel::onTrackAndPlay
+                )
+                CaptureStep.SCALE -> ScaleStep(
                     uiState = uiState,
                     isStandalone = viewModel.isStandalone,
-                    onTap = viewModel::onCalibrationTap,
-                    onResetPoints = viewModel::onResetCalibrationPoints,
+                    onTap = viewModel::onScaleTap,
+                    onResetPoints = viewModel::onResetScalePoints,
                     onReferenceLengthChanged = viewModel::onReferenceLengthChanged,
                     onWeightKgChanged = viewModel::onWeightKgChanged,
-                    onConfirm = viewModel::onConfirmCalibration
+                    onConfirm = viewModel::onConfirmScale
                 )
+                CaptureStep.PLAYBACK -> Unit // handled full-screen above
                 CaptureStep.PROCESSING -> ProcessingStep()
                 CaptureStep.RESULTS -> ResultsStep(
                     analysis = uiState.analysis,
@@ -309,8 +330,69 @@ private fun BarPathTipsCard(onDismiss: () -> Unit, modifier: Modifier = Modifier
     }
 }
 
+/** Frame + tap-to-sample the marker color, then TRACK & PLAY. No scale/weight here — the whole
+ * point is to get to the tracked playback with the least setup. Tapping again re-samples. */
 @Composable
-private fun CalibrationStep(
+private fun MarkingStep(
+    uiState: BarPathCaptureUiState,
+    onTap: (TapPoint) -> Unit,
+    onReMark: () -> Unit,
+    onTrackAndPlay: () -> Unit
+) {
+    val frame = uiState.calibrationFrame
+    var boxWidthPx by remember { mutableStateOf(1f) }
+    var boxHeightPx by remember { mutableStateOf(1f) }
+    val hasMark = uiState.markerSamplePoint != null
+
+    Column(Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState())) {
+        Text(
+            if (hasMark) "Tap again to re-mark, or TRACK & PLAY to watch it track."
+            else "Tap the marker on the bar.",
+            color = NeonGreen, fontSize = 13.sp, fontWeight = FontWeight.Black,
+            modifier = Modifier.padding(bottom = 10.dp)
+        )
+        if (frame != null) {
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 420.dp)
+                    .aspectRatio(frame.width.toFloat() / frame.height.toFloat())
+                    .onSizeChanged { size -> boxWidthPx = size.width.toFloat(); boxHeightPx = size.height.toFloat() }
+                    .pointerInput(frame) {
+                        detectTapGestures { offset ->
+                            val scaleX = frame.width / boxWidthPx
+                            val scaleY = frame.height / boxHeightPx
+                            onTap(TapPoint(offset.x * scaleX, offset.y * scaleY))
+                        }
+                    }
+            ) {
+                Image(bitmap = frame.asImageBitmap(), contentDescription = null, modifier = Modifier.fillMaxSize())
+                Canvas(Modifier.fillMaxSize()) {
+                    val scaleX = boxWidthPx / frame.width
+                    val scaleY = boxHeightPx / frame.height
+                    uiState.markerSamplePoint?.let {
+                        drawCircle(color = PowerAmber, radius = 14f, center = Offset(it.xPx * scaleX, it.yPx * scaleY))
+                    }
+                }
+            }
+        }
+
+        Spacer(Modifier.height(16.dp))
+
+        SaiyanButton(onClick = onTrackAndPlay, modifier = Modifier.fillMaxWidth()) {
+            Text("TRACK & PLAY  >>>", fontWeight = FontWeight.Black)
+        }
+
+        uiState.errorMessage?.let {
+            Text(it, color = DangerRed, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
+        }
+    }
+}
+
+/** Optional scale step (reached from playback via GET VELOCITY NUMBERS): tap two plate edges +
+ * reference length + weight, then ANALYZE the already-tracked samples. */
+@Composable
+private fun ScaleStep(
     uiState: BarPathCaptureUiState,
     isStandalone: Boolean,
     onTap: (TapPoint) -> Unit,
@@ -324,10 +406,9 @@ private fun CalibrationStep(
     var boxHeightPx by remember { mutableStateOf(1f) }
 
     val instruction = when {
-        uiState.markerSamplePoint == null -> "1. Tap the marker on the bar."
-        uiState.calibrationPoint1 == null -> "2. Tap one edge of a weight plate."
-        uiState.calibrationPoint2 == null -> "2. Now tap the opposite edge of that same plate."
-        else -> "Ready — RESET POINTS to redo, or ANALYZE to continue."
+        uiState.calibrationPoint1 == null -> "Tap one edge of a weight plate."
+        uiState.calibrationPoint2 == null -> "Now tap the opposite edge of that same plate."
+        else -> "Ready — RESET POINTS to redo, or ANALYZE."
     }
 
     Column(Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState())) {
@@ -355,9 +436,6 @@ private fun CalibrationStep(
                 Canvas(Modifier.fillMaxSize()) {
                     val scaleX = boxWidthPx / frame.width
                     val scaleY = boxHeightPx / frame.height
-                    uiState.markerSamplePoint?.let {
-                        drawCircle(color = PowerAmber, radius = 14f, center = Offset(it.xPx * scaleX, it.yPx * scaleY))
-                    }
                     uiState.calibrationPoint1?.let {
                         drawCircle(color = MarkerGreen, radius = 12f, center = Offset(it.xPx * scaleX, it.yPx * scaleY))
                     }
@@ -427,7 +505,7 @@ private fun ProcessingStep() {
     ) {
         CircularProgressIndicator(color = NeonGreen)
         Spacer(Modifier.height(16.dp))
-        Text("Tracking the marker and computing velocity...", color = Color.White.copy(alpha = 0.6f), fontSize = 13.sp)
+        Text("Tracking the marker…", color = Color.White.copy(alpha = 0.6f), fontSize = 13.sp)
     }
 }
 

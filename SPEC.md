@@ -1,191 +1,157 @@
-# SaiyanStrong — VBT Camera Tracking: Fix & Simplify to One Robust Flow
+# SaiyanStrong — VBT: Mark-then-Watch Tracked Playback
 
 ## Status: Draft — awaiting confirmation before implementation.
 
-(Replaces the previous "Femur ↔ Torso Angle Coupling" biomechanics spec — that shipped as
-v0.50.0. This spec returns to the Velocity-Based Training camera feature, which the user reports
-is broken across the board: wrong/nonsense numbers, crashes, confusing calibration, and tracking
-that loses the bar. Direction chosen: collapse to one robust, verifiable flow — fewer features,
-ones that actually work — rather than more targeted patches on the accumulated complexity.)
+(Replaces the previous "VBT Fix & Simplify" spec — that shipped as v0.51.0/v0.51.1. This builds the
+user's requested flow: upload (or record) a video → tap to mark the bar's marker color → play the
+video and watch the marker tracked in real time with its path highlighted. Most of the *rendering*
+already exists in `BarPathReplayContent` [Sprint 38]; this spec restructures the flow so that
+visual, tracked playback is what you get right after marking the bar — not something buried behind
+scale calibration, weight entry, and analysis.)
 
 ---
 
 ## 0. Decisions locked in via clarifying questions
 
-- **Symptoms reported (all of them):** implausible numbers, crashes/errors, calibration
-  confusing/stuck, tracking losing the bar. So this is a ground-up reliability pass on the primary
-  flow, not a single bug.
-- **Marker approach — user deferred to "pick what's most reliable":** chosen approach is a
-  **single bright single-color marker** for tracking + a **one-time known-length scale** measured
-  by tapping two points on a static reference in the first frame (a standard weight plate is
-  ~45 cm across — always present, nothing to buy or attach twice). This is strictly more robust
-  than the current dual-marker default: scale is measured once from a still frame instead of
-  depending on a second marker being correctly detected in every single frame.
-- **Aggressiveness — "simplify to one robust flow + verify":** the offline **record → calibrate →
-  analyze** path becomes THE flow. The parallel/experimental paths (dual-marker calibration,
-  continuous live uncalibrated session, high-speed capture, live reticle/velocity overlays) are
-  removed from the primary user path. Their engine-level code may remain dormant where ripping it
-  out is risky, but nothing in the default flow renders or depends on them.
+- **Watch first, numbers optional.** After marking the marker color, the app tracks the marker
+  across all frames and immediately plays the video with the tracked overlay — **no scale tap and
+  no weight required just to watch**. A "GET VELOCITY NUMBERS" action on the playback screen adds
+  the plate-scale + weight step only if the user wants real m/s. This removes all friction from the
+  core "see it track" experience and makes it the primary way to verify tracking works.
+- **Single-color trail + marker dot.** As the video plays, a bright dot sits on the tracked marker
+  and leaves a growing single-color (neon green) trail behind it. No velocity coloring in this mode
+  — there's no scale yet, so a speed-colored trail would imply a real reading it doesn't have. (The
+  existing velocity-colored replay stays available *after* numbers are computed.)
+- **Applies to both recorded and uploaded videos.** Once a video exists from either source, the
+  mark → track → watch flow is identical. The video's origin doesn't matter once the file is on disk.
 
 ---
 
 ## 1. Objective
 
-Make the VBT feature produce trustworthy velocity numbers from a phone recording of a barbell
-lift, via the simplest flow that can be made reliable: record a set, tap the marker + a known
-reference length, get real m/s / power / bar-path back — and be able to *see* that the tracking
-actually followed the bar before trusting the number.
+Let a user confirm, at a glance, that bar tracking actually followed the bar — by watching it happen
+over their own footage — before caring about any number. Flow:
 
-Target users: any SaiyanStrong user who wants velocity feedback and is willing to stick one bright
-marker on the bar and film one set roughly side-on.
+1. Get a video (record in-app, or import from gallery — unchanged).
+2. See the first frame; **tap the marker on the bar** to sample its color (existing mechanism).
+3. The app tracks the marker across every frame (off-screen, using color only — no scale needed).
+4. The video plays with a **dot on the tracked marker + a growing trail** of where it's been,
+   synced to playback. Scrub/replay freely.
+5. Optionally tap **GET VELOCITY NUMBERS** → tap two edges of a plate for scale + enter weight →
+   the existing analysis runs (reusing the already-tracked samples) → results, with the
+   velocity-colored replay now available.
 
----
-
-## 2. Root causes & the fix for each
-
-### 2.1 Whole-clip-treated-as-concentric → mean velocity ≈ 0, peak from the descent (BIGGEST)
-- Today `AnalyzeBarPathUseCase.execute` is called with `concentricStartMs = samples.first()` and
-  `concentricEndMs = samples.last()` — the entire clip. For a full squat (down then up), net
-  vertical displacement over the whole clip ≈ 0, so `meanConcentricVelocityMs` ≈ 0, and
-  `peakVelocityMs` can come from the eccentric (downward) phase. This alone produces the classic
-  "0.00 mean, huge peak" nonsense.
-- **Fix**: new pure `ConcentricDetector` (domain/util) that finds the concentric (net-upward)
-  window from the tracked height series — from the lowest bar point to the subsequent highest
-  point (the ascent). `BarPathCaptureViewModel` passes that window's start/end into the analyzer
-  instead of the whole clip. A concentric-only clip yields ≈ the whole clip; a full-rep clip
-  yields just the ascent.
-- Guard: if the detected window has < N samples (e.g. the clip is too short or motion is flat),
-  fall back to the whole clip so a degenerate case degrades gracefully rather than returning empty.
-- **Acceptance**: unit tests on synthetic down-then-up height series confirm the detected window
-  is the ascent (positive net displacement), and that a monotonic-up series returns ≈ the whole
-  clip. A full-rep fixture that previously yielded ~0 mean velocity now yields a plausible positive
-  mean.
-
-### 2.2 Dual-marker default → garbage/zero scale when marker B mis-detected
-- Today `useDualMarkerMode = true` is the default; `onConfirmDualMarkerCalibration` uses
-  `perFramePixelsPerMeter`, and if the reference marker is never found the fallback is
-  `firstNotNullOfOrNull { ... } ?: 0.0`, which zeroes the analysis (or worse, uses a bad frame's
-  scale). It also demands two *distinct* colors a *precise* known distance apart — the most
-  error-prone setup in the feature.
-- **Fix**: remove dual-marker mode from the flow. Single-marker + tap-two-reference-points becomes
-  the only calibration path. The `useDualMarkerMode` branch, the marker-B tap handling, and the
-  reference-distance field are removed from the calibration UI and the ViewModel's confirm logic.
-- **Acceptance**: the calibration screen offers exactly one path; there is no way to reach a
-  zeroed-scale result from a mis-detected second marker because there is no second marker.
-
-### 2.3 Crashes / errors
-- **Fix**: wrap every native/IO boundary in the flow — `extractFirstFrame`, `trackMarker`,
-  `videoDimensions`, `analyzeBarPathUseCase.execute/trackFrames`, gallery import — in defensive
-  `runCatching`, routing any failure to `CaptureStep.ERROR` with a specific, human message instead
-  of crashing. High-speed capture stays off by default (already true since v0.42.1); its toggle is
-  removed from the simplified recording step. Confirm no path can call the analyzer with fewer
-  than 2 samples (already guarded) and that a null/failed frame extraction is handled everywhere.
-- **Acceptance**: forcing each failure (unreadable video, no marker found, zero-length clip)
-  surfaces a distinct error message and returns to a usable state; none crash.
-
-### 2.4 Calibration confusing/stuck
-- **Fix**: one linear, numbered flow with unmistakable prompts:
-  1. "Tap the marker on the bar" (samples color).
-  2. "Tap each end of one weight plate" (two points) — with the hint that a standard plate is
-     ~45 cm; the reference-length field is prefilled to 45 and editable.
-  3. (standalone entry only) "Weight lifted (kg)".
-  4. ANALYZE.
-- The v0.28.0 calibration-scroll fix stays; the screen must remain fully scrollable with the
-  ANALYZE button always reachable. Remove the dual/manual mode toggle entirely (one mode now).
-- **Acceptance**: a first-time user can complete calibration without guessing what to tap; every
-  required input has a visible prompt and validation message if missing.
-
-### 2.5 Tracking loses the bar / latches onto the wrong thing
-- Blob detection + nearest-neighbor tracking already exist (Sprint 28) and stay. The reliability
-  additions here are (a) removing false-positive-prone complexity, (b) making tracking *visible*
-  so the user can judge it, and (c) clearer guidance:
-  - **Show the tracked path on the RESULTS screen** over the calibration frame — full polyline +
-    start(green)/end(red) dots — so a jumpy/jagged path is immediately obvious before the user
-    trusts the numbers. (A tracked-path preview already exists from earlier sprints; ensure it is
-    actually shown in the simplified results, statically, not only inside the optional replay.)
-  - **Recording tips** (kept, tightened): one bright marker that contrasts with the background,
-    good lighting, film roughly side-on and perpendicular, keep the whole bar path in frame.
-- **Acceptance**: after analysis the user sees the path the tracker followed; obviously-bad
-  tracking is visually distinguishable from a clean vertical-ish path without reading any number.
+Target users: anyone who wants to see the tracking work on their own lift, with the least possible
+setup — and, as a bonus, this is the tool that finally makes the long-standing "is tracking
+trustworthy?" question answerable by the user directly.
 
 ---
 
-## 3. Simplifications (remove from the primary path)
+## 2. How it works technically (locked decisions, not open questions)
 
-- Dual-marker calibration mode (see 2.2).
-- Continuous live uncalibrated rep session (`currentRepSummary`/`liveSessionReps`/`LiveTrailOverlay`/
-  `LiveSessionUi`) — removed from the default recording step. It only ever produced *relative*
-  (non-m/s) numbers and is a major source of "confusing." Engine code may remain dormant; the
-  primary flow neither renders nor depends on it.
-- Live reticle / live velocity readout / START REP / tap-to-color-during-recording overlays on the
-  recording step — removed. Color is sampled during calibration on the first frame, which is more
-  reliable than sampling a live moving frame anyway.
-- High-speed (120fps) capture toggle — removed from the recording step (stays off).
-- The recording step becomes: camera preview + RECORD/STOP + IMPORT FROM GALLERY (standalone) +
-  dismissible tips. Nothing else.
+- **Pre-track, then synced overlay — not literal per-frame analysis during playback.** Tracking all
+  frames up front (fast, off the main thread, the existing `BarPathFrameTracker.trackMarker`) and
+  then playing the video with the pre-computed path overlaid + a cursor that follows the current
+  playback position looks identical to "live tracking" but is smooth and robust. True frame-by-frame
+  analysis synchronized to playback would stutter and would make the dot vanish on any frame that
+  fails to track. This is the same architecture the existing replay already uses.
+- **No scale needed to watch.** `trackMarker` returns pixel positions (`List<BarPathSample>` with
+  `xPx`/`yPx`); scale (`pixelsPerMeter`) is only consumed by `AnalyzeBarPathUseCase`. The playback
+  overlay maps pixel positions into the letterboxed video rect via the existing pure
+  `computeFittedVideoRect` helper — exactly how the current replay maps its path.
+- **Track once, reuse.** The samples tracked for playback are reused by the later analysis, so
+  choosing GET VELOCITY NUMBERS does not re-track the video.
 
-These are removals from the *user-facing default flow*. Deleting the underlying files entirely is
-a follow-up cleanup, explicitly out of scope for this pass unless it falls out cleanly — the goal
-here is a reliable path, not a code purge.
+---
+
+## 3. Core features & acceptance criteria
+
+### 3.1 Marking step (color only)
+- After a video is obtained, show its first frame. Tapping the bar samples the marker color
+  (existing `sampleMarkerColor` → `MarkerColorProfile.sample`, small-neighborhood average). A
+  visible dot marks where the color was sampled. A "RE-MARK" affordance clears it.
+- A single primary action: **TRACK & PLAY**, enabled once a color is sampled.
+- **Acceptance**: from a fresh video, one tap + TRACK & PLAY reaches the playback screen; no scale
+  or weight input is present or required at this stage.
+
+### 3.2 Tracked playback (the core deliverable)
+- Plays the video (ExoPlayer/PlayerView, already a dependency) with an overlay: a white dot ringed
+  in neon green sitting on the tracked marker at the current playback moment, and a growing neon
+  trail of the path up to that moment. Loops; has play/pause + a scrub slider (reuse the replay's
+  transport).
+- The dot follows the marker as the video plays; scrubbing moves the dot to match.
+- If tracking clearly failed (dot not on the bar / jumping), the user can go BACK and re-mark, or
+  RE-MARK in place — this screen *is* the verification tool.
+- **Acceptance**: on a real recording with a marked bar, the dot visibly tracks the bar through the
+  lift and the trail traces the bar path, synced to playback — with zero velocity/scale/weight setup.
+
+### 3.3 Optional velocity numbers
+- A **GET VELOCITY NUMBERS** action on the playback screen leads to the scale step: tap two edges of
+  a plate (a plate is ~45 cm), reference-length field (prefilled 45), and weight (standalone entry
+  only). Then ANALYZE runs `AnalyzeBarPathUseCase` over the auto-detected concentric window
+  (`ConcentricDetector`, v0.51.0) using the already-tracked samples, and shows the existing results
+  screen — from which the existing velocity-colored replay, share, and save all work as today.
+- **Acceptance**: velocity numbers require exactly the scale tap + weight (no re-recording,
+  re-marking, or re-tracking); skipping this step still lets the user watch tracked playback fully.
+
+### 3.4 Both sources
+- Recording in-app and importing from gallery both land on the same marking → playback flow. The
+  recorded-video path no longer goes straight to the old calibrate-everything-first screen.
 
 ---
 
 ## 4. Tech stack additions
 
-None. Pure Kotlin for `ConcentricDetector` (domain/util) + edits to existing
-`AnalyzeBarPathUseCase` wiring, `BarPathCaptureViewModel`, `BarPathCaptureScreen`. No new deps, no
-schema change (saved `BarPathAnalysis`/`bar_path_metrics` shape is unchanged — this changes *what
-window* feeds the same fields, not the fields).
+None. Reuses ExoPlayer/media3 (already a dependency, used by `BarPathReplayContent`),
+`BarPathFrameTracker`, `AnalyzeBarPathUseCase`, `ConcentricDetector`, and the pure
+`computeFittedVideoRect` helper. New code is a lightweight playback composable + flow restructuring.
 
 ---
 
 ## 5. Project structure (new/changed)
 
 ```
-app/src/main/java/com/saiyanstrong/
-├── domain/util/
-│   └── ConcentricDetector.kt              ← NEW: pure concentric-window detection
-├── domain/usecase/
-│   └── AnalyzeBarPathUseCase.kt           ← unchanged internally; called with detected window
-├── presentation/screens/barpath/
-│   ├── BarPathCaptureViewModel.kt         ← single-marker only; concentric window; crash hardening;
-│   │                                         remove dual-marker + live-session orchestration
-│   └── BarPathCaptureScreen.kt            ← one linear calibration; stripped recording step;
-│                                             tracked-path shown on results
+app/src/main/java/com/saiyanstrong/presentation/screens/barpath/
+├── BarPathCaptureViewModel.kt      ← new steps (MARKING → PLAYBACK → optional SCALE → RESULTS);
+│                                       track-once-reuse; color-only marking split from scale
+├── BarPathCaptureScreen.kt         ← MarkingStep (frame + marker tap + TRACK & PLAY),
+│                                       PlaybackStep (hosts the new overlay + GET VELOCITY NUMBERS),
+│                                       ScaleStep (the old scale-tap + weight, now optional/after)
+├── BarPathTrackPlaybackContent.kt  ← NEW: ExoPlayer + single-color trail/dot overlay (no velocity),
+│                                       reuses computeFittedVideoRect
+└── BarPathReplayContent.kt         ← unchanged; still the velocity-colored replay reached after
+                                        GET VELOCITY NUMBERS. computeFittedVideoRect made reusable.
 ```
 
-Test files mirror the new/changed pure logic (`ConcentricDetectorTest`, and any
-`AnalyzeBarPathUseCase` window-selection coverage), per this project's "pure core, untested Compose
-shell" split.
+A pure helper `currentSampleIndex(samples, playbackMs)` (which tracked sample a playback time maps
+to) is extracted and unit-tested, mirroring the existing `computeFittedVideoRect`/`velocityColorArgb`
+pure-helper precedent.
 
 ---
 
 ## 6. Code style (extends existing CLAUDE.md rules)
 
-- `ConcentricDetector` is pure `domain/util` (zero Android imports), same home/shape as
-  `SavitzkyGolayFilter`/`ScaleCorrection`.
-- No hardcoded colors; reuse existing theme tokens and existing composables where possible.
-- Error messages are specific and actionable ("Couldn't track the marker — make sure it's bright
-  and well-lit against the background"), never a bare "error".
-- Named constants for any thresholds (min concentric samples, etc.) with a one-line rationale,
-  matching existing `MIN_MARKER_PIXELS`-style precedent.
+- Overlay math (pixel→fitted-rect mapping, current-index selection) stays in pure helpers with unit
+  tests; the Compose/ExoPlayer shell stays untested (same split as `BarPathReplayContent`).
+- No hardcoded colors outside the existing theme tokens (NeonGreen/etc.).
+- No new persistence — tracked samples/playback are in-memory for the screen's lifetime, exactly as
+  the current ephemeral replay already is.
+- Reuse `computeFittedVideoRect` rather than duplicating the letterbox math.
 
 ---
 
 ## 7. Testing strategy
 
-- **ConcentricDetector**: synthetic height series — pure down-then-up (returns the ascent),
-  monotonic up (returns ~whole), flat/degenerate (falls back to whole clip), noisy-but-clearly-up.
-- **Analyzer window selection**: a full-rep sample fixture that previously produced ≈0 mean
-  velocity now produces a plausible positive mean when fed the detected window.
-- **Existing suite stays green**: `AnalyzeBarPathUseCaseTest`, `BarPathFrameTrackerTest`,
-  `MarkerColorProfileTest`, etc. — re-run; the analyzer's internal math is unchanged so these must
-  pass untouched.
-- **On-device verification (the user's part, honestly flagged)**: real-footage validation still
-  requires a physical recording — this session has no device. The tracked-path preview on results
-  is specifically to make that verification a glance for the user. Provide a short on-device test
-  checklist (record a single squat with a bright marker, tap marker + plate ends, confirm the path
-  follows the bar and the mean velocity is in a sane 0.1–1.5 m/s range).
+- **`currentSampleIndex`**: pure unit tests — playback before the first sample, between samples
+  (picks the latest sample at/under the time), after the last, empty list.
+- **`computeFittedVideoRect`**: existing tests stay green (reused, not changed).
+- **Track-once-reuse**: verify (via the ViewModel's logic) that reaching results after playback does
+  not invoke `trackMarker` a second time — a targeted assertion on the flow, not a full UI test.
+- **Existing suite green**: `ConcentricDetectorTest`, `AnalyzeBarPathUseCaseTest`,
+  `BarPathFrameTrackerTest`, replay helper tests — all must still pass.
+- **On-device verification (the user's, and now the whole point)**: this feature *is* the tracking
+  verification tool. Honest flag stays — the coordinate mapping and ExoPlayer sync are unverified on
+  a device — but watching the dot track the bar is exactly the check that closes that gap.
 - Full `assembleGithubDebug` + full unit-test run before shipping, same release discipline as every
   prior sprint (version bump before build, badging verification local + downloaded release asset,
   explicit file staging).
@@ -195,31 +161,28 @@ shell" split.
 ## 8. Boundaries
 
 **Always do:**
-- Keep all new analysis logic pure and unit-tested.
-- Keep the physics engine (`AnalyzeBarPathUseCase` internals) intact — only its *input window*
-  changes.
-- Surface every failure as a clear ERROR state; never crash the capture flow.
-- Preserve the existing saved-data shape and the ExerciseDetail "BAR SPEED" chart / rep-card
-  consumers (they read the same `BarPathAnalysis` fields).
+- Keep tracking off the main thread; keep the overlay math pure and tested.
+- Reuse the already-tracked samples for analysis — never re-track when getting numbers.
+- Keep the velocity-colored replay and results/save/share exactly as they are, reached after
+  GET VELOCITY NUMBERS.
 
 **Ask first about:**
-- Whether to *delete* the now-dormant dual-marker / live-session / high-speed files vs. leave them
-  dormant (default: leave dormant this pass, cleanup later).
-- The default reference-length prompt (45 cm plate) if a different standard is preferred.
+- Whether to drop the old "calibrate everything first" ordering entirely vs. keep a shortcut to it
+  (default: the new marking→playback flow replaces it; scale becomes an after-the-fact optional step).
 
 **Never do:**
-- Don't reintroduce dual-marker or the uncalibrated live session into the default flow.
-- Don't claim real-footage verification that didn't happen — the on-device check is the user's,
-  and the KNOWN GAP stays flagged.
-- Don't touch unrelated features (biomechanics visualizer, Coach mode, updater).
+- Don't color the watch-mode trail by speed (implies a real reading with no scale).
+- Don't reintroduce the removed dual-marker / live-session / high-speed paths.
+- Don't do literal per-frame analysis during playback (stutters; use pre-track + synced overlay).
+- Don't touch unrelated features (biomechanics, Coach mode, updater).
 
 ---
 
 ## 9. Notes
 
-This is deliberately a *subtractive* sprint: the VBT feature accumulated ~17 files and many
-overlapping tracking/calibration mechanisms across a dozen sprints, none verified end-to-end
-against real footage. The single highest-value change (concentric-window detection) is small and
-pure; the rest is removing fragility and making tracking visible so the user can trust — or
-distrust — a result at a glance. Real-device validation remains the open item it has always been,
-but the flow the user has to validate is now one path instead of four.
+The rendering the user asked for (video + marker cursor + highlighted path, synced) already exists —
+this sprint's real work is **flow**: make that visual playback the immediate reward for marking the
+bar, drop the scale/weight prerequisite for merely watching, and reuse one tracking pass for both the
+watch overlay and the optional numbers. It also, almost incidentally, turns the app's biggest
+open risk (is marker tracking trustworthy on real footage?) into something the user can now see and
+judge for themselves in two taps.

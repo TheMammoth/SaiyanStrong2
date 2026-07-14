@@ -35,7 +35,13 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 import kotlin.math.hypot
 
-enum class CaptureStep { RECORDING, CALIBRATING, PROCESSING, RESULTS, ERROR }
+/**
+ * RECORDING → MARKING (tap the marker color) → PROCESSING (track) → PLAYBACK (watch the tracked
+ * marker + path over the video, no scale needed) → optionally SCALE (tap plate edges + weight) →
+ * PROCESSING (analyze the already-tracked samples) → RESULTS. The marker is tracked ONCE (entering
+ * PLAYBACK) and those samples are reused by the analysis, so getting numbers never re-tracks.
+ */
+enum class CaptureStep { RECORDING, MARKING, PROCESSING, PLAYBACK, SCALE, RESULTS, ERROR }
 
 data class TapPoint(val xPx: Float, val yPx: Float)
 
@@ -362,7 +368,7 @@ class BarPathCaptureViewModel @Inject constructor(
             val frame = runCatching { barPathFrameTracker.extractFirstFrame(path) }.getOrNull()
             _uiState.update {
                 if (frame != null) {
-                    it.copy(step = CaptureStep.CALIBRATING, videoPath = path, calibrationFrame = frame, isPreparingVideo = false)
+                    it.copy(step = CaptureStep.MARKING, videoPath = path, calibrationFrame = frame, isPreparingVideo = false)
                 } else {
                     it.copy(step = CaptureStep.ERROR, isPreparingVideo = false, errorMessage = failureMessage)
                 }
@@ -374,18 +380,19 @@ class BarPathCaptureViewModel @Inject constructor(
         _uiState.update { it.copy(weightKgInput = kg) }
     }
 
-    /**
-     * One linear single-marker calibration: first tap samples the marker's color; the next two
-     * taps place the ends of a known-length reference (a plate is ~45 cm across). A tap after both
-     * reference points restarts the reference pair.
-     */
-    fun onCalibrationTap(point: TapPoint) {
+    /** MARKING step — every tap (re)samples the marker's color from that point on the first frame. */
+    fun onMarkerTap(point: TapPoint) {
+        _uiState.update { state ->
+            val profile = sampleMarkerColor(state.calibrationFrame, point)
+            state.copy(markerSamplePoint = point, colorProfile = profile, errorMessage = null)
+        }
+    }
+
+    /** SCALE step — taps place the two ends of a known-length reference (a plate is ~45 cm). A tap
+     * after both are placed restarts the pair. */
+    fun onScaleTap(point: TapPoint) {
         _uiState.update { state ->
             when {
-                state.markerSamplePoint == null -> {
-                    val profile = sampleMarkerColor(state.calibrationFrame, point)
-                    state.copy(markerSamplePoint = point, colorProfile = profile)
-                }
                 state.calibrationPoint1 == null -> state.copy(calibrationPoint1 = point)
                 state.calibrationPoint2 == null -> state.copy(calibrationPoint2 = point)
                 else -> state.copy(calibrationPoint1 = point, calibrationPoint2 = null)
@@ -416,13 +423,20 @@ class BarPathCaptureViewModel @Inject constructor(
         return MarkerColorProfile.sample((sumR / count).toInt(), (sumG / count).toInt(), (sumB / count).toInt())
     }
 
-    fun onResetCalibrationPoints() {
+    /** MARKING → clears the sampled color so the user can re-tap. Also used by the PLAYBACK
+     * screen's BACK to re-mark if tracking looked wrong. */
+    fun onReMark() {
         _uiState.update {
             it.copy(
+                step = CaptureStep.MARKING,
                 markerSamplePoint = null, colorProfile = null,
-                calibrationPoint1 = null, calibrationPoint2 = null
+                trackedSamples = emptyList(), errorMessage = null
             )
         }
+    }
+
+    fun onResetScalePoints() {
+        _uiState.update { it.copy(calibrationPoint1 = null, calibrationPoint2 = null) }
     }
 
     fun onReferenceLengthChanged(cm: String) {
@@ -430,41 +444,21 @@ class BarPathCaptureViewModel @Inject constructor(
     }
 
     /**
-     * Single-marker calibration → track → analyze. Every native/IO boundary (frame tracking,
-     * analysis, video-dimension read) is wrapped so a failure surfaces as a clear ERROR step
-     * instead of crashing. The analysis window is the auto-detected concentric (ascent) phase —
-     * see [ConcentricDetector]; without this, a full descend-then-ascend clip nets ~0 vertical
-     * displacement and reports a ~0 mean velocity.
+     * TRACK & PLAY: track the marker across the whole video (color only — no scale needed), then go
+     * to the PLAYBACK step to watch it. The tracked samples are kept in state and reused verbatim by
+     * [onConfirmScale] later, so choosing "get velocity numbers" never re-tracks. Every native/IO
+     * call is wrapped so a failure surfaces as a clear ERROR instead of crashing.
      */
-    fun onConfirmCalibration() {
+    fun onTrackAndPlay() {
         val state = _uiState.value
         val colorProfile = state.colorProfile
-        val p1 = state.calibrationPoint1
-        val p2 = state.calibrationPoint2
-        val referenceCm = state.referenceLengthCm.toDoubleOrNull()
         val videoPath = state.videoPath
-        val massKg = if (isStandalone) state.weightKgInput.toDoubleOrNull() else knownWeightKg
 
         if (colorProfile == null) {
             _uiState.update { it.copy(errorMessage = "Tap the marker on the bar in this frame first.") }
             return
         }
-        if (p1 == null || p2 == null) {
-            _uiState.update { it.copy(errorMessage = "Tap each end of a known-length reference (a plate is ~45 cm across).") }
-            return
-        }
-        if (referenceCm == null || referenceCm <= 0.0) {
-            _uiState.update { it.copy(errorMessage = "Enter a valid reference length in cm.") }
-            return
-        }
-        if (isStandalone && (massKg == null || massKg <= 0.0)) {
-            _uiState.update { it.copy(errorMessage = "Enter the weight lifted in this video (kg).") }
-            return
-        }
         if (videoPath == null) return
-
-        val pixelDistance = hypot((p2.xPx - p1.xPx).toDouble(), (p2.yPx - p1.yPx).toDouble())
-        val pixelsPerMeter = pixelDistance / (referenceCm / 100.0)
 
         _uiState.update { it.copy(step = CaptureStep.PROCESSING, errorMessage = null) }
         viewModelScope.launch(Dispatchers.Default) {
@@ -490,8 +484,54 @@ class BarPathCaptureViewModel @Inject constructor(
                 return@launch
             }
 
-            // Restrict the analysis to the ascent; fall back to the whole clip if no clear
-            // concentric is found (ConcentricDetector already handles that internally).
+            val (vw, vh) = runCatching { barPathFrameTracker.videoDimensions(videoPath) }.getOrDefault(0 to 0)
+            _uiState.update {
+                it.copy(step = CaptureStep.PLAYBACK, trackedSamples = samples, videoWidthPx = vw, videoHeightPx = vh)
+            }
+        }
+    }
+
+    /** PLAYBACK → SCALE: user wants real velocity numbers, so collect the plate-scale + weight.
+     * Resets the scale points so they tap fresh. */
+    fun onGetVelocityNumbers() {
+        _uiState.update {
+            it.copy(step = CaptureStep.SCALE, calibrationPoint1 = null, calibrationPoint2 = null, errorMessage = null)
+        }
+    }
+
+    /**
+     * SCALE → analyze. Reuses the samples already tracked in [onTrackAndPlay] (no re-track); scales
+     * pixels→meters from the two plate-edge taps; analyzes over the auto-detected concentric
+     * (ascent) window ([ConcentricDetector]) so a full descend-then-ascend clip doesn't net ~0.
+     */
+    fun onConfirmScale() {
+        val state = _uiState.value
+        val p1 = state.calibrationPoint1
+        val p2 = state.calibrationPoint2
+        val referenceCm = state.referenceLengthCm.toDoubleOrNull()
+        val videoPath = state.videoPath
+        val samples = state.trackedSamples
+        val massKg = if (isStandalone) state.weightKgInput.toDoubleOrNull() else knownWeightKg
+
+        if (p1 == null || p2 == null) {
+            _uiState.update { it.copy(errorMessage = "Tap each edge of a plate (~45 cm across) to set the scale.") }
+            return
+        }
+        if (referenceCm == null || referenceCm <= 0.0) {
+            _uiState.update { it.copy(errorMessage = "Enter a valid reference length in cm.") }
+            return
+        }
+        if (isStandalone && (massKg == null || massKg <= 0.0)) {
+            _uiState.update { it.copy(errorMessage = "Enter the weight lifted in this video (kg).") }
+            return
+        }
+        if (videoPath == null || samples.size < 2) return
+
+        val pixelDistance = hypot((p2.xPx - p1.xPx).toDouble(), (p2.yPx - p1.yPx).toDouble())
+        val pixelsPerMeter = pixelDistance / (referenceCm / 100.0)
+
+        _uiState.update { it.copy(step = CaptureStep.PROCESSING, errorMessage = null) }
+        viewModelScope.launch(Dispatchers.Default) {
             val (concentricStartMs, concentricEndMs) = ConcentricDetector.detect(samples)
                 ?: (samples.first().timestampMs to samples.last().timestampMs)
 
@@ -504,8 +544,7 @@ class BarPathCaptureViewModel @Inject constructor(
                     concentricEndMs = concentricEndMs
                 )
                 val frames = analyzeBarPathUseCase.trackFrames(samples, pixelsPerMeter, concentricStartMs, concentricEndMs)
-                val (vw, vh) = barPathFrameTracker.videoDimensions(videoPath)
-                Triple(analysis, frames, vw to vh)
+                analysis to frames
             }.getOrNull()
 
             if (result == null) {
@@ -515,13 +554,8 @@ class BarPathCaptureViewModel @Inject constructor(
                 return@launch
             }
 
-            val (analysis, frames, dims) = result
-            _uiState.update {
-                it.copy(
-                    step = CaptureStep.RESULTS, analysis = analysis, trackedSamples = samples,
-                    trackedFrames = frames, videoWidthPx = dims.first, videoHeightPx = dims.second
-                )
-            }
+            val (analysis, frames) = result
+            _uiState.update { it.copy(step = CaptureStep.RESULTS, analysis = analysis, trackedFrames = frames) }
         }
     }
 
