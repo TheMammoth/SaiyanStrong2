@@ -1,180 +1,168 @@
-# SaiyanStrong — Biomechanics Visualizer: Turntable View + Perfectly Rigid Proportions
+# SaiyanStrong — Biomechanics Visualizer: Femur ↔ Torso Angle Coupling
 
 ## Status: Draft — ready for implementation.
 
-(Replaces the previous "Real Squat Mechanics + Custom Proportions" spec in this file — that
-shipped as v0.48.0/v0.48.1; see CLAUDE.md "Sprint — Biomechanics Visualizer Phase 1" onward. User
-tried v0.48.1 and asked for two more things: rotate the stickman to view it from different angles,
-and stop letting the squat correction distort limb proportions at all.)
+(Replaces the previous "Turntable View + Perfectly Rigid Proportions" spec in this file — that
+shipped as v0.49.0. User tried it and the sliders still felt disconnected: "when i move the femur
+length the torso angle should also move when i move the torso slider the femur angle should
+change.")
 
 ---
 
-## 0. Decisions locked in via clarifying questions
+## 0. Decisions locked in via clarifying question
 
-- **Rotation approach**: **fake 3D turntable**, not a real 3D rig and not a plain 2D canvas tilt.
-  The existing single-sagittal-plane rig stays exactly as-is; a yaw angle is applied as a
-  post-process horizontal squash on top of `StickmanKinematics.buildNodes`' output — every node's
-  x-deviation from a fixed pivot (mid-foot, `ANKLE_X`) is multiplied by `cos(yaw)`. At yaw = 0°
-  (default) the view is pixel-identical to today. As yaw approaches 90° the whole cutout
-  foreshortens toward a thin vertical sliver at the pivot — like spinning a flat paper cutout, not
-  a real front/back view with different anatomy. Cheap, no new per-node depth data, existing
-  kinematics/tests untouched (the transform is a rendering-time projection, not a change to
-  `buildNodes`).
-- **Proportion priority vs. the bar-over-mid-foot pin**: **perfect proportions win.** The
-  horizontal-shift "bar-over-mid-foot" correction from v0.48.0 (which stretched the thigh segment
-  by a few percent to keep the bar pinned to the exact mid-foot pixel every frame) is **removed
-  entirely**. Every limb — including the thigh — now stays exactly `ratio × bodyScale` at every
-  single interpolated frame, with no exceptions. The bar will still land close to mid-foot as a
-  natural consequence of the angle-driven chain (torso lean compensates for hip travel, same
-  physical reason real lifters' bar paths stay fairly vertical), but it is no longer
-  force-corrected to the exact pixel. This is a one-way tradeoff, made explicitly by the user
-  after being told what it costs.
+- **Coupling direction — two-way, confirmed by the user over the one-way option offered:**
+  1. **Femur/shank/foot-length → torso angle (physically real).** Today `torsoAngleDeg` is an
+     independent authored/interpolated input, completely decoupled from `LimbRatios`. It becomes
+     **derived**: solved from a real balance equation (see 2.1) so the bar lands back over
+     mid-foot given however far the thigh/shank/foot ratios push the hip forward — the same
+     mechanical fact this app's own archetype content already claims ("Forward torso lean is
+     greater than standard" for LONG_FEMUR) but the kinematics never actually enforced.
+  2. **Torso ratio → knee/thigh angle (explicitly a stylistic/comfort nudge, not physics).** The
+     user picked this over leaving it one-way. There is no real mechanical reason torso *length*
+     dictates knee bend at a fixed squat depth — this direction is acknowledged as made up, small,
+     and clamped so it can never invert the existing hip-below-knee depth guarantee.
 
 ---
 
 ## 1. Objective
 
-Two independent changes to the existing Biomechanics Visualizer (`presentation/screens/
-biomechanics/*`, `domain/util/StickmanKinematics.kt`), both requested after trying v0.48.1:
+Make the Custom Proportions sliders (and, since `buildNodes` is one shared function for every
+archetype, the 4 fixed archetypes too) feel like one connected body instead of independently
+resizable segments. Two coupled changes to `StickmanKinematics.buildNodes`:
 
-1. **Rotate the view.** Today the stickman only ever renders from one fixed side-on angle. Add an
-   interactive yaw control so the user can spin the figure left/right on its own vertical axis and
-   see it from a range of angles, without needing a real 3D rig.
-2. **Never distort proportions during the squat.** Today's bar-over-mid-foot correction (v0.48.0)
-   is a translation applied after the fact, which makes the *thigh* segment silently drift off its
-   true ratio-defined length while every other limb stays rigid. Remove that correction so *every*
-   limb, with no exception, holds its exact ratio at every frame of the animation — accepting that
-   the bar will no longer be pinned to the literal mid-foot pixel.
-
-Target users: unchanged — anyone on the "Body" tab, viewing a fixed archetype, comparing
-archetypes, or using their own Custom Proportions.
+1. Stop reading `PoseAngles.torsoAngleDeg` as an independent input. Solve it instead from a
+   horizontal-balance equation over the already-built ankle→knee→hip chain, so the torso leans
+   exactly enough to bring the bar back over mid-foot. This is a genuine improvement over both
+   prior attempts at "bar over mid-foot": v0.48.0 achieved it via a post-hoc *translation* (which
+   broke thigh rigidity); v0.49.0 dropped it entirely (perfect rigidity, no balance). Solving for
+   a *rotation* instead gets both at once — rotation never changes segment length, so every limb
+   stays exactly rigid **and** the bar lands on mid-foot as a real consequence of the geometry,
+   not a hack.
+2. Add a small, explicitly-labeled "comfort" scaling factor: `torsoRatio`'s deviation from a
+   reference value nudges how far the thigh rotates for a given knee angle, so dragging the TORSO
+   slider visibly moves the femur too.
 
 ---
 
 ## 2. Core features & acceptance criteria
 
-### 2.1 Turntable yaw rotation
-- New pure function, `StickmanKinematics.applyYaw(nodes: List<NodePosition>, yawDegrees: Float):
-  List<NodePosition>` (or a new sibling object `StickmanYawProjection` — final placement decided
-  during implementation, following the existing `domain/util/` pure-core convention). For every
-  node: `newX = pivotX + (node.x - pivotX) * cos(yawDegrees)`, `y` unchanged. `pivotX` is the
-  fixed `ANKLE_X` constant (mid-foot) — same pivot the feet plant on, so rotation reads as
-  "spinning in place" rather than sliding sideways.
-- Applied at **render time only**, downstream of `StickmanInterpolator.interpolate(...)` — never
-  inside `buildNodes` itself, so every existing kinematics/interpolation test (rigidity, depth,
-  symmetry) continues to assert against the un-rotated rig and needs zero changes.
-- **Control**: drag horizontally anywhere on the `StickmanCanvas` to rotate — this is the natural
-  "spin the figure" gesture and avoids adding a second slider next to the existing scrub slider.
-  Yaw is clamped to a sensible range (e.g. −80°..80°, stopping short of the degenerate 90° sliver)
-  and is session-only state (resets to 0° on screen open) — not persisted, since it's a viewing
-  convenience, not a body-proportion setting.
-- Wired into every screen that hosts a `StickmanCanvas`: `BiomechanicsVisualizerScreen`,
-  `BiomechanicsCompareScreen` (each panel rotates independently), `CustomProportionsScreen`,
-  `ArchetypeSelectionScreen`'s small preview cards excluded (static thumbnails, not worth the
-  gesture surface on a tiny card).
-- **Acceptance**: at yaw = 0°, rendered output is identical to today (regression-testable: `applyYaw(nodes,
-  0f) == nodes`, exact equality). Dragging left/right on the canvas visibly rotates the figure in
-  real time with no lag (pure per-frame recompute, same cost class as the existing scrub).
+### 2.1 Torso angle solved from balance, not authored
+- After building the ankle→knee→hip chain exactly as today (shank/thigh lean from knee angle,
+  now also comfort-scaled — see 2.2), solve `torsoLean` such that:
+  `ankleX + shankDx + thighDx + (torsoRatio + barRiseRatio) × bodyScale × sin(torsoLean) ==
+  midFootX` (where `midFootX = ankleX + footLenRatio × bodyScale × 0.5`).
+- `sin(torsoLean)` is clamped to `[-1, 1]` before `asin` (an unreachable combination of extreme
+  ratios could otherwise be mathematically impossible to balance); the final angle is additionally
+  clamped to `[0°, 90°]` (a squat torso lean is never backward or past horizontal, as a defensive
+  bound, not something expected to trigger for any slider-reachable ratio combination).
+- `PoseAngles.torsoAngleDeg` stays in the model (same precedent as the already-unused
+  `hipAngleDeg`) but is no longer fed into this geometry.
+- **Acceptance**: for the same knee angle, increasing `thighRatio` (holding other ratios fixed)
+  changes the solved torso lean (regression test, not just eyeballed) — matching the literal ask
+  ("move femur length, torso angle should also move"). Sanity check already hand-verified before
+  writing code: at LONG_FEMUR's BOTTOM angles/ratios the solve yields a noticeably larger torso
+  lean than PROPORTIONAL's, consistent with this app's own existing archetype content copy.
 
-### 2.2 Remove the bar-over-mid-foot correction — perfect proportion rigidity
-- Delete the horizontal-shift block in `StickmanKinematics.buildNodes` (the `midFootX`/
-  `correction`/`hipC`/`neckC`/`headC`/`barC` translation) entirely. `hip`, `neck`, `head`, and
-  `bar` are used directly, uncorrected, as already computed by the angle-driven chain.
-- Update the class-level KDoc: remove the "Bar-over-mid-foot correction" section and its stated
-  thigh-rigidity tradeoff — it no longer applies.
-- **Acceptance**: a new/updated regression test asserts the thigh segment (`knee`→`hip`, via the
-  same L/R-midpoint `centerline()` helper already used for shank/torso) stays exactly
-  `thighRatio × bodyScale` at every interpolated progress step, for every archetype — closing the
-  one gap the existing "shank, torso, head-neck stay rigid" test explicitly excluded.
-- The old exact-equality bar-over-mid-foot test is removed (the invariant it asserted no longer
-  holds by design) — optionally replaced with a loose sanity check that the bar stays within some
-  generous band of mid-foot at BOTTOM, if useful, but not a hard requirement.
+### 2.2 Torso ratio nudges thigh lean (comfort factor, not physics)
+- `thighLean = shankLean - (180° - kneeAngleDeg) × comfortScale`, where `comfortScale = 1 +
+  THIGH_TORSO_COMFORT_GAIN × (torsoRatio - TORSO_REFERENCE_RATIO)`, clamped to a safe band (e.g.
+  `0.6..1.4`) so it can never zero out or invert the knee-driven rotation direction.
+  `TORSO_REFERENCE_RATIO` is PROPORTIONAL's torso ratio (0.29, the value the rest of the rig was
+  originally tuned against) — at that exact ratio, `comfortScale == 1.0` and behavior is
+  byte-identical to today.
+- Documented in KDoc, plainly, as a stylistic choice with no biomechanical justification — unlike
+  2.1, which is a real balance equation.
+- **Acceptance**: for the same knee angle, changing `torsoRatio` measurably changes the resulting
+  thigh segment's angle (not just torso). The existing "hip drops below the knee at BOTTOM, for
+  every archetype" regression test must still pass with the comfort factor applied to each
+  archetype's own torso ratio — re-verify numerically, don't assume the clamp band is automatically
+  safe.
+
+### 2.3 Rigidity and yaw are unaffected
+- Every segment (shank/thigh/torso/head-neck) stays exactly `ratio × bodyScale` at every frame —
+  unchanged from v0.49.0, and actually *reinforced* here, since solving an angle (rather than
+  translating nodes) can never break rigidity by construction.
+- `StickmanKinematics.applyYaw` (the turntable rotation from v0.49.0) is untouched — it's a
+  separate, purely cosmetic post-process downstream of all of this.
 
 ---
 
 ## 3. Tech stack additions
 
-None. Pure Kotlin (`domain/util/StickmanKinematics.kt` simplified; new pure yaw-projection
-function/object) + a `pointerInput`/`detectDragGestures` modifier on the existing Compose
-`StickmanCanvas`. No new dependencies.
+None. Pure Kotlin, `domain/util/StickmanKinematics.kt` only.
 
 ---
 
-## 4. Project structure (new/changed)
+## 4. Project structure (changed)
 
 ```
-app/src/main/java/com/saiyanstrong/
-├── domain/util/
-│   └── StickmanKinematics.kt          ← remove bar-over-midfoot correction block + KDoc
-│   └── (new) yaw projection fn/object ← pure, StickmanKinematics.applyYaw or new sibling file
-├── presentation/screens/biomechanics/
-│   ├── StickmanCanvas.kt              ← + drag-to-rotate gesture, applies yaw before draw
-│   ├── BiomechanicsVisualizerScreen.kt/ViewModel.kt   ← thread yaw state through (session-only)
-│   ├── BiomechanicsCompareScreen.kt/ViewModel.kt      ← per-panel independent yaw state
-│   └── CustomProportionsScreen.kt/ViewModel.kt        ← same drag-to-rotate on its canvas
+app/src/main/java/com/saiyanstrong/domain/util/
+└── StickmanKinematics.kt   ← torsoLean solved from balance instead of read from PoseAngles;
+                                thighLean gains a torsoRatio-driven comfort scale
 ```
 
-Test files mirror each changed pure-logic file, per this project's "pure core, untested Compose
-shell" split (`StickmanKinematicsTest.kt` updated; new yaw-projection test file).
+Test file mirrors it: `StickmanKinematicsTest.kt` gains coupling-direction tests; existing rigidity
+and depth tests re-verified (numbers may shift slightly since torso lean values change, but the
+*invariants* — exact rigidity, hip below knee at BOTTOM — must still hold).
 
 ---
 
 ## 5. Code style (extends existing CLAUDE.md rules)
 
-- Yaw projection stays pure (`domain/util`, zero Android/Compose imports), same split as every
-  other kinematics function today.
-- No hardcoded colors, no new dependencies, no new persistence — yaw is transient UI state
-  (`remember`/ViewModel `StateFlow`, not DataStore).
-- Drag gesture uses Compose's own first-party `pointerInput { detectDragGestures { ... } }` —
-  consistent with this project's "Compose only, first-party APIs" pattern used elsewhere
-  (`Animatable`, `rememberInfiniteTransition` etc. in the VBT reticle work).
+- Stays pure (`domain/util`, zero Android/Compose imports) — same split as everything else in this
+  file.
+- Constants (`TORSO_REFERENCE_RATIO`, `THIGH_TORSO_COMFORT_GAIN`, clamp bounds) are named,
+  top-of-object `private const val`s with a one-line comment on what each does — no magic numbers
+  buried inline, matching the existing `ANKLE_X`/`BODY_SCALE` precedent.
 
 ---
 
 ## 6. Testing strategy
 
-- **Yaw identity at 0°**: `applyYaw(nodes, 0f)` returns nodes with x unchanged (exact equality) —
-  locks in "default view matches today" permanently.
-- **Yaw squashes toward the pivot**: at some nonzero yaw (e.g. 45°/90°), every node's x moves
-  strictly closer to `ANKLE_X` than at yaw 0° (except nodes already exactly at the pivot) —
-  verifies the squash direction/magnitude without over-specifying exact pixel values.
-- **Thigh rigidity**: new test parallel to the existing shank/torso/head-neck rigidity test,
-  sweeping progress 0.0→1.0 across every archetype, asserting thigh length stays exactly
-  `thighRatio × bodyScale` (tolerance 1e-4, matching existing style).
-- Full existing suite (`StickmanKinematicsTest`, `StickmanInterpolatorTest`,
-  `StickmanRendererTest`) must stay green — re-derive any expected values that assumed the
-  now-removed correction (the old bar-over-mid-foot exact-equality test is expected to be
-  deleted/replaced, not "fixed" to still pass against a no-longer-true invariant).
+- **Femur → torso coupling**: fixed knee angle, two different `thighRatio` values → solved torso
+  lean differs between them (not just "doesn't crash" — an actual numeric comparison).
+- **Torso → thigh coupling**: fixed knee angle, two different `torsoRatio` values → resulting
+  thigh segment's angle (derivable from its endpoints) differs between them.
+- **Rigidity**: existing shank/thigh/torso/head-neck exact-length test must still pass unchanged
+  in spirit (rotation-only geometry guarantees it, but re-run for real, don't assume).
+- **Depth**: existing "hip below knee at BOTTOM" test re-verified against the comfort-scaled thigh
+  lean for all 4 archetypes' real torso ratios — deepen angles further only if a real failure
+  turns up, not preemptively.
+- **Balance**: new test confirming the bar lands at (or very near) mid-foot again now that it's
+  solved rather than dropped — within float tolerance, for a representative set of ratios/angles.
+- Full existing suite must stay green (`StickmanInterpolatorTest`, `StickmanRendererTest`
+  included) — re-derive any expected values that assumed the old fixed-`torsoAngleDeg` behavior.
 
 ---
 
 ## 7. Boundaries
 
 **Always do:**
-- Keep the yaw transform a pure, separately-testable function — never bake it into `buildNodes`.
-- Preserve every other existing archetype/CUSTOM behavior — this sprint only removes the
-  bar-pin correction and adds a rendering-time rotation, nothing else about kinematics changes.
+- Keep this a pure rotation-only solve — never reintroduce a translation-based correction (that
+  was the specific thing that broke rigidity in v0.48.0).
+- Clamp both the comfort scale and the solved angle defensively, and document why each clamp
+  exists.
 - Run the full test suite + `assembleGithubDebug` before shipping, same release discipline as
-  every prior sprint (version bump before build, badging verification, explicit file staging).
+  every prior sprint.
 
 **Ask first about:**
-- Exact yaw clamp range and drag sensitivity (pixels-per-degree) — pick a sane default, confirm
-  after it's tried once if it feels off.
+- Exact values for `THIGH_TORSO_COMFORT_GAIN` and the clamp bands — pick a first-pass default
+  that produces a visible-but-not-absurd effect across the Custom screen's slider ranges; confirm
+  after it's tried if it feels off.
 
 **Never do:**
-- Don't build a real 3D rig (per-node depth/z data, 3D projection) — explicitly ruled out in favor
-  of the cheap cos(yaw) squash.
-- Don't re-add any form of bar-pinning correction — proportions win outright per the locked-in
-  decision above.
-- Don't touch the VBT bar-path feature (`presentation/screens/barpath/*`) — unrelated, out of
-  scope even though both involve "bar path."
+- Don't reintroduce a translation-based bar correction.
+- Don't touch `applyYaw`/the turntable feature — unrelated, already correct.
+- Don't touch the VBT bar-path feature — unrelated, out of scope.
 
 ---
 
 ## 8. Notes
 
-Removing the bar-over-mid-foot correction is a genuine step back on the "bar always over mid-foot"
-mechanical-accuracy front from v0.48.0 — flagged, not silently absorbed. The user chose perfect
-proportions over that pin when told the tradeoff explicitly. The turntable rotation is cosmetic
-only (a rendering projection), so it carries no mechanical-accuracy tradeoff of its own — the
-figure is still the same single-sagittal-plane rig underneath, just viewed at a squash angle.
+This turns out to actually *resolve* the tension flagged in the previous two specs (v0.48.0's
+"proportions vs. bar pin" tradeoff, v0.49.0's explicit choice to drop the pin) rather than pick a
+side again — solving for a rotation instead of a translation gets exact rigidity **and** a
+mechanically real bar-over-mid-foot result at the same time. The femur↔torso coupling was the
+missing piece that made this possible; it wasn't available to the earlier specs because nothing
+had asked for the ratios and the angles to depend on each other yet.

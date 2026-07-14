@@ -52,6 +52,21 @@ class StickmanKinematicsTest {
         return NodePosition(left, (l.x + r.x) / 2f, l.y)
     }
 
+    /** Lean angle (degrees from vertical) of the hip-to-neck vector — the rendered torso angle,
+     * read back out of the built nodes rather than re-deriving it independently. */
+    private fun torsoLeanOf(nodes: List<NodePosition>): Double {
+        val hip = node(nodes, NodeId.HIP_CENTER)
+        val neck = node(nodes, NodeId.NECK_BASE)
+        return Math.toDegrees(Math.atan2((neck.x - hip.x).toDouble(), (hip.y - neck.y).toDouble()))
+    }
+
+    /** Lean angle (degrees from vertical) of the knee-to-hip vector — the rendered thigh angle. */
+    private fun thighAngleOf(nodes: List<NodePosition>): Double {
+        val kneeCenter = centerline(nodes, NodeId.L_KNEE, NodeId.R_KNEE)
+        val hip = node(nodes, NodeId.HIP_CENTER)
+        return Math.toDegrees(Math.atan2((hip.x - kneeCenter.x).toDouble(), (kneeCenter.y - hip.y).toDouble()))
+    }
+
     @Test
     fun `every node id is present exactly once`() {
         val nodes = StickmanKinematics.buildNodes(ratios, PoseAngles(180f, 180f, 5f))
@@ -61,9 +76,10 @@ class StickmanKinematicsTest {
 
     @Test
     fun `shank, thigh, torso, and head-neck segments all stay exactly rigid at every pose`() {
-        // Since the v0.48.0 bar-over-midfoot correction was removed, there is no longer any
-        // exception here: every segment in the chain (thigh included) holds its exact ratio at
-        // every pose. This is the real regression coverage for "limb length stays rigid."
+        // Torso lean is now solved (a rotation about the hip), not translated — a rotation can
+        // never change segment length, so there is no exception here: every segment in the chain
+        // (thigh and torso included) holds its exact ratio at every pose. This is the real
+        // regression coverage for "limb length stays rigid."
         val bodyScale = 0.80
         for (angles in listOf(
             PoseAngles(180f, 180f, 5f), PoseAngles(130f, 120f, 35f),
@@ -80,6 +96,52 @@ class StickmanKinematicsTest {
             assertEquals("thigh at $angles", ratios.thighRatio * bodyScale, thighLength, 1e-4)
             assertEquals("torso at $angles", ratios.torsoRatio * bodyScale, torsoLength, 1e-4)
             assertEquals("head-neck at $angles", ratios.headNeckRatio * bodyScale, headLength, 1e-4)
+        }
+    }
+
+    @Test
+    fun `increasing thigh ratio changes the solved torso lean (femur to torso coupling)`() {
+        // The literal ask: "when i move the femur length the torso angle should also move."
+        // A longer thigh pushes the hip further from the ankle at the same knee angle, which the
+        // balance equation must compensate for with a different torso lean.
+        val angles = PoseAngles(72f, 57f, 47f)
+        val shortThigh = ratiosOf(thigh = 0.18f, shank = 0.32f, torso = 0.29f, head = 0.16f, hipHalf = 0.07f)
+        val longThigh = ratiosOf(thigh = 0.32f, shank = 0.18f, torso = 0.29f, head = 0.16f, hipHalf = 0.07f)
+        val torsoLeanShort = torsoLeanOf(StickmanKinematics.buildNodes(shortThigh, angles))
+        val torsoLeanLong = torsoLeanOf(StickmanKinematics.buildNodes(longThigh, angles))
+        assertTrue(
+            "expected a different torso lean for a different thigh ratio, got $torsoLeanShort for both",
+            Math.abs(torsoLeanLong - torsoLeanShort) > 1f
+        )
+    }
+
+    @Test
+    fun `changing torso ratio changes the resulting thigh angle (comfort coupling)`() {
+        // The literal ask: "when i move the torso slider the femur angle should change." This is
+        // the explicitly-labeled stylistic comfort factor, not a balance-equation consequence.
+        val angles = PoseAngles(72f, 57f, 47f)
+        val shortTorso = ratiosOf(thigh = 0.23f, shank = 0.27f, torso = 0.20f, head = 0.16f, hipHalf = 0.07f)
+        val longTorso = ratiosOf(thigh = 0.23f, shank = 0.27f, torso = 0.36f, head = 0.16f, hipHalf = 0.07f)
+        val thighAngleShort = thighAngleOf(StickmanKinematics.buildNodes(shortTorso, angles))
+        val thighAngleLong = thighAngleOf(StickmanKinematics.buildNodes(longTorso, angles))
+        assertTrue(
+            "expected a different thigh angle for a different torso ratio, got $thighAngleShort for both",
+            Math.abs(thighAngleLong - thighAngleShort) > 1f
+        )
+    }
+
+    @Test
+    fun `bar lands back on (or very near) mid-foot now that torso lean is solved`() {
+        // Restores the mechanical fact both v0.48.0 (via a translation that broke rigidity) and
+        // v0.49.0 (by dropping the correction entirely) failed to deliver cleanly — this time as
+        // a direct, exact consequence of the balance equation, not an approximation.
+        for ((name, pair) in archetypeBottomAngles) {
+            val (archetypeRatios, bottomAngles) = pair
+            val nodes = StickmanKinematics.buildNodes(archetypeRatios, bottomAngles)
+            val bar = node(nodes, NodeId.BAR)
+            val ankleCenter = centerline(nodes, NodeId.L_ANKLE, NodeId.R_ANKLE)
+            val midFootX = ankleCenter.x + archetypeRatios.footLenRatio * 0.80f * 0.5f
+            assertEquals("$name: bar not near mid-foot at BOTTOM", midFootX, bar.x, 1e-3f)
         }
     }
 

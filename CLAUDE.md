@@ -2470,6 +2470,50 @@ _(Claude Code appends here after each completed task)_
   bar is no longer pinned to mid-foot) — flagged, not silently absorbed; the user chose perfect
   proportions over that pin when told the tradeoff explicitly.
   versionCode 67, versionName 0.49.0.
+- [x] Femur ↔ torso angle coupling (v0.50.0), per SPEC.md `/spec` round: user tried v0.49.0 and
+  said the sliders still felt disconnected — "when i move the femur length the torso angle should
+  also move when i move the torso slider the femur angle should change." One clarifying question
+  asked (one-way physical coupling vs. two-way with an explicitly-labeled comfort nudge); user
+  picked two-way.
+  This also **resolves** the tension the last two specs kept trading off rather than fixing:
+  v0.48.0 pinned the bar over mid-foot via a post-hoc *translation*, which broke thigh rigidity;
+  v0.49.0 dropped that correction, restoring rigidity but losing the bar-over-mid-foot guarantee.
+  Solving for torso lean as a *rotation* instead of translating anything gets both at once — a
+  rotation about the hip never changes segment length.
+  (1) **Femur → torso (real balance equation)**: `StickmanKinematics.buildNodes` no longer reads
+  `PoseAngles.torsoAngleDeg` at all — new private `solveTorsoLean(ratios, ankleX, hip)` picks the
+  torso lean so `ankleX + shankDx + thighDx + (torsoRatio + barRiseRatio) × bodyScale ×
+  sin(torsoLean) == midFootX`, i.e. the bar lands back over mid-foot given wherever the
+  knee-driven ankle→knee→hip chain put the hip. `sin(...)` clamped to `[-1,1]` before `asin`,
+  final angle clamped to `[0°,90°]` — both defensive, not expected to trigger for any
+  slider-reachable ratio. Hand-verified before writing code: at LONG_FEMUR's own BOTTOM
+  ratios/angles the solve yields a visibly larger torso lean than PROPORTIONAL's, matching this
+  app's own archetype content copy ("Forward torso lean is greater than standard" for
+  LONG_FEMUR) that the kinematics never actually enforced until now.
+  (2) **Torso → femur (explicit comfort factor, not physics)**: `thighLean` gains a
+  `comfortScale = 1 + THIGH_TORSO_COMFORT_GAIN × (torsoRatio - TORSO_REFERENCE_RATIO)` multiplier
+  on the existing knee-driven deviation, clamped to `0.6..1.4` so it can never zero out or invert
+  the knee-driven rotation direction. `TORSO_REFERENCE_RATIO` = PROPORTIONAL's own torso ratio
+  (0.29) — at that exact value `comfortScale == 1.0` and behavior is unchanged, so the 4 fixed
+  archetypes whose torso ratio sits near that reference barely move; CUSTOM's wider slider range
+  (0.20–0.36) is where this is most visible. KDoc is explicit that this direction is a stylistic
+  nudge with no real biomechanical justification, unlike (1).
+  (3) `PoseAngles.hipAngleDeg` *and* now `torsoAngleDeg` both sit unused in the model (kept for
+  content/reference, same precedent already established for `hipAngleDeg` since Sprint —
+  Biomechanics Visualizer Phase 1) — every pose is now driven entirely by `kneeAngleDeg` (depth)
+  plus the ratios themselves.
+  (4) Tests: `StickmanKinematicsTest` gains a femur→torso coupling test (two different
+  `thighRatio`s at the same knee angle produce measurably different solved torso lean, read back
+  via a new `torsoLeanOf`/`thighAngleOf` helper pair using `atan2` on the built nodes rather than
+  re-deriving the angle independently) and a torso→thigh coupling test (same shape, opposite
+  direction). Also restored a bar-near-mid-foot regression test (now legitimately exact again,
+  not dropped like in v0.49.0) since the balance equation guarantees it as a direct consequence,
+  not an approximation. Full existing suite (rigidity, depth, yaw, interpolator, renderer) re-run
+  and passed unchanged — no archetype angle table needed re-deepening.
+  KNOWN GAP unchanged: none of this has been tried on a real device this session — the
+  `THIGH_TORSO_COMFORT_GAIN` value (1.5) and its `0.6..1.4` clamp are first-pass defaults, worth
+  tuning once actually dragged on a phone, same as the turntable's drag sensitivity from v0.49.0.
+  versionCode 68, versionName 0.50.0.
 
 ## Release rules
 

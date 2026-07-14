@@ -4,6 +4,7 @@ import com.saiyanstrong.domain.model.LimbRatios
 import com.saiyanstrong.domain.model.NodeId
 import com.saiyanstrong.domain.model.NodePosition
 import com.saiyanstrong.domain.model.PoseAngles
+import kotlin.math.asin
 import kotlin.math.cos
 import kotlin.math.sin
 
@@ -26,21 +27,43 @@ import kotlin.math.sin
  * [com.saiyanstrong.domain.util.StickmanKinematicsTest] for the regression test.
  *
  * [PoseAngles.hipAngleDeg] stays in the model (matches the spec's authored angle table and is
- * available for future use/content) but is **not** fed into this geometry — [torsoAngleDeg]
- * already gives the torso's absolute lean directly (spec section 7's own column is literally
- * "Torso Angle (from vert.)"), and deriving the thigh from *both* hip and knee angles would
- * require them to already be geometrically self-consistent, which spec's hand-authored table
- * was never guaranteed to be. This is a documented, deliberate simplification, not an oversight.
+ * available for future use/content) but is **not** fed into this geometry, for the same reason
+ * [torsoAngleDeg] no longer is either (see below) — deriving the thigh from a raw authored angle
+ * would require that angle to already be geometrically self-consistent with everything else,
+ * which the hand-authored table was never guaranteed to be. Documented, deliberate, not an
+ * oversight.
  *
- * ## No bar-over-mid-foot correction — proportions win
- * A v0.48.0 revision added a horizontal-shift correction that translated every node from the hip
- * up so the bar landed exactly on mid-foot every frame — but since a translation can't move a
- * joint without changing the segment lengths on either side of it, that let the thigh segment
- * (knee-to-hip) drift a few percent off its true `thighRatio × bodyScale` length. Per an explicit
- * product decision, that correction has been removed entirely: every limb, including the thigh,
- * now holds its exact ratio-defined length at every interpolated frame, no exception. The bar
- * still lands close to mid-foot as a natural side-effect of the angle-driven chain (torso lean
- * partially offsets hip travel), but is no longer force-pinned to the exact pixel.
+ * ## Torso angle is solved from a balance equation, not read from PoseAngles
+ * [PoseAngles.torsoAngleDeg] is **not** used here. Two earlier revisions each picked one side of
+ * a tradeoff: v0.48.0 translated every upper-body node so the bar landed exactly on mid-foot,
+ * which broke the thigh's exact rigidity (a translation can't move a joint without changing the
+ * segment lengths on either side of it); v0.49.0 dropped that correction entirely, restoring
+ * exact rigidity but losing the bar-over-mid-foot guarantee. Solving for torso lean as a
+ * *rotation* — instead of translating anything — gets both at once, since a rotation about the
+ * hip never changes segment length: `torsoLean` is chosen so that
+ * `ankleX + shankDx + thighDx + (torsoRatio + barRiseRatio) × bodyScale × sin(torsoLean) ==
+ * midFootX`. This is also what makes the femur↔torso coupling physically real: a longer
+ * [LimbRatios.thighRatio] pushes the hip further from the ankle at the same knee angle, which
+ * this equation directly translates into a larger required torso lean — hand-verified before
+ * writing this: at LONG_FEMUR's own BOTTOM ratios/angles the solve yields a visibly larger torso
+ * lean than PROPORTIONAL's, matching this app's own archetype content copy ("Forward torso lean
+ * is greater than standard" for LONG_FEMUR) that the kinematics never actually enforced before.
+ * `sin(torsoLean)` is clamped to `[-1, 1]` before `asin` (an unreachable ratio combination could
+ * otherwise be mathematically impossible to balance) and the resulting angle clamped to
+ * `[0°, 90°]` (a squat torso never leans backward or past horizontal) — both defensive bounds,
+ * not expected to trigger for any ratio reachable from the Custom Proportions sliders.
+ *
+ * ## Torso ratio nudges thigh lean too (explicitly a comfort factor, not physics)
+ * The reverse coupling — dragging the TORSO ratio slider should also visibly move the femur —
+ * has no real mechanical justification (there's no physical reason torso *length* dictates knee
+ * bend at a fixed squat depth), so it's implemented as a small, clearly-labeled stylistic nudge:
+ * [THIGH_TORSO_COMFORT_GAIN] scales how far the knee-driven deviation rotates the thigh, based on
+ * how far [LimbRatios.torsoRatio] sits from [TORSO_REFERENCE_RATIO] (PROPORTIONAL's own torso
+ * ratio — the value this whole rig was originally tuned against, so at exactly that ratio the
+ * scale is 1.0 and behavior is unchanged). Clamped to `0.6..1.4` so it can never zero out or
+ * invert the knee-driven rotation direction — see [com.saiyanstrong.domain.util.StickmanKinematicsTest]
+ * for the regression coverage confirming the existing hip-below-knee depth guarantee still holds
+ * with this factor applied.
  *
  * ## Turntable yaw (rendering-time only, not part of this chain)
  * [applyYaw] is a separate, purely cosmetic post-process — never called from [buildNodes] —
@@ -65,18 +88,32 @@ object StickmanKinematics {
     private const val ANKLE_Y = FLOOR_Y - 0.03f
     private const val BODY_SCALE = 0.80f
 
+    /** PROPORTIONAL's own torso ratio — the reference point at which [THIGH_TORSO_COMFORT_GAIN]
+     * has zero effect (comfort scale == 1.0), matching the rig's original tuning exactly. */
+    private const val TORSO_REFERENCE_RATIO = 0.29f
+
+    /** Stylistic knob only (see class KDoc "Torso ratio nudges thigh lean too") — not derived
+     * from any real biomechanical relationship. */
+    private const val THIGH_TORSO_COMFORT_GAIN = 1.5f
+    private const val COMFORT_SCALE_MIN = 0.6f
+    private const val COMFORT_SCALE_MAX = 1.4f
+
     fun buildNodes(ratios: LimbRatios, angles: PoseAngles): List<NodePosition> {
-        val shankLean = (180f - angles.kneeAngleDeg) * 0.15f
-        val thighLean = shankLean - (180f - angles.kneeAngleDeg)
-        val torsoLean = angles.torsoAngleDeg
+        val kneeDeviation = 180f - angles.kneeAngleDeg
+        val shankLean = kneeDeviation * 0.15f
+        val comfortScale = (1f + THIGH_TORSO_COMFORT_GAIN * (ratios.torsoRatio - TORSO_REFERENCE_RATIO))
+            .coerceIn(COMFORT_SCALE_MIN, COMFORT_SCALE_MAX)
+        val thighLean = shankLean - kneeDeviation * comfortScale
 
         // --- Foot and shank: planted, fixed for the whole rep ---
         val ankle = ANKLE_X to ANKLE_Y
         val knee = ankle + rotateUp(ratios.shankRatio * BODY_SCALE, shankLean)
         val toe = (ankle.first + ratios.footLenRatio * BODY_SCALE) to FLOOR_Y
 
-        // --- Hip and up: no post-hoc correction — every segment stays exactly ratio-rigid ---
+        // --- Hip and up: torso lean solved (rotation, not translation) so segments stay rigid
+        // AND the bar lands back over mid-foot — see class KDoc "Torso angle is solved..." ---
         val hip = knee + rotateUp(ratios.thighRatio * BODY_SCALE, thighLean)
+        val torsoLean = solveTorsoLean(ratios, ankle.first, hip)
         val neck = hip + rotateUp(ratios.torsoRatio * BODY_SCALE, torsoLean)
         val head = neck + rotateUp(ratios.headNeckRatio * BODY_SCALE, torsoLean)
         val bar = neck + rotateUp(ratios.barRiseRatio * BODY_SCALE, torsoLean)
@@ -122,6 +159,17 @@ object StickmanKinematics {
     private fun rotateUp(length: Float, leanDeg: Float): Pair<Float, Float> {
         val rad = Math.toRadians(leanDeg.toDouble())
         return (length * sin(rad)).toFloat() to (-length * cos(rad)).toFloat()
+    }
+
+    /** Solves the torso lean (degrees) that brings the bar back over mid-foot, given where the
+     * knee-driven ankle→knee→hip chain already landed. See class KDoc "Torso angle is solved..."
+     * for the derivation and both defensive clamps. */
+    private fun solveTorsoLean(ratios: LimbRatios, ankleX: Float, hip: Pair<Float, Float>): Float {
+        val midFootX = ankleX + ratios.footLenRatio * BODY_SCALE * 0.5f
+        val torsoBarSpan = (ratios.torsoRatio + ratios.barRiseRatio) * BODY_SCALE
+        val sinTorso = ((midFootX - hip.first) / torsoBarSpan).coerceIn(-1f, 1f)
+        val solved = Math.toDegrees(asin(sinTorso.toDouble())).toFloat()
+        return solved.coerceIn(0f, 90f)
     }
 
     private fun side(center: Pair<Float, Float>, half: Float): Pair<Pair<Float, Float>, Pair<Float, Float>> =
