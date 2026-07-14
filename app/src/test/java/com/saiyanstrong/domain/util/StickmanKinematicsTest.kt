@@ -60,12 +60,10 @@ class StickmanKinematicsTest {
     }
 
     @Test
-    fun `shank, torso, and head-neck segments stay exactly rigid at every pose`() {
-        // Unlike the thigh (see the bar-over-midfoot test below), these three segments are
-        // never touched by the horizontal correction: shank because neither ankle nor knee is
-        // ever shifted, torso and head-neck because BOTH of their endpoints are shifted by the
-        // identical correction amount (hip and neck; neck and head), which cancels out in the
-        // difference vector. This is the real regression coverage for "limb length stays rigid."
+    fun `shank, thigh, torso, and head-neck segments all stay exactly rigid at every pose`() {
+        // Since the v0.48.0 bar-over-midfoot correction was removed, there is no longer any
+        // exception here: every segment in the chain (thigh included) holds its exact ratio at
+        // every pose. This is the real regression coverage for "limb length stays rigid."
         val bodyScale = 0.80
         for (angles in listOf(
             PoseAngles(180f, 180f, 5f), PoseAngles(130f, 120f, 35f),
@@ -75,31 +73,13 @@ class StickmanKinematicsTest {
             val ankleCenter = centerline(nodes, NodeId.L_ANKLE, NodeId.R_ANKLE)
             val kneeCenter = centerline(nodes, NodeId.L_KNEE, NodeId.R_KNEE)
             val shankLength = distance(ankleCenter, kneeCenter)
+            val thighLength = distance(kneeCenter, node(nodes, NodeId.HIP_CENTER))
             val torsoLength = distance(node(nodes, NodeId.HIP_CENTER), node(nodes, NodeId.NECK_BASE))
             val headLength = distance(node(nodes, NodeId.NECK_BASE), node(nodes, NodeId.HEAD))
             assertEquals("shank at $angles", ratios.shankRatio * bodyScale, shankLength, 1e-4)
+            assertEquals("thigh at $angles", ratios.thighRatio * bodyScale, thighLength, 1e-4)
             assertEquals("torso at $angles", ratios.torsoRatio * bodyScale, torsoLength, 1e-4)
             assertEquals("head-neck at $angles", ratios.headNeckRatio * bodyScale, headLength, 1e-4)
-        }
-    }
-
-    @Test
-    fun `bar sits exactly over mid-foot at every pose, for every archetype`() {
-        // The one invariant a real squat holds regardless of torso lean. Guaranteed by
-        // construction (a direct horizontal solve, not an approximation), so this is an exact
-        // equality, not a tolerance-band check.
-        for ((_, pair) in archetypeBottomAngles) {
-            val (archetypeRatios, _) = pair
-            for (angles in listOf(
-                PoseAngles(180f, 180f, 5f), PoseAngles(130f, 120f, 35f),
-                PoseAngles(95f, 76f, 55f), PoseAngles(75f, 58f, 62f)
-            )) {
-                val nodes = StickmanKinematics.buildNodes(archetypeRatios, angles)
-                val bar = node(nodes, NodeId.BAR)
-                val ankleCenter = centerline(nodes, NodeId.L_ANKLE, NodeId.R_ANKLE)
-                val midFootX = ankleCenter.x + archetypeRatios.footLenRatio * 0.80f * 0.5f
-                assertEquals("bar not over mid-foot at $angles", midFootX, bar.x, 1e-4f)
-            }
         }
     }
 
@@ -154,14 +134,44 @@ class StickmanKinematicsTest {
     }
 
     @Test
-    fun `ankle and knee never move due to the bar-over-midfoot correction (feet stay planted)`() {
-        val uncorrectedReference = StickmanKinematics.buildNodes(ratios, PoseAngles(180f, 180f, 5f))
+    fun `ankle stays fixed regardless of pose (feet stay planted)`() {
+        val reference = StickmanKinematics.buildNodes(ratios, PoseAngles(180f, 180f, 5f))
         for (angles in listOf(PoseAngles(130f, 120f, 35f), PoseAngles(95f, 76f, 55f), PoseAngles(75f, 58f, 62f))) {
             val nodes = StickmanKinematics.buildNodes(ratios, angles)
             // Ankle position is a fixed constant regardless of pose (feet don't move during a
             // real squat) — assert it's identical across every phase, not just non-null.
-            assertEquals(node(uncorrectedReference, NodeId.L_ANKLE).x, node(nodes, NodeId.L_ANKLE).x, 1e-4f)
-            assertEquals(node(uncorrectedReference, NodeId.L_ANKLE).y, node(nodes, NodeId.L_ANKLE).y, 1e-4f)
+            assertEquals(node(reference, NodeId.L_ANKLE).x, node(nodes, NodeId.L_ANKLE).x, 1e-4f)
+            assertEquals(node(reference, NodeId.L_ANKLE).y, node(nodes, NodeId.L_ANKLE).y, 1e-4f)
+        }
+    }
+
+    @Test
+    fun `applyYaw at 0 degrees returns nodes unchanged`() {
+        val nodes = StickmanKinematics.buildNodes(ratios, PoseAngles(95f, 76f, 55f))
+        val rotated = StickmanKinematics.applyYaw(nodes, 0f)
+        assertEquals(nodes, rotated)
+    }
+
+    @Test
+    fun `applyYaw squashes every node's x toward the mid-foot pivot as yaw increases`() {
+        val nodes = StickmanKinematics.buildNodes(ratios, PoseAngles(95f, 76f, 55f))
+        val pivotX = node(nodes, NodeId.L_ANKLE).x.let { l ->
+            (l + node(nodes, NodeId.R_ANKLE).x) / 2f
+        }
+        val rotated45 = StickmanKinematics.applyYaw(nodes, 45f)
+        val rotated90 = StickmanKinematics.applyYaw(nodes, 90f)
+        for (id in NodeId.entries) {
+            val original = node(nodes, id).x
+            val distOriginal = Math.abs(original - pivotX)
+            if (distOriginal < 1e-4f) continue // already at the pivot, nothing to squash
+            val dist45 = Math.abs(node(rotated45, id).x - pivotX)
+            val dist90 = Math.abs(node(rotated90, id).x - pivotX)
+            assertTrue("$id should squash toward pivot at yaw=45", dist45 < distOriginal + 1e-4f)
+            assertTrue("$id should squash further toward pivot at yaw=90 than at yaw=45", dist90 <= dist45 + 1e-4f)
+        }
+        // At yaw=90, cos(90)=0, so every node collapses exactly onto the pivot.
+        for (id in NodeId.entries) {
+            assertEquals("$id should sit on the pivot at yaw=90", pivotX, node(rotated90, id).x, 1e-3f)
         }
     }
 

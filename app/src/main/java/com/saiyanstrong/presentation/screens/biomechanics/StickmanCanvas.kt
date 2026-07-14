@@ -1,27 +1,46 @@
 package com.saiyanstrong.presentation.screens.biomechanics
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
 import com.saiyanstrong.domain.model.NodeId
 import com.saiyanstrong.domain.model.NodeId.L_WRIST
 import com.saiyanstrong.domain.model.NodeId.R_WRIST
 import com.saiyanstrong.domain.model.NodePosition
+import com.saiyanstrong.domain.util.StickmanKinematics
 import com.saiyanstrong.presentation.theme.PowerAmber
 import com.saiyanstrong.presentation.theme.StickmanBar
 import com.saiyanstrong.presentation.theme.StickmanBody
 import com.saiyanstrong.presentation.theme.StickmanFloor
 import kotlin.math.hypot
 
+/** Degrees of yaw per pixel dragged horizontally — tuned so a full-width drag on a typical phone
+ * (~350dp canvas) covers roughly the full -80..80 clamp range without feeling twitchy. */
+private const val DEGREES_PER_PIXEL = 0.35f
+private const val YAW_CLAMP = 80f
+
 /**
  * Compose replacement for the spec's `StickmanCanvasView : View` — this project is Compose-only
  * (CLAUDE.md non-negotiable rule, no custom Views/XML). All topology/ordering logic lives in the
  * pure, unit-tested [StickmanRenderer]; this composable only maps normalized node coordinates to
  * pixels and issues the DrawScope calls, which can't be unit-tested without a real Canvas.
+ *
+ * Drag horizontally anywhere on the canvas to spin the figure on its own vertical axis (a fake
+ * 3D "turntable" — see [StickmanKinematics.applyYaw]'s KDoc for what this does and doesn't show).
+ * Yaw is transient per-instance UI state: `remember` scopes it to this composable's own call
+ * site, so each [StickmanCanvas] on screen (e.g. every panel in the compare grid) rotates
+ * independently, and it resets to 0° whenever the screen is left and reopened — a viewing
+ * convenience, not a persisted body-proportion setting.
  */
 @Composable
 fun StickmanCanvas(
@@ -30,11 +49,24 @@ fun StickmanCanvas(
     showBar: Boolean = true,
     modifier: Modifier = Modifier
 ) {
-    Canvas(modifier.fillMaxSize()) {
+    var yawDegrees by remember { mutableFloatStateOf(0f) }
+    val rotatedNodes = remember(nodes, yawDegrees) { StickmanKinematics.applyYaw(nodes, yawDegrees) }
+
+    Canvas(
+        modifier
+            .fillMaxSize()
+            .pointerInput(Unit) {
+                detectDragGestures { change, dragAmount ->
+                    change.consume()
+                    yawDegrees = (yawDegrees + dragAmount.x * DEGREES_PER_PIXEL)
+                        .coerceIn(-YAW_CLAMP, YAW_CLAMP)
+                }
+            }
+    ) {
         val w = size.width
         val h = size.height
         fun px(id: NodeId): Offset? =
-            StickmanRenderer.findNode(nodes, id)?.let { Offset(it.x * w, it.y * h) }
+            StickmanRenderer.findNode(rotatedNodes, id)?.let { Offset(it.x * w, it.y * h) }
 
         // 1. Floor — a plain thin line, not dashed; less visual noise
         val floorY = StickmanRenderer.floorYFraction(nodes) * h

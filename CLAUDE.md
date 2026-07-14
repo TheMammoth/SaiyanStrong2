@@ -2425,6 +2425,51 @@ _(Claude Code appends here after each completed task)_
   inert. Not resolved either way without asking, since undoing it would contradict the prior
   explicit request.
   versionCode 66, versionName 0.48.1.
+- [x] Turntable view + perfectly rigid proportions (v0.49.0), per SPEC.md `/spec` round: user
+  asked for two more things after trying v0.48.1 — rotate the stickman to view it from different
+  angles, and stop letting the squat correction distort limb proportions at all. Two clarifying
+  questions asked and answered first: fake-3D turntable (not a real 3D rig, not a plain canvas
+  tilt) over the other rotation options; and, told explicitly that perfect proportions and the
+  exact bar-over-mid-foot pixel pin now conflict (only the thigh was ever the tradeoff), user
+  picked perfect proportions, dropping the pin.
+  (1) **Removed the bar-over-mid-foot correction entirely**: `StickmanKinematics.buildNodes`'s
+  v0.48.0 horizontal-shift block (`midFootX`/`correction`/`hipC`/`neckC`/`headC`/`barC`) is gone
+  — `hip`/`neck`/`head`/`bar` are used directly from the angle-driven chain, uncorrected. Since a
+  translation can't move a joint without changing the segment lengths on either side of it, this
+  was the one thing keeping the thigh off its exact ratio; removing it means every limb (shank,
+  thigh, torso, head-neck) now holds `ratio × bodyScale` exactly, at every interpolated frame, no
+  exception. The bar still lands close to mid-foot as a side-effect of the chain (torso lean
+  partially offsets hip travel), just no longer force-pinned to the literal pixel.
+  (2) **Fake 3D turntable**: new pure `StickmanKinematics.applyYaw(nodes, yawDegrees)` — every
+  node's x-deviation from the fixed mid-foot pivot (`ANKLE_X`) is scaled by `cos(yawDegrees)`.
+  At yaw 0° output is identical to today; toward ±90° the whole silhouette foreshortens to a thin
+  vertical sliver at the pivot, like spinning a flat paper cutout — not a real 3D projection (no
+  per-node depth data exists), by explicit design choice. Applied at render time only, downstream
+  of `StickmanInterpolator.interpolate(...)`, never inside `buildNodes` — every existing
+  kinematics/interpolation test keeps asserting against the un-rotated rig, unchanged.
+  (3) **Drag-to-rotate, no new persistence**: `StickmanCanvas` gained a `pointerInput { detect
+  DragGestures { ... } }` modifier — dragging horizontally anywhere on the canvas adjusts a
+  `remember`ed `yawDegrees` (0.35°/px, clamped ±80° to avoid the degenerate 90° sliver) and
+  re-applies `applyYaw` before drawing. Because the state lives in `remember` at the `Stickman
+  Canvas` call site itself, every screen that already hosts one — `BiomechanicsVisualizerScreen`,
+  `BiomechanicsCompareScreen` (each grid panel rotates independently), `CustomProportionsScreen`
+  — picked up the gesture for free, zero ViewModel/UiState plumbing needed. Yaw is session-only
+  (resets to 0° next time the screen opens), consistent with "viewing convenience, not a body
+  setting" — `ArchetypeSelectionScreen`'s small static preview cards were left out on purpose,
+  not worth the gesture surface on a thumbnail.
+  (4) Tests: `StickmanKinematicsTest`'s old exact bar-over-mid-foot test is gone (the invariant no
+  longer holds by design); the rigidity test now asserts thigh length too, alongside shank/torso/
+  head-neck (renamed to say so); `StickmanInterpolatorTest`'s equivalent bar-pin test removed,
+  its shank-rigidity test's stale comment updated. Two new `applyYaw` tests: identity at 0° (exact
+  equality with the un-rotated nodes) and a squash-toward-pivot sweep (every node's distance from
+  the pivot strictly shrinks from 0°→45°→90°, landing exactly on the pivot at 90° where cos=0).
+  Full existing suite re-run and confirmed green, not just the new/changed tests.
+  KNOWN GAP unchanged: none of this has been tried on a real device this session — the drag
+  sensitivity (0.35°/px) and the ±80° clamp are first-pass defaults, worth tuning once actually
+  dragged on a phone. This is also a genuine step back on mechanical accuracy vs. v0.48.0 (the
+  bar is no longer pinned to mid-foot) — flagged, not silently absorbed; the user chose perfect
+  proportions over that pin when told the tradeoff explicitly.
+  versionCode 67, versionName 0.49.0.
 
 ## Release rules
 

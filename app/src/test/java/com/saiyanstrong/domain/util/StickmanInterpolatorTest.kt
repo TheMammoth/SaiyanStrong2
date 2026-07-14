@@ -78,10 +78,10 @@ class StickmanInterpolatorTest {
 
     @Test
     fun `interpolate produces nodes with shank length rigid at every progress step`() {
-        // The shank (ankle-to-knee) is never touched by the bar-over-midfoot correction (see
-        // StickmanKinematics' KDoc — only the thigh trades off exact rigidity for that fix), so
-        // this is the segment that should still be provably constant-length across the whole
-        // scrub, matching the v0.47.1 regression test's spirit.
+        // Since v0.49.0 there's no bar-over-midfoot correction at all — every segment (shank
+        // included) is provably constant-length across the whole scrub, matching the v0.47.1
+        // regression test's spirit. See StickmanKinematicsTest for the full-chain (incl. thigh)
+        // rigidity coverage.
         val bodyScale = 0.80
         val expectedLength = ratios.shankRatio * bodyScale
         for (step in 0..10) {
@@ -94,23 +94,6 @@ class StickmanInterpolatorTest {
                 "shank length drifted at progress=$progress: expected ~$expectedLength, got $actualLength",
                 Math.abs(actualLength - expectedLength) < 1e-3
             )
-        }
-    }
-
-    @Test
-    fun `interpolate keeps the bar over mid-foot at every progress step`() {
-        for (step in 0..10) {
-            val progress = step / 10f
-            val nodes = StickmanInterpolator.interpolate(keyframes, ratios, progress)
-            val bar = nodes.first { it.id == NodeId.BAR }
-            // L_ANKLE/R_ANKLE carry a symmetric x half-width offset from the true centerline —
-            // recover the centerline via their midpoint (exact by construction) rather than
-            // reading L_ANKLE.x directly, which would be off by ankleHalfRatio.
-            val lAnkle = nodes.first { it.id == NodeId.L_ANKLE }
-            val rAnkle = nodes.first { it.id == NodeId.R_ANKLE }
-            val ankleCenterX = (lAnkle.x + rAnkle.x) / 2f
-            val midFootX = ankleCenterX + ratios.footLenRatio * 0.80f * 0.5f
-            assertEquals("bar drifted off mid-foot at progress=$progress", midFootX, bar.x, 1e-4f)
         }
     }
 
