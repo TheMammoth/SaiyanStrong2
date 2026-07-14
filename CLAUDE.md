@@ -2691,6 +2691,40 @@ _(Claude Code appends here after each completed task)_
   this is the self-verifying live check. Genuine frame-locked real-time was declined (decode slower
   than 33ms/frame -> stutter); "play now + background track = live on loop" is the chosen approach.
   versionCode 74, versionName 0.53.0.
+- [x] Sprint - markerless template tracking (v0.54.0), per SPEC.md /spec round: user tried the live
+  player and the tracking was "all over the place and not accurate" - dot offset from the tap, jumps
+  to wrong spots, jittery, drifts. Root cause confirmed via answers: the user taps the bar/plate
+  ITSELF (no coloured marker), and the tracker followed COLOUR, which can't lock onto a bare grey
+  bar - it grabbed whatever grey blob was biggest and wandered. Fix: track a small image PATCH around
+  the tapped point by appearance, not colour. User chose markerless + trace smoothing.
+  (1) New pure util/barpath/TemplateMatcher.kt: normalized cross-correlation (NCC) over a grayscale
+  search window - bestMatch(frame, template, centre, searchRadius) -> best-match centre + NCC score
+  in [-1,1]. NCC (not SSD) so a linear brightness change between frames still matches. 6 unit tests
+  (exact/shifted match, brightness invariance, featureless-template null, oversize null, mismatched-
+  structure scores below the 0.4 accept gate). Two initial test failures were a TEST bug (used a
+  linear gradient, which NCC treats as translation-invariant -> ambiguous position); fixed by using a
+  distinct 2D feature.
+  (2) BarPathFrameTracker.trackTemplate: extracts a grayscale patch (TEMPLATE_PATCH=24 @
+  TEMPLATE_DOWNSCALE=0.5) around the tapped point at the mark frame, then per frame NCC-searches a
+  window (TEMPLATE_SEARCH=32) around the previous position; a match below TEMPLATE_NCC_THRESHOLD=0.4
+  is REJECTED and the point HOLDS its previous position - this is the "can't teleport all over the
+  place" fix. Reuses the same frame-extraction, startMs, MAX_SAMPLES cap, and onSample streaming as
+  trackMarker; emits BarPathSamples in video-px, so overlay/ConcentricDetector/AnalyzeBarPathUseCase
+  are all unchanged. New toGray (bulk getPixels, BT.601) + extractPatch helpers. Colour tracking
+  (trackMarker/MarkerColorProfile) left dormant, not called.
+  (3) BarPathCaptureViewModel.onMarkTap now calls trackTemplate with the tap's video coords (no colour
+  sample). (4) Tap offset fix: PlayerView resizeMode set explicitly to RESIZE_MODE_FIT so the video's
+  on-screen letterbox matches computeFittedVideoRect/screenToVideoPx - the tap maps to the right
+  pixel and the dot lands where tapped (the template is centred exactly on the tapped point, so the
+  first tracked point IS the tap point). (5) Trace smoothing: new pure smoothedPathPoints (moving
+  average, window 5) draws a clean trail/dot instead of raw jittery points; display only, the analysis
+  still smooths raw samples via SG. 2 smoothing unit tests.
+  KNOWN GAP: template tracking can still lose lock on a featureless patch, heavy motion blur, or big
+  appearance change (the hold-on-low-confidence gate mitigates jumps but a lost lock just holds) - so
+  tapping a DISTINCTIVE point (plate edge/marking, collar) matters, surfaced in the retry message. All
+  constants are first-pass, tunable after a real-footage look. Not re-verified on device this session -
+  but the live player makes tracking quality immediately visible, which is the whole point.
+  versionCode 75, versionName 0.54.0.
 
 ## Release rules
 

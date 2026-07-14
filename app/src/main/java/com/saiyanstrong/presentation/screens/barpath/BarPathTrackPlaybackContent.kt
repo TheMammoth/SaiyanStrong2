@@ -40,6 +40,7 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import com.saiyanstrong.domain.model.BarPathSample
 import com.saiyanstrong.presentation.components.SaiyanButton
@@ -127,7 +128,16 @@ fun BarPathTrackPlaybackContent(
                 }
         ) {
             AndroidView(
-                factory = { PlayerView(it).apply { player = exoPlayer; useController = false } },
+                // RESIZE_MODE_FIT = aspect-preserving letterbox, matching computeFittedVideoRect /
+                // screenToVideoPx, so the tap maps to the right video pixel and the dot lands where
+                // tapped. (Any other resize mode would offset the overlay from the video.)
+                factory = {
+                    PlayerView(it).apply {
+                        player = exoPlayer
+                        useController = false
+                        resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+                    }
+                },
                 modifier = Modifier.fillMaxSize()
             )
             if (videoWidthPx > 0 && videoHeightPx > 0) {
@@ -190,28 +200,29 @@ private fun TrackTrailOverlay(
     videoHeightPx: Int,
     modifier: Modifier = Modifier
 ) {
+    // Smoothed once per sample-list change; index-aligned to `samples`. Draws a clean line instead
+    // of the jittery raw per-frame points.
+    val smoothed = remember(samples) { smoothedPathPoints(samples) }
     Canvas(modifier) {
         // Latest sample at/before the current playback time; -1 means playback hasn't reached the
         // first tracked frame yet (before the mark) — draw nothing.
         val currentIndex = samples.indexOfLast { it.timestampMs <= playbackMs }
-        if (currentIndex < 0) return@Canvas
+        if (currentIndex < 0 || currentIndex >= smoothed.size) return@Canvas
         val rect = computeFittedVideoRect(size.width, size.height, videoWidthPx, videoHeightPx)
-        fun px(s: BarPathSample) = Offset(
-            rect.left + (s.xPx.toFloat() / videoWidthPx) * rect.width,
-            rect.top + (s.yPx.toFloat() / videoHeightPx) * rect.height
+        fun px(p: Pair<Double, Double>) = Offset(
+            rect.left + (p.first.toFloat() / videoWidthPx) * rect.width,
+            rect.top + (p.second.toFloat() / videoHeightPx) * rect.height
         )
         for (i in 1..currentIndex) {
             drawLine(
                 color = NeonGreen.copy(alpha = 0.9f),
-                start = px(samples[i - 1]), end = px(samples[i]),
+                start = px(smoothed[i - 1]), end = px(smoothed[i]),
                 strokeWidth = 6.dp.toPx(), cap = StrokeCap.Round
             )
         }
-        samples.getOrNull(currentIndex)?.let { s ->
-            val c = px(s)
-            drawCircle(Color.White, radius = 11.dp.toPx() / 2, center = c)
-            drawCircle(NeonGreen, radius = 11.dp.toPx() / 2, center = c, style = Stroke(width = 3.dp.toPx()))
-        }
+        val c = px(smoothed[currentIndex])
+        drawCircle(Color.White, radius = 11.dp.toPx() / 2, center = c)
+        drawCircle(NeonGreen, radius = 11.dp.toPx() / 2, center = c, style = Stroke(width = 3.dp.toPx()))
     }
 }
 
@@ -222,6 +233,23 @@ private fun TrackTrailOverlay(
 internal fun currentSampleIndex(samples: List<BarPathSample>, playbackMs: Long): Int {
     if (samples.isEmpty()) return -1
     return samples.indexOfLast { it.timestampMs <= playbackMs }.coerceAtLeast(0)
+}
+
+/**
+ * Moving-average smoothing of the tracked positions for a clean DRAWN trail (raw per-frame points
+ * are inherently jittery). Index-aligned to [samples]; display only — the analysis smooths the raw
+ * samples separately (Savitzky-Golay). A short series is returned unchanged. Pure/unit-tested.
+ */
+internal fun smoothedPathPoints(samples: List<BarPathSample>, window: Int = 5): List<Pair<Double, Double>> {
+    if (samples.size < 3 || window <= 1) return samples.map { it.xPx to it.yPx }
+    val half = window / 2
+    return samples.indices.map { i ->
+        var sx = 0.0; var sy = 0.0; var n = 0
+        for (j in (i - half)..(i + half)) {
+            if (j in samples.indices) { sx += samples[j].xPx; sy += samples[j].yPx; n++ }
+        }
+        (sx / n) to (sy / n)
+    }
 }
 
 /**

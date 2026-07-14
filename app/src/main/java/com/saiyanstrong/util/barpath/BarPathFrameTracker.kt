@@ -230,6 +230,97 @@ class BarPathFrameTracker @Inject constructor(
     }
 
     /**
+     * Markerless point tracking: follows a small image PATCH around the tapped point ([tapVideoX],
+     * [tapVideoY] in full-resolution video pixels) by appearance, so the user can tap the bare bar
+     * (a plate edge, collar, bolt) with no coloured marker. Extracts a grayscale template at the mark
+     * frame, then per frame searches a window around the previous position for the best NCC match
+     * ([TemplateMatcher]). A match below [TEMPLATE_NCC_THRESHOLD] is REJECTED — the previous position
+     * is held — so a bad frame can't teleport the point onto something else (the "all over the place"
+     * fix). Reuses the same frame-extraction, [startMs], MAX_SAMPLES cap, and [onSample] streaming as
+     * [trackMarker]; emits [BarPathSample]s in video-pixel space, so everything downstream is
+     * unchanged.
+     */
+    fun trackTemplate(
+        videoPath: String,
+        tapVideoX: Double,
+        tapVideoY: Double,
+        videoWidthPx: Int,
+        videoHeightPx: Int,
+        startMs: Long,
+        onSample: ((BarPathSample) -> Unit)? = null
+    ): List<BarPathSample> {
+        if (videoWidthPx <= 0 || videoHeightPx <= 0) return emptyList()
+        val (rawIntervalMs, durationMs) = readTiming(videoPath, null)
+        if (durationMs <= 0L) return emptyList()
+        val trackedSpanMs = (durationMs - startMs).coerceAtLeast(1L)
+        val intervalMs = maxOf(rawIntervalMs, trackedSpanMs / MAX_SAMPLES).coerceAtLeast(MIN_SAMPLE_INTERVAL_MS)
+        val fromMs = startMs.coerceIn(0L, durationMs)
+
+        // Template from the mark frame.
+        val startFrame = extractFrameAt(videoPath, fromMs) ?: return emptyList()
+        val sgw = (startFrame.width * TEMPLATE_DOWNSCALE).toInt().coerceAtLeast(1)
+        val sgh = (startFrame.height * TEMPLATE_DOWNSCALE).toInt().coerceAtLeast(1)
+        val startGray = toGray(startFrame, sgw, sgh)
+        startFrame.recycle()
+
+        val half = TEMPLATE_PATCH / 2
+        val cx0 = (tapVideoX / videoWidthPx * sgw).toInt().coerceIn(half, sgw - half - 1)
+        val cy0 = (tapVideoY / videoHeightPx * sgh).toInt().coerceIn(half, sgh - half - 1)
+        val template = extractPatch(startGray, sgw, sgh, cx0, cy0, TEMPLATE_PATCH) ?: return emptyList()
+
+        val samples = mutableListOf<BarPathSample>()
+        var prevX = cx0
+        var prevY = cy0
+        driveRetrieverFrames(videoPath, intervalMs, fromMs, durationMs) { frame, timestampMs ->
+            val fgw = (frame.width * TEMPLATE_DOWNSCALE).toInt().coerceAtLeast(1)
+            val fgh = (frame.height * TEMPLATE_DOWNSCALE).toInt().coerceAtLeast(1)
+            val gray = toGray(frame, fgw, fgh)
+            val match = TemplateMatcher.bestMatch(
+                gray, fgw, fgh, template, TEMPLATE_PATCH, TEMPLATE_PATCH, prevX, prevY, TEMPLATE_SEARCH
+            )
+            if (match != null && match.score >= TEMPLATE_NCC_THRESHOLD) {
+                prevX = match.x
+                prevY = match.y
+            }
+            val xPx = prevX.toDouble() / fgw * videoWidthPx
+            val yPx = prevY.toDouble() / fgh * videoHeightPx
+            val sample = BarPathSample(timestampMs, xPx, yPx)
+            samples += sample
+            onSample?.invoke(sample)
+        }
+        return samples
+    }
+
+    /** Downscaled 8-bit grayscale of [bitmap] at [w]×[h] (BT.601 luma), via one bulk getPixels(). */
+    private fun toGray(bitmap: Bitmap, w: Int, h: Int): IntArray {
+        val scaled = Bitmap.createScaledBitmap(bitmap, w, h, true)
+        val pixels = IntArray(w * h)
+        scaled.getPixels(pixels, 0, w, 0, 0, w, h)
+        scaled.recycle()
+        val gray = IntArray(w * h)
+        for (i in pixels.indices) {
+            val p = pixels[i]
+            val r = (p shr 16) and 0xFF; val g = (p shr 8) and 0xFF; val b = p and 0xFF
+            gray[i] = (r * 299 + g * 587 + b * 114) / 1000
+        }
+        return gray
+    }
+
+    /** [size]×[size] patch of [gray] centred on ([cx],[cy]); null if it can't fit fully. */
+    private fun extractPatch(gray: IntArray, w: Int, h: Int, cx: Int, cy: Int, size: Int): IntArray? {
+        val half = size / 2
+        val left = cx - half; val top = cy - half
+        if (left < 0 || top < 0 || left + size > w || top + size > h) return null
+        val patch = IntArray(size * size)
+        var i = 0
+        for (ty in 0 until size) {
+            val row = (top + ty) * w + left
+            for (tx in 0 until size) patch[i++] = gray[row + tx]
+        }
+        return patch
+    }
+
+    /**
      * Tracks two independent color markers per frame — the primary marker (returned as each
      * sample's position, exactly like [trackMarker]) and a reference marker a known real-world
      * distance away, used purely to compute a directly-measured pixels-per-meter for that exact
@@ -463,6 +554,13 @@ class BarPathFrameTracker @Inject constructor(
 
         const val DEFAULT_SAMPLE_INTERVAL_MS = 33L
         const val MIN_SAMPLE_INTERVAL_MS = 5L // sanity floor, ~200fps worst case
+
+        // Markerless template tracking (trackTemplate) — all in downscaled working pixels. First-pass
+        // defaults, tune after a real-footage look.
+        const val TEMPLATE_DOWNSCALE = 0.5   // work at half-res: precise enough, ~4× faster than full
+        const val TEMPLATE_PATCH = 24        // patch side (px @ downscale) ~= 48px full-res
+        const val TEMPLATE_SEARCH = 32       // per-frame search radius (px @ downscale) ~= 64px full-res
+        const val TEMPLATE_NCC_THRESHOLD = 0.4 // below this the match is rejected and the point holds
 
         // Upper bound on sampled frames per clip — each is a slow getFrameAtTime seek+decode, so
         // this caps worst-case tracking time (and the "stuck on Tracking…" perception) regardless

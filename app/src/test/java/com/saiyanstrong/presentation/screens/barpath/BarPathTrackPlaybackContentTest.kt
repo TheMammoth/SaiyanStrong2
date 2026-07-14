@@ -3,6 +3,7 @@ package com.saiyanstrong.presentation.screens.barpath
 import com.saiyanstrong.domain.model.BarPathSample
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class BarPathTrackPlaybackContentTest {
@@ -70,5 +71,27 @@ class BarPathTrackPlaybackContentTest {
     fun `degenerate dimensions return null`() {
         assertNull(screenToVideoPx(10f, 10f, 100f, 100f, 0, 100))
         assertNull(screenToVideoPx(10f, 10f, 0f, 100f, 100, 100))
+    }
+
+    // ── smoothedPathPoints ───────────────────────────────────────────────────────────
+
+    private fun samplesXY(vararg xy: Pair<Double, Double>): List<BarPathSample> =
+        xy.mapIndexed { i, (x, y) -> BarPathSample(i * 100L, x, y) }
+
+    @Test
+    fun `smoothing a short series returns it unchanged`() {
+        val s = samplesXY(0.0 to 0.0, 10.0 to 10.0)
+        assertEquals(listOf(0.0 to 0.0, 10.0 to 10.0), smoothedPathPoints(s))
+    }
+
+    @Test
+    fun `smoothing pulls a single jittery point toward its neighbors`() {
+        // A straight line at y=0 with one spike up to y=100 in the middle.
+        val s = samplesXY(0.0 to 0.0, 1.0 to 0.0, 2.0 to 100.0, 3.0 to 0.0, 4.0 to 0.0)
+        val smoothed = smoothedPathPoints(s, window = 5)
+        // The spike (index 2) should be pulled far below 100 by its zero neighbors.
+        assertTrue("spike should be smoothed down, was ${smoothed[2].second}", smoothed[2].second < 40.0)
+        // Endpoints stay put-ish (fewer neighbors), still index-aligned.
+        assertEquals(s.size, smoothed.size)
     }
 }
