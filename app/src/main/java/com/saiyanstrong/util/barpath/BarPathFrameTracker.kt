@@ -132,11 +132,16 @@ class BarPathFrameTracker @Inject constructor(
     }
 
     /** First frame of the video, for the calibration screen (tap two points of known distance). */
-    fun extractFirstFrame(videoPath: String): Bitmap? {
+    fun extractFirstFrame(videoPath: String): Bitmap? = extractFrameAt(videoPath, 0L)
+
+    /** The frame nearest [ms] — used to sample the marker colour at the point/time the user tapped
+     * in the live player, and as the still for the scale step. Rotation-applied, like every frame
+     * this class produces. */
+    fun extractFrameAt(videoPath: String, ms: Long): Bitmap? {
         val retriever = MediaMetadataRetriever()
         return try {
             retriever.setDataSource(videoPath)
-            retriever.getFrameAtTime(0, MediaMetadataRetriever.OPTION_CLOSEST)
+            retriever.getFrameAtTime(ms * 1000, MediaMetadataRetriever.OPTION_CLOSEST)
         } finally {
             retriever.release()
         }
@@ -167,25 +172,32 @@ class BarPathFrameTracker @Inject constructor(
         focalMm: Double = 0.0,
         sensorWidthMm: Double = 0.0,
         videoStartUptimeNs: Long = 0L,
-        onProgress: ((Float) -> Unit)? = null
+        startMs: Long = 0L,
+        onProgress: ((Float) -> Unit)? = null,
+        onSample: ((BarPathSample) -> Unit)? = null
     ): List<BarPathSample> {
         val (rawIntervalMs, durationMs) = readTiming(videoPath, sampleIntervalMs)
         if (durationMs <= 0L) return emptyList()
         // Each frame is a slow getFrameAtTime seek+decode, so an uncapped interval (a long clip, or
         // a high-fps recording reporting a tiny interval) means hundreds/thousands of seeks and a
         // "stuck on Tracking…" screen. Cap the frame count: widen the interval so no clip produces
-        // more than MAX_SAMPLES samples. ~150 over a rep is ample temporal resolution for velocity.
-        val intervalMs = maxOf(rawIntervalMs, durationMs / MAX_SAMPLES).coerceAtLeast(MIN_SAMPLE_INTERVAL_MS)
+        // more than MAX_SAMPLES samples. Cap is over the tracked span [startMs, durationMs].
+        val trackedSpanMs = (durationMs - startMs).coerceAtLeast(1L)
+        val intervalMs = maxOf(rawIntervalMs, trackedSpanMs / MAX_SAMPLES).coerceAtLeast(MIN_SAMPLE_INTERVAL_MS)
+        val fromMs = startMs.coerceIn(0L, durationMs)
 
         // Builds a FRESH sample list from whatever frame source drives it — so a failed streaming
         // attempt's partial list is discarded (local to that call), and the retriever fallback
-        // starts clean with no risk of double-counting.
+        // starts clean with no risk of double-counting. Each found sample is also streamed via
+        // [onSample] for the live overlay (the dot follows as tracking progresses).
         fun collect(drive: (onFrame: (Bitmap, Long) -> Unit) -> Unit): List<BarPathSample> {
             val samples = mutableListOf<BarPathSample>()
             var previousCentroid: Pair<Double, Double>? = null
             var focalLengthPx = 0.0
             drive { frame, timestampMs ->
-                if (durationMs > 0L) onProgress?.invoke((timestampMs.toFloat() / durationMs).coerceIn(0f, 1f))
+                if (trackedSpanMs > 0L) {
+                    onProgress?.invoke(((timestampMs - fromMs).toFloat() / trackedSpanMs).coerceIn(0f, 1f))
+                }
                 if (focalLengthPx == 0.0 && focalMm > 0.0 && sensorWidthMm > 0.0) {
                     focalLengthPx = ShakeCompensator.focalLengthPx(focalMm, sensorWidthMm, frame.width)
                 }
@@ -199,7 +211,9 @@ class BarPathFrameTracker @Inject constructor(
                         x = compensated.x
                         y = compensated.y
                     }
-                    samples += BarPathSample(timestampMs, x, y, tracked.diameterPx)
+                    val sample = BarPathSample(timestampMs, x, y, tracked.diameterPx)
+                    samples += sample
+                    onSample?.invoke(sample)
                     previousCentroid = x to y
                 }
             }
@@ -212,7 +226,7 @@ class BarPathFrameTracker @Inject constructor(
             }.getOrNull()
             if (!streamed.isNullOrEmpty()) return streamed
         }
-        return collect { onFrame -> driveRetrieverFrames(videoPath, intervalMs, durationMs, onFrame) }
+        return collect { onFrame -> driveRetrieverFrames(videoPath, intervalMs, fromMs, durationMs, onFrame) }
     }
 
     /**
@@ -309,7 +323,7 @@ class BarPathFrameTracker @Inject constructor(
             }.getOrNull()
             if (!streamed.isNullOrEmpty()) return streamed
         }
-        return collect { onFrame -> driveRetrieverFrames(videoPath, intervalMs, durationMs, onFrame) }
+        return collect { onFrame -> driveRetrieverFrames(videoPath, intervalMs, 0L, durationMs, onFrame) }
     }
 
     /** (sampleIntervalMs, durationMs) — a lightweight metadata-only read, no frame decode. */
@@ -327,20 +341,21 @@ class BarPathFrameTracker @Inject constructor(
     }
 
     /**
-     * The proven frame source: per-timestamp getFrameAtTime seeks over the [0, durationMs] grid.
-     * Each [Bitmap] is recycled right after [onFrame] returns (consume it synchronously) — the
-     * grid timestamp is passed through as the sample time, exactly as before this was extracted.
+     * The proven frame source: per-timestamp getFrameAtTime seeks over the [startMs, durationMs]
+     * grid. Each [Bitmap] is recycled right after [onFrame] returns (consume it synchronously) —
+     * the grid timestamp is passed through as the sample time.
      */
     private fun driveRetrieverFrames(
         videoPath: String,
         intervalMs: Long,
+        startMs: Long,
         durationMs: Long,
         onFrame: (Bitmap, Long) -> Unit
     ) {
         val retriever = MediaMetadataRetriever()
         try {
             retriever.setDataSource(videoPath)
-            var timestampMs = 0L
+            var timestampMs = startMs
             while (timestampMs <= durationMs) {
                 val frame = retriever.getFrameAtTime(timestampMs * 1000, MediaMetadataRetriever.OPTION_CLOSEST)
                 if (frame != null) {

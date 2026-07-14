@@ -99,14 +99,18 @@ fun BarPathCaptureScreen(
         return
     }
 
-    // Mark-then-watch tracked playback — full-screen, single-colour trail, no scale/weight.
-    if (uiState.step == CaptureStep.PLAYBACK && uiState.videoPath != null) {
+    // Live player — full-screen: video plays immediately, tap the bar to mark + track live.
+    if (uiState.step == CaptureStep.PLAYER && uiState.videoPath != null) {
+        val liveSamples by viewModel.liveSamples.collectAsStateWithLifecycle()
         BarPathTrackPlaybackContent(
             videoPath = uiState.videoPath!!,
-            samples = uiState.trackedSamples,
+            samples = liveSamples,
             videoWidthPx = uiState.videoWidthPx,
             videoHeightPx = uiState.videoHeightPx,
-            onBack = viewModel::onReMark,
+            isMarked = uiState.markMs != null,
+            errorMessage = uiState.errorMessage,
+            onMarkTap = viewModel::onMarkTap,
+            onReMark = viewModel::onReMark,
             onGetVelocityNumbers = viewModel::onGetVelocityNumbers
         )
         return
@@ -127,12 +131,6 @@ fun BarPathCaptureScreen(
                     onFinished = viewModel::onRecordingFinished,
                     onGalleryVideoPicked = viewModel::onGalleryVideoPicked
                 )
-                CaptureStep.MARKING -> MarkingStep(
-                    uiState = uiState,
-                    onTap = viewModel::onMarkerTap,
-                    onReMark = viewModel::onReMark,
-                    onTrackAndPlay = viewModel::onTrackAndPlay
-                )
                 CaptureStep.SCALE -> ScaleStep(
                     uiState = uiState,
                     isStandalone = viewModel.isStandalone,
@@ -142,7 +140,7 @@ fun BarPathCaptureScreen(
                     onWeightKgChanged = viewModel::onWeightKgChanged,
                     onConfirm = viewModel::onConfirmScale
                 )
-                CaptureStep.PLAYBACK -> Unit // handled full-screen above
+                CaptureStep.PLAYER -> Unit // handled full-screen above
                 CaptureStep.PROCESSING -> ProcessingStep(progress = uiState.trackingProgress)
                 CaptureStep.RESULTS -> ResultsStep(
                     analysis = uiState.analysis,
@@ -326,65 +324,6 @@ private fun BarPathTipsCard(onDismiss: () -> Unit, modifier: Modifier = Modifier
                 "•  $tip", color = Color.White.copy(alpha = 0.7f), fontSize = 11.sp,
                 modifier = Modifier.padding(top = 3.dp)
             )
-        }
-    }
-}
-
-/** Frame + tap-to-sample the marker color, then TRACK & PLAY. No scale/weight here — the whole
- * point is to get to the tracked playback with the least setup. Tapping again re-samples. */
-@Composable
-private fun MarkingStep(
-    uiState: BarPathCaptureUiState,
-    onTap: (TapPoint) -> Unit,
-    onReMark: () -> Unit,
-    onTrackAndPlay: () -> Unit
-) {
-    val frame = uiState.calibrationFrame
-    var boxWidthPx by remember { mutableStateOf(1f) }
-    var boxHeightPx by remember { mutableStateOf(1f) }
-    val hasMark = uiState.markerSamplePoint != null
-
-    Column(Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState())) {
-        Text(
-            if (hasMark) "Tap again to re-mark, or TRACK & PLAY to watch it track."
-            else "Tap the marker on the bar.",
-            color = NeonGreen, fontSize = 13.sp, fontWeight = FontWeight.Black,
-            modifier = Modifier.padding(bottom = 10.dp)
-        )
-        if (frame != null) {
-            Box(
-                Modifier
-                    .fillMaxWidth()
-                    .heightIn(max = 420.dp)
-                    .aspectRatio(frame.width.toFloat() / frame.height.toFloat())
-                    .onSizeChanged { size -> boxWidthPx = size.width.toFloat(); boxHeightPx = size.height.toFloat() }
-                    .pointerInput(frame) {
-                        detectTapGestures { offset ->
-                            val scaleX = frame.width / boxWidthPx
-                            val scaleY = frame.height / boxHeightPx
-                            onTap(TapPoint(offset.x * scaleX, offset.y * scaleY))
-                        }
-                    }
-            ) {
-                Image(bitmap = frame.asImageBitmap(), contentDescription = null, modifier = Modifier.fillMaxSize())
-                Canvas(Modifier.fillMaxSize()) {
-                    val scaleX = boxWidthPx / frame.width
-                    val scaleY = boxHeightPx / frame.height
-                    uiState.markerSamplePoint?.let {
-                        drawCircle(color = PowerAmber, radius = 14f, center = Offset(it.xPx * scaleX, it.yPx * scaleY))
-                    }
-                }
-            }
-        }
-
-        Spacer(Modifier.height(16.dp))
-
-        SaiyanButton(onClick = onTrackAndPlay, modifier = Modifier.fillMaxWidth()) {
-            Text("TRACK & PLAY  >>>", fontWeight = FontWeight.Black)
-        }
-
-        uiState.errorMessage?.let {
-            Text(it, color = DangerRed, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
         }
     }
 }

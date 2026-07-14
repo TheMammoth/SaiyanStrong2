@@ -24,6 +24,7 @@ import com.saiyanstrong.util.barpath.LiveFrameResult
 import com.saiyanstrong.util.barpath.MarkerColorProfile
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -36,12 +37,12 @@ import javax.inject.Inject
 import kotlin.math.hypot
 
 /**
- * RECORDING → MARKING (tap the marker color) → PROCESSING (track) → PLAYBACK (watch the tracked
- * marker + path over the video, no scale needed) → optionally SCALE (tap plate edges + weight) →
- * PROCESSING (analyze the already-tracked samples) → RESULTS. The marker is tracked ONCE (entering
- * PLAYBACK) and those samples are reused by the analysis, so getting numbers never re-tracks.
+ * RECORDING → PLAYER (video plays immediately; scrub + tap the bar to mark it, marker tracks live
+ * from that point as playback loops) → optionally SCALE (tap plate edges + weight) → PROCESSING
+ * (analyze the already-tracked samples) → RESULTS. Tracking streams in the background from the mark
+ * time; those samples are reused by the analysis, so getting numbers never re-tracks.
  */
-enum class CaptureStep { RECORDING, MARKING, PROCESSING, PLAYBACK, SCALE, RESULTS, ERROR }
+enum class CaptureStep { RECORDING, PLAYER, PROCESSING, SCALE, RESULTS, ERROR }
 
 data class TapPoint(val xPx: Float, val yPx: Float)
 
@@ -51,6 +52,9 @@ data class BarPathCaptureUiState(
     val calibrationFrame: Bitmap? = null,
     val markerSamplePoint: TapPoint? = null,
     val colorProfile: MarkerColorProfile? = null,
+    /** Playback time (ms) the user tapped the bar to mark it; tracking runs from here. Null = not
+     * yet marked. */
+    val markMs: Long? = null,
     val calibrationPoint1: TapPoint? = null,
     val calibrationPoint2: TapPoint? = null,
     val referenceLengthCm: String = "45",
@@ -102,6 +106,15 @@ class BarPathCaptureViewModel @Inject constructor(
 
     private val _uiState = MutableStateFlow(BarPathCaptureUiState())
     val uiState: StateFlow<BarPathCaptureUiState> = _uiState.asStateFlow()
+
+    /** Marker positions streamed in as background tracking finds them — the live player's dot/trail
+     * reads this so the dot follows the bar as tracking progresses (fully live once it's caught up
+     * on the video's loop). Reset on each (re)mark. */
+    private val _liveSamples = MutableStateFlow<List<BarPathSample>>(emptyList())
+    val liveSamples: StateFlow<List<BarPathSample>> = _liveSamples.asStateFlow()
+
+    /** The in-flight background tracking job, cancelled when the user re-marks. */
+    private var trackJob: Job? = null
 
     val tipsDismissed: StateFlow<Boolean> = userRepository.getBarPathTipsDismissed()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), true)
@@ -348,7 +361,7 @@ class BarPathCaptureViewModel @Inject constructor(
             sensorWidthMm = sensorWidthMm, 
             videoStartUptimeNs = videoStartUptimeNs
         ) }
-        loadCalibrationFrame(path, failureMessage = "Couldn't read the recorded video.")
+        loadVideo(path, failureMessage = "Couldn't read the recorded video.")
     }
 
     fun onGalleryVideoPicked(uri: Uri) {
@@ -360,22 +373,29 @@ class BarPathCaptureViewModel @Inject constructor(
                     it.copy(step = CaptureStep.ERROR, isPreparingVideo = false, errorMessage = "Couldn't import that video — try again.")
                 }
             } else {
-                loadCalibrationFrame(path, failureMessage = "Couldn't read the imported video.")
+                loadVideo(path, failureMessage = "Couldn't read the imported video.")
             }
         }
     }
 
-    private fun loadCalibrationFrame(path: String, failureMessage: String) {
+    /** Go straight to the live player — read only the video dimensions (a fast metadata read, needed
+     * to map taps and draw the overlay); no blocking frame extraction, so playback starts at once. */
+    private fun loadVideo(path: String, failureMessage: String) {
         _uiState.update { it.copy(isPreparingVideo = true) }
         viewModelScope.launch(Dispatchers.Default) {
-            val frame = runCatching { barPathFrameTracker.extractFirstFrame(path) }.getOrNull()
+            val (vw, vh) = runCatching { barPathFrameTracker.videoDimensions(path) }.getOrDefault(0 to 0)
             _uiState.update {
-                if (frame != null) {
-                    it.copy(step = CaptureStep.MARKING, videoPath = path, calibrationFrame = frame, isPreparingVideo = false)
+                if (vw > 0 && vh > 0) {
+                    it.copy(
+                        step = CaptureStep.PLAYER, videoPath = path,
+                        videoWidthPx = vw, videoHeightPx = vh, isPreparingVideo = false,
+                        markMs = null, colorProfile = null, markerSamplePoint = null
+                    )
                 } else {
                     it.copy(step = CaptureStep.ERROR, isPreparingVideo = false, errorMessage = failureMessage)
                 }
             }
+            _liveSamples.value = emptyList()
         }
     }
 
@@ -383,11 +403,60 @@ class BarPathCaptureViewModel @Inject constructor(
         _uiState.update { it.copy(weightKgInput = kg) }
     }
 
-    /** MARKING step — every tap (re)samples the marker's color from that point on the first frame. */
-    fun onMarkerTap(point: TapPoint) {
-        _uiState.update { state ->
-            val profile = sampleMarkerColor(state.calibrationFrame, point)
-            state.copy(markerSamplePoint = point, colorProfile = profile, errorMessage = null)
+    /**
+     * PLAYER — the user tapped the bar at playback time [atMs]. Sample the marker color from that
+     * exact frame/point (one getFrameAtTime), record the mark, and start streaming background
+     * tracking from [atMs] to the end. The dot follows as samples arrive. Cancels any prior track.
+     * [videoX]/[videoY] are already in full-resolution video-pixel space (mapped by the UI via
+     * screenToVideoPx).
+     */
+    fun onMarkTap(videoX: Float, videoY: Float, atMs: Long) {
+        val state = _uiState.value
+        val videoPath = state.videoPath ?: return
+        trackJob?.cancel()
+        _liveSamples.value = emptyList()
+        _uiState.update { it.copy(markMs = atMs, markerSamplePoint = TapPoint(videoX, videoY), errorMessage = null) }
+
+        trackJob = viewModelScope.launch(Dispatchers.Default) {
+            val frame = runCatching { barPathFrameTracker.extractFrameAt(videoPath, atMs) }.getOrNull()
+            val profile = sampleMarkerColor(frame, TapPoint(videoX, videoY))
+            if (profile == null) {
+                _uiState.update { it.copy(errorMessage = "Couldn't read the marker color there — tap the bar again.") }
+                return@launch
+            }
+            _uiState.update { it.copy(colorProfile = profile) }
+
+            val samples = runCatching {
+                barPathFrameTracker.trackMarker(
+                    videoPath = videoPath,
+                    colorProfile = profile,
+                    gyroTimeline = state.gyroTimeline,
+                    focalMm = state.focalMm,
+                    sensorWidthMm = state.sensorWidthMm,
+                    videoStartUptimeNs = state.videoStartUptimeNs,
+                    startMs = atMs,
+                    onSample = { s -> _liveSamples.update { it + s } }
+                )
+            }.getOrElse { emptyList() }
+
+            // Final list (also what the analysis reuses). If nothing tracked, tell the user; stay on
+            // the player so they can re-mark rather than bouncing to a dead-end error screen.
+            if (samples.size < 2) {
+                _uiState.update {
+                    it.copy(errorMessage = "Couldn't track that color — pick a brighter, more distinct point on the bar.")
+                }
+            } else {
+                _uiState.update { it.copy(trackedSamples = samples) }
+            }
+        }
+    }
+
+    /** RE-MARK — drop the current mark/track so the next tap re-samples from scratch. */
+    fun onReMark() {
+        trackJob?.cancel()
+        _liveSamples.value = emptyList()
+        _uiState.update {
+            it.copy(markMs = null, colorProfile = null, markerSamplePoint = null, trackedSamples = emptyList(), errorMessage = null)
         }
     }
 
@@ -426,18 +495,6 @@ class BarPathCaptureViewModel @Inject constructor(
         return MarkerColorProfile.sample((sumR / count).toInt(), (sumG / count).toInt(), (sumB / count).toInt())
     }
 
-    /** MARKING → clears the sampled color so the user can re-tap. Also used by the PLAYBACK
-     * screen's BACK to re-mark if tracking looked wrong. */
-    fun onReMark() {
-        _uiState.update {
-            it.copy(
-                step = CaptureStep.MARKING,
-                markerSamplePoint = null, colorProfile = null,
-                trackedSamples = emptyList(), errorMessage = null
-            )
-        }
-    }
-
     fun onResetScalePoints() {
         _uiState.update { it.copy(calibrationPoint1 = null, calibrationPoint2 = null) }
     }
@@ -446,60 +503,25 @@ class BarPathCaptureViewModel @Inject constructor(
         _uiState.update { it.copy(referenceLengthCm = cm) }
     }
 
-    /**
-     * TRACK & PLAY: track the marker across the whole video (color only — no scale needed), then go
-     * to the PLAYBACK step to watch it. The tracked samples are kept in state and reused verbatim by
-     * [onConfirmScale] later, so choosing "get velocity numbers" never re-tracks. Every native/IO
-     * call is wrapped so a failure surfaces as a clear ERROR instead of crashing.
-     */
-    fun onTrackAndPlay() {
-        val state = _uiState.value
-        val colorProfile = state.colorProfile
-        val videoPath = state.videoPath
-
-        if (colorProfile == null) {
-            _uiState.update { it.copy(errorMessage = "Tap the marker on the bar in this frame first.") }
-            return
-        }
-        if (videoPath == null) return
-
-        _uiState.update { it.copy(step = CaptureStep.PROCESSING, trackingProgress = 0f, errorMessage = null) }
-        viewModelScope.launch(Dispatchers.Default) {
-            val samples = runCatching {
-                barPathFrameTracker.trackMarker(
-                    videoPath = videoPath,
-                    colorProfile = colorProfile,
-                    gyroTimeline = state.gyroTimeline,
-                    focalMm = state.focalMm,
-                    sensorWidthMm = state.sensorWidthMm,
-                    videoStartUptimeNs = state.videoStartUptimeNs,
-                    onProgress = { p -> _uiState.update { it.copy(trackingProgress = p) } }
-                )
-            }.getOrElse { emptyList() }
-
-            if (samples.size < 2) {
-                _uiState.update {
-                    it.copy(
-                        step = CaptureStep.ERROR,
-                        errorMessage = "Couldn't track the marker across enough frames — check it's " +
-                            "bright and well-lit against the background, then try again."
-                    )
-                }
-                return@launch
-            }
-
-            val (vw, vh) = runCatching { barPathFrameTracker.videoDimensions(videoPath) }.getOrDefault(0 to 0)
-            _uiState.update {
-                it.copy(step = CaptureStep.PLAYBACK, trackedSamples = samples, videoWidthPx = vw, videoHeightPx = vh)
-            }
-        }
-    }
-
-    /** PLAYBACK → SCALE: user wants real velocity numbers, so collect the plate-scale + weight.
-     * Resets the scale points so they tap fresh. */
+    /** PLAYER → SCALE: user wants real velocity numbers. Extract a still frame at the mark point to
+     * tap the plate on, then collect the plate-scale + weight. */
     fun onGetVelocityNumbers() {
-        _uiState.update {
-            it.copy(step = CaptureStep.SCALE, calibrationPoint1 = null, calibrationPoint2 = null, errorMessage = null)
+        val state = _uiState.value
+        val videoPath = state.videoPath ?: return
+        val atMs = state.markMs ?: 0L
+        _uiState.update { it.copy(isPreparingVideo = true) }
+        viewModelScope.launch(Dispatchers.Default) {
+            val frame = runCatching { barPathFrameTracker.extractFrameAt(videoPath, atMs) }.getOrNull()
+            _uiState.update {
+                if (frame != null) {
+                    it.copy(
+                        step = CaptureStep.SCALE, calibrationFrame = frame, isPreparingVideo = false,
+                        calibrationPoint1 = null, calibrationPoint2 = null, errorMessage = null
+                    )
+                } else {
+                    it.copy(step = CaptureStep.ERROR, isPreparingVideo = false, errorMessage = "Couldn't read a frame for scaling.")
+                }
+            }
         }
     }
 
@@ -514,7 +536,7 @@ class BarPathCaptureViewModel @Inject constructor(
         val p2 = state.calibrationPoint2
         val referenceCm = state.referenceLengthCm.toDoubleOrNull()
         val videoPath = state.videoPath
-        val samples = state.trackedSamples
+        val samples = _liveSamples.value // whatever's been tracked (the full list once complete)
         val massKg = if (isStandalone) state.weightKgInput.toDoubleOrNull() else knownWeightKg
 
         if (p1 == null || p2 == null) {
@@ -559,7 +581,7 @@ class BarPathCaptureViewModel @Inject constructor(
             }
 
             val (analysis, frames) = result
-            _uiState.update { it.copy(step = CaptureStep.RESULTS, analysis = analysis, trackedFrames = frames) }
+            _uiState.update { it.copy(step = CaptureStep.RESULTS, analysis = analysis, trackedSamples = samples, trackedFrames = frames) }
         }
     }
 

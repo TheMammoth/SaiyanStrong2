@@ -2658,6 +2658,39 @@ _(Claude Code appends here after each completed task)_
   `getPixel()` (a JNI call each, ~50k+/frame) for one `getPixels()` array copy, a large real speedup
   of the pixel-scan portion. Blob/centroid logic unchanged (all findBlobs tests still green).
   versionCode 73, versionName 0.52.1.
+- [x] Sprint - live tracked player, mark anywhere (v0.53.0), per SPEC.md /spec round: user wanted
+  the tracking to feel live ("as soon as i press play the video should play and the marker moves")
+  and to mark the bar partway through the clip ("i might put the marker later in the video since the
+  lifting doesn't start at the beginning"). Three clarifying questions answered first: play-now +
+  background-track (not literal per-frame real-time, which stutters), one player where you scrub and
+  tap the bar anytime, and track from the mark point onward.
+  Replaces the v0.52.0 two-step mark->watch. New flow (BarPathCaptureViewModel): CaptureStep is now
+  RECORDING -> PLAYER -> optional SCALE -> PROCESSING(analyze) -> RESULTS (MARKING + track-PROCESSING
+  + PLAYBACK gone). loadVideo reads only videoDimensions (fast metadata) and goes straight to PLAYER
+  - no blocking frame extraction, so playback starts at once.
+  (1) Live streaming track: BarPathFrameTracker.trackMarker gained startMs (track from the mark time
+  to the end; the MAX_SAMPLES cap now applies over that span) and onSample (emit each position as
+  found); driveRetrieverFrames starts at startMs. New extractFrameAt(videoPath, ms) samples the
+  colour at the tapped frame. onMarkTap(videoX, videoY, atMs) samples the marker colour from that
+  frame/point (one getFrameAtTime), then runs trackMarker(startMs=atMs, onSample=stream into a
+  _liveSamples StateFlow) on a cancellable Job; the player overlay reads _liveSamples so the dot
+  follows as tracking arrives (fully live once caught up on the loop). onReMark cancels + clears;
+  re-tapping re-marks. Numbers reuse _liveSamples (no re-track).
+  (2) Tap-to-mark coordinate mapping: new pure screenToVideoPx (inverse of computeFittedVideoRect;
+  null for letterbox-margin taps) maps a tap on the PlayerView to full-res video pixels - 4 unit
+  tests (centre, letterbox-margin-null, fitted-rect corners, degenerate dims). currentSampleIndex
+  reused.
+  (3) BarPathTrackPlaybackContent is now the live PLAYER: ExoPlayer auto-plays/loops; tapping the
+  video pauses + maps the tap + calls onMarkTap; single-colour trail + dot from the streaming samples
+  (draws nothing until playback reaches the mark, so no phantom dot before the lift); header toggles
+  "Scrub to the lift, then tap the bar" -> "TRACKING" + RE-MARK; GET VELOCITY NUMBERS appears once
+  tracked; errors shown inline (stay on the player to re-mark, not a dead-end error screen). Screen
+  collects viewModel.liveSamples; MarkingStep removed; ScaleStep + ResultsStep + velocity replay
+  unchanged.
+  KNOWN GAP: same unverified-on-device coordinate mapping / ExoPlayer sync as the prior replay - but
+  this is the self-verifying live check. Genuine frame-locked real-time was declined (decode slower
+  than 33ms/frame -> stutter); "play now + background track = live on loop" is the chosen approach.
+  versionCode 74, versionName 0.53.0.
 
 ## Release rules
 
