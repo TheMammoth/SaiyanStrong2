@@ -1,5 +1,6 @@
 package com.saiyanstrong.domain.util
 
+import com.saiyanstrong.domain.model.LiftType
 import com.saiyanstrong.domain.model.LimbRatios
 import com.saiyanstrong.domain.model.NodeId
 import com.saiyanstrong.domain.model.NodePosition
@@ -249,6 +250,66 @@ class StickmanKinematicsTest {
         assertEquals(80f, StickmanKinematics.nearestYawDetent(70f))
         assertEquals(-45f, StickmanKinematics.nearestYawDetent(-52f))
         assertEquals(-80f, StickmanKinematics.nearestYawDetent(-72f))
+    }
+
+    // --- Deadlift (Slice 2): hanging arms, authored hinge torso ---
+
+    private val deadliftSetup = PoseAngles(66f, 122f, 57f)
+    private val deadliftLockout = PoseAngles(178f, 180f, 4f)
+
+    @Test
+    fun `deadlift arms hang straight down from the shoulders`() {
+        val nodes = StickmanKinematics.buildNodes(proportionalRatios, deadliftSetup, LiftType.DEADLIFT)
+        val lShoulder = node(nodes, NodeId.L_SHOULDER)
+        val lWrist = node(nodes, NodeId.L_WRIST)
+        val rShoulder = node(nodes, NodeId.R_SHOULDER)
+        val rWrist = node(nodes, NodeId.R_WRIST)
+        assertEquals("left arm vertical", lShoulder.x, lWrist.x, 1e-4f)
+        assertEquals("right arm vertical", rShoulder.x, rWrist.x, 1e-4f)
+        assertTrue("wrist hangs below the shoulder", lWrist.y > lShoulder.y)
+        // arm length is a fixed ratio (not stretched to reach the floor)
+        assertEquals(proportionalRatios.armRatio * 0.80, distance(lShoulder, lWrist), 1e-4)
+    }
+
+    @Test
+    fun `deadlift bar spans the wrists and hangs under the shoulders`() {
+        val nodes = StickmanKinematics.buildNodes(proportionalRatios, deadliftSetup, LiftType.DEADLIFT)
+        val bar = node(nodes, NodeId.BAR)
+        val lWrist = node(nodes, NodeId.L_WRIST)
+        val rWrist = node(nodes, NodeId.R_WRIST)
+        val lShoulder = node(nodes, NodeId.L_SHOULDER)
+        assertEquals((lWrist.x + rWrist.x) / 2f, bar.x, 1e-4f)
+        assertTrue("bar sits below the shoulders", bar.y > lShoulder.y)
+    }
+
+    @Test
+    fun `deadlift torso uses the authored hinge angle directly (not the solved squat lean)`() {
+        val leanSetup = torsoLeanOf(StickmanKinematics.buildNodes(proportionalRatios, deadliftSetup, LiftType.DEADLIFT))
+        val leanLockout = torsoLeanOf(StickmanKinematics.buildNodes(proportionalRatios, deadliftLockout, LiftType.DEADLIFT))
+        assertEquals("setup lean == authored 57°", 57.0, leanSetup, 0.5)
+        assertEquals("lockout lean == authored 4°", 4.0, leanLockout, 0.5)
+    }
+
+    @Test
+    fun `deadlift bar rises from setup to lockout`() {
+        val barSetup = node(StickmanKinematics.buildNodes(proportionalRatios, deadliftSetup, LiftType.DEADLIFT), NodeId.BAR)
+        val barLockout = node(StickmanKinematics.buildNodes(proportionalRatios, deadliftLockout, LiftType.DEADLIFT), NodeId.BAR)
+        // y grows downward, so a higher bar at lockout means a smaller y.
+        assertTrue("bar should be higher at lockout than setup", barLockout.y < barSetup.y)
+    }
+
+    @Test
+    fun `deadlift segments stay rigid (legs, torso, head, arms)`() {
+        val bodyScale = 0.80
+        for (angles in listOf(deadliftSetup, PoseAngles(75f, 130f, 56f), deadliftLockout)) {
+            val nodes = StickmanKinematics.buildNodes(proportionalRatios, angles, LiftType.DEADLIFT)
+            val ankleCenter = centerline(nodes, NodeId.L_ANKLE, NodeId.R_ANKLE)
+            val kneeCenter = centerline(nodes, NodeId.L_KNEE, NodeId.R_KNEE)
+            assertEquals("shank", proportionalRatios.shankRatio * bodyScale, distance(ankleCenter, kneeCenter), 1e-4)
+            assertEquals("thigh", proportionalRatios.thighRatio * bodyScale, distance(kneeCenter, node(nodes, NodeId.HIP_CENTER)), 1e-4)
+            assertEquals("torso", proportionalRatios.torsoRatio * bodyScale, distance(node(nodes, NodeId.HIP_CENTER), node(nodes, NodeId.NECK_BASE)), 1e-4)
+            assertEquals("arm", proportionalRatios.armRatio * bodyScale, distance(node(nodes, NodeId.L_SHOULDER), node(nodes, NodeId.L_WRIST)), 1e-4)
+        }
     }
 
     @Test

@@ -1,5 +1,6 @@
 package com.saiyanstrong.domain.util
 
+import com.saiyanstrong.domain.model.LiftType
 import com.saiyanstrong.domain.model.LimbRatios
 import com.saiyanstrong.domain.model.NodePosition
 import com.saiyanstrong.domain.model.PoseAngles
@@ -15,10 +16,15 @@ import com.saiyanstrong.domain.model.StickmanKeyframe
 object StickmanInterpolator {
 
     /** @param progress 0.0 (first keyframe) to 1.0 (last keyframe), linear across all segments. */
-    fun interpolate(keyframes: List<StickmanKeyframe>, ratios: LimbRatios, progress: Float): List<NodePosition> {
+    fun interpolate(
+        keyframes: List<StickmanKeyframe>,
+        ratios: LimbRatios,
+        progress: Float,
+        lift: LiftType = LiftType.SQUAT
+    ): List<NodePosition> {
         if (keyframes.isEmpty()) return emptyList()
         val angles = interpolateAngles(keyframes, progress)
-        return StickmanKinematics.buildNodes(ratios, angles)
+        return StickmanKinematics.buildNodes(ratios, angles, lift)
     }
 
     internal fun interpolateAngles(keyframes: List<StickmanKeyframe>, progress: Float): PoseAngles {

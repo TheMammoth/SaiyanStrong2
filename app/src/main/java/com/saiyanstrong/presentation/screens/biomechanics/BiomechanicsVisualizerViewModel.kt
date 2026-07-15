@@ -69,7 +69,7 @@ class BiomechanicsVisualizerViewModel @Inject constructor(
 
     fun onSliderChanged(progress: Float) {
         val currentRatios = ratios ?: return
-        val nodes = StickmanInterpolator.interpolate(keyframes, currentRatios, progress)
+        val nodes = StickmanInterpolator.interpolate(keyframes, currentRatios, progress, lift)
         _uiState.update { it.copy(nodes = nodes, sliderProgress = progress) }
     }
 
@@ -89,6 +89,9 @@ class BiomechanicsVisualizerViewModel @Inject constructor(
         com.saiyanstrong.domain.model.BiomechanicsPhase.PARALLEL -> "PARALLEL"
         com.saiyanstrong.domain.model.BiomechanicsPhase.BOTTOM -> "BOTTOM"
         com.saiyanstrong.domain.model.BiomechanicsPhase.ASCENT_STICK -> "GRIND"
+        com.saiyanstrong.domain.model.BiomechanicsPhase.SETUP -> "FLOOR"
+        com.saiyanstrong.domain.model.BiomechanicsPhase.KNEE_PASS -> "KNEES"
+        com.saiyanstrong.domain.model.BiomechanicsPhase.LOCKOUT -> "LOCK"
         else -> null
     }
 }

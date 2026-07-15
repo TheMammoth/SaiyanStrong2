@@ -51,14 +51,24 @@ fun LiftSelectorScreen(
             modifier = Modifier.fillMaxWidth()
         ) { Text("SQUAT", fontWeight = FontWeight.Black, letterSpacing = 1.sp) }
 
-        // Deadlift keyframe content doesn't exist yet (Phase 1 ships squat only, per spec's
-        // acceptance criteria) — shown disabled rather than omitted, so it reads as "coming
-        // soon" instead of quietly missing.
+        OutlinedButton(
+            onClick = { onLiftChosen(LiftType.DEADLIFT) },
+            modifier = Modifier.fillMaxWidth().padding(top = 10.dp)
+        ) { Text("DEADLIFT", fontWeight = FontWeight.Black, letterSpacing = 1.sp) }
+
+        // Overhead press and bench are the next slices — shown disabled rather than omitted so
+        // they read as "coming soon" instead of quietly missing.
         OutlinedButton(
             onClick = {},
             enabled = false,
             modifier = Modifier.fillMaxWidth().padding(top = 10.dp)
-        ) { Text("DEADLIFT (SOON)", fontWeight = FontWeight.Black, letterSpacing = 1.sp) }
+        ) { Text("OVERHEAD PRESS (SOON)", fontWeight = FontWeight.Black, letterSpacing = 1.sp) }
+
+        OutlinedButton(
+            onClick = {},
+            enabled = false,
+            modifier = Modifier.fillMaxWidth().padding(top = 10.dp)
+        ) { Text("BENCH PRESS (SOON)", fontWeight = FontWeight.Black, letterSpacing = 1.sp) }
     }
 }
 

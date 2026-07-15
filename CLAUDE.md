@@ -2811,6 +2811,44 @@ _(Claude Code appends here after each completed task)_
   user's real look. Slices 2–4 (deadlift hanging-arm/bar, OHP press-up, bench supine) not started;
   bench's supine orientation to be confirmed on a device before finishing, per SPEC.md §10.
   versionCode 78, versionName 0.56.0.
+- [x] Sprint — Stickman animation, Slice 2: deadlift (v0.57.0), per SPEC.md §4/§6. Adds the
+  deadlift as the second of four lifts, reusing Slice 1's `torsoLeanBiasDeg` grind mechanism.
+  (1) **Per-lift kinematics branch**: `StickmanKinematics.buildNodes` gained a
+  `lift: LiftType = LiftType.SQUAT` param (defaulted, so every existing squat call and test is
+  untouched). The leg chain (ankle→knee→hip, knee-driven) is shared. What branches: **torso mode**
+  — squat still SOLVES lean from the bar-over-mid-foot balance equation; deadlift USES the authored
+  `torsoAngleDeg` directly (torso pitch is the defining feature of a hinge — solving it would erase
+  the archetype differences the feature exists to show). **Arm/bar mode** — squat keeps the bar
+  racked on the upper back (wrists grip it either side); deadlift hangs the arms straight down from
+  the shoulders by a fixed `armRatio` length, with the bar spanning the wrists, so the bar tracks
+  under the shoulders (the correct DL bar path) and its height falls out of shoulder height + arm
+  reach — no bar-height field needed. The femur↔torso comfort nudge is now squat-only (deadlift's
+  thigh is pure knee-driven, since its torso is authored not solved). `StickmanInterpolator
+  .interpolate` threads `lift` through; the ViewModel passes it.
+  (2) **`armRatio`** added to `LimbRatios` (defaulted 0.34, so pre-existing squat JSON and saved
+  custom-ratio blobs still decode). Unused by the squat; the deadlift (and later presses) use it.
+  (3) **`keyframes_deadlift.json`** — 4 archetypes, full-rep timeline (SETUP → FIRST_PULL →
+  KNEE_PASS → LOCKOUT → KNEE_PASS → FIRST_PULL → SETUP, so the slider runs floor→lockout→floor with
+  the bottom/floor at 0 and 1). The concentric sticking point (FIRST_PULL) carries a positive
+  `torsoLeanBiasDeg` (hips-lead grind: hips rise while the torso stays pitched) — worst for
+  LONG_FEMUR (+14), mildest for SHORT_FEMUR (+8). Authored torso angles differ per archetype
+  (LONG_FEMUR sets up ~66° pitched, SHORT_FEMUR ~48° more upright) — the leverage difference the
+  visualizer is meant to teach, which the kinematics never enforced for deadlift before because
+  deadlift had no content at all.
+  (4) **UI**: Lift Selector enables DEADLIFT (was a disabled "SOON"); OHP + bench added as the new
+  disabled "SOON" rows. Phase-tick labels extended (SETUP→FLOOR, KNEE_PASS→KNEES, LOCKOUT→LOCK).
+  The CUSTOM-archetype copy in `GetArchetypeAnimationUseCase` was squat-specific ("descent",
+  "squat", "mid-foot") — neutralized to lift-agnostic wording now that CUSTOM serves deadlift too.
+  (5) **Tests**: 5 new in `StickmanKinematicsTest` (arms hang vertical from the shoulders at a
+  fixed arm length; bar spans the wrists and hangs below the shoulders; torso reads the authored
+  hinge angle directly, not the solved squat lean; bar rises from setup to lockout; all segments —
+  legs/torso/arms — stay rigid across the deadlift range). Full Stickman suite + `assembleGithubDebug`
+  green, no `" lb"`.
+  KNOWN GAP: not visually validated on a device this session. In particular the deadlift setup bar
+  height (a loaded bar sits at plate-radius/mid-shin height, not on the floor — the current chain
+  puts it around knee height, a touch high) and the archetype torso/knee angles are a first-pass,
+  tunable after a real look. Slices 3 (OHP press-up) and 4 (bench supine) not started.
+  versionCode 79, versionName 0.57.0.
 
 ## Release rules
 

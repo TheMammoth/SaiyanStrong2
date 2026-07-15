@@ -18,5 +18,9 @@ data class LimbRatios(
     val kneeHalfRatio: Float,
     val ankleHalfRatio: Float,
     val barRiseRatio: Float,
-    val gripHalfRatio: Float
+    val gripHalfRatio: Float,
+    /** Shoulder-to-wrist arm length. Unused by the squat (its wrists grip a bar racked on the
+     * back); the deadlift and presses use it to hang/extend the arms. Defaulted so every
+     * pre-existing squat keyframe JSON and saved custom-ratio blob still decodes unchanged. */
+    val armRatio: Float = 0.34f
 )

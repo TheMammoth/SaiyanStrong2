@@ -29,16 +29,16 @@ class GetArchetypeAnimationUseCase @Inject constructor(
             archetype = Archetype.CUSTOM,
             limbRatios = customRatios,
             mechanicalFacts = listOf(
-                "This build reflects the proportions you set below — torso lean, knee travel, and " +
-                    "hip depth follow whatever thigh, shin, and torso lengths you chose.",
+                "This build reflects the proportions you set below — torso lean, joint travel, and " +
+                    "depth follow whatever thigh, shin, and torso lengths you chose.",
                 "Widening or narrowing a ratio changes how this animation moves; there's no single " +
                     "correct setting, only what matches your own build.",
-                "The bar still stays over mid-foot throughout, the same physical constraint every " +
-                    "proportion has to satisfy."
+                "The mechanics scale with your proportions the same way every body has to work with " +
+                    "its own leverages."
             ),
             stanceCue = "Adjust the sliders until the standing pose matches your own proportions, " +
-                "then compare the descent to how your squat actually feels.",
-            irrelevantCue = "\"Every squat should look the same\" → mechanics scale with the " +
+                "then compare the movement to how the lift actually feels for you.",
+            irrelevantCue = "\"Everyone's lift should look the same\" → mechanics scale with the " +
                 "proportions set here — there's no universal template to match."
         )
     }

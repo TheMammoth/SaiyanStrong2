@@ -1,0 +1,110 @@
+[
+  {
+    "archetype": "LONG_FEMUR",
+    "lift": "DEADLIFT",
+    "limbRatios": {
+      "thighRatio": 0.260, "shankRatio": 0.240, "torsoRatio": 0.26, "headNeckRatio": 0.19,
+      "footLenRatio": 0.10, "shoulderHalfRatio": 0.090, "hipHalfRatio": 0.070,
+      "kneeHalfRatio": 0.050, "ankleHalfRatio": 0.045, "barRiseRatio": 0.04, "gripHalfRatio": 0.09,
+      "armRatio": 0.36
+    },
+    "keyframes": [
+      { "phase": "SETUP",      "angles": { "hipAngleDeg": 70,  "kneeAngleDeg": 128, "torsoAngleDeg": 66 } },
+      { "phase": "FIRST_PULL", "angles": { "hipAngleDeg": 78,  "kneeAngleDeg": 135, "torsoAngleDeg": 64, "torsoLeanBiasDeg": 14 } },
+      { "phase": "KNEE_PASS",  "angles": { "hipAngleDeg": 120, "kneeAngleDeg": 152, "torsoAngleDeg": 45, "torsoLeanBiasDeg": 6 } },
+      { "phase": "LOCKOUT",    "angles": { "hipAngleDeg": 178, "kneeAngleDeg": 180, "torsoAngleDeg": 4 } },
+      { "phase": "KNEE_PASS",  "angles": { "hipAngleDeg": 120, "kneeAngleDeg": 152, "torsoAngleDeg": 45 } },
+      { "phase": "FIRST_PULL", "angles": { "hipAngleDeg": 78,  "kneeAngleDeg": 135, "torsoAngleDeg": 64 } },
+      { "phase": "SETUP",      "angles": { "hipAngleDeg": 70,  "kneeAngleDeg": 128, "torsoAngleDeg": 66 } }
+    ],
+    "mechanicalFacts": [
+      "The torso starts more pitched forward than a shorter-femur build — long thighs put the hips further back at setup.",
+      "Off the floor the hips tend to rise first while the torso stays pitched; this is the sticking point, not a fault to coach away.",
+      "The bar hangs under the shoulders the whole pull — that's the vertical path the arms track.",
+      "Lockout brings the torso to vertical as the hips finish through."
+    ],
+    "stanceCue": "Lifters with this structure often set the hips a little higher — chasing a low, squat-style hip position fights the long-femur leverage.",
+    "irrelevantCue": "\"Get your hips down like a squat\" → With long femurs, forcing the hips low shifts the shoulders behind the bar and lengthens the lever. The higher hip is the structure, not a shortcut."
+  },
+  {
+    "archetype": "SHORT_FEMUR",
+    "lift": "DEADLIFT",
+    "limbRatios": {
+      "thighRatio": 0.200, "shankRatio": 0.300, "torsoRatio": 0.32, "headNeckRatio": 0.13,
+      "footLenRatio": 0.10, "shoulderHalfRatio": 0.090, "hipHalfRatio": 0.070,
+      "kneeHalfRatio": 0.050, "ankleHalfRatio": 0.045, "barRiseRatio": 0.04, "gripHalfRatio": 0.09,
+      "armRatio": 0.34
+    },
+    "keyframes": [
+      { "phase": "SETUP",      "angles": { "hipAngleDeg": 62,  "kneeAngleDeg": 112, "torsoAngleDeg": 48 } },
+      { "phase": "FIRST_PULL", "angles": { "hipAngleDeg": 72,  "kneeAngleDeg": 120, "torsoAngleDeg": 47, "torsoLeanBiasDeg": 8 } },
+      { "phase": "KNEE_PASS",  "angles": { "hipAngleDeg": 118, "kneeAngleDeg": 145, "torsoAngleDeg": 32, "torsoLeanBiasDeg": 4 } },
+      { "phase": "LOCKOUT",    "angles": { "hipAngleDeg": 178, "kneeAngleDeg": 180, "torsoAngleDeg": 3 } },
+      { "phase": "KNEE_PASS",  "angles": { "hipAngleDeg": 118, "kneeAngleDeg": 145, "torsoAngleDeg": 32 } },
+      { "phase": "FIRST_PULL", "angles": { "hipAngleDeg": 72,  "kneeAngleDeg": 120, "torsoAngleDeg": 47 } },
+      { "phase": "SETUP",      "angles": { "hipAngleDeg": 62,  "kneeAngleDeg": 112, "torsoAngleDeg": 48 } }
+    ],
+    "mechanicalFacts": [
+      "The torso sits closer to upright at setup — a shorter thigh and longer torso let the hips start lower without the bar drifting forward.",
+      "The knees bend more than a long-femur build, so the pull looks a little more squat-like off the floor.",
+      "The bar still hangs straight under the shoulders throughout the pull.",
+      "The sticking point off the floor is milder — the shoulders sit more over the bar from the start."
+    ],
+    "stanceCue": "Lifters with this structure can usually start with the hips lower and the chest taller without losing the bar over mid-foot.",
+    "irrelevantCue": "\"Keep your hips high to save your back\" → With short femurs, an exaggerated high hip turns the pull into a stiff-legged hinge the structure doesn't need."
+  },
+  {
+    "archetype": "PROPORTIONAL",
+    "lift": "DEADLIFT",
+    "limbRatios": {
+      "thighRatio": 0.230, "shankRatio": 0.270, "torsoRatio": 0.29, "headNeckRatio": 0.16,
+      "footLenRatio": 0.10, "shoulderHalfRatio": 0.090, "hipHalfRatio": 0.070,
+      "kneeHalfRatio": 0.050, "ankleHalfRatio": 0.045, "barRiseRatio": 0.04, "gripHalfRatio": 0.09,
+      "armRatio": 0.35
+    },
+    "keyframes": [
+      { "phase": "SETUP",      "angles": { "hipAngleDeg": 66,  "kneeAngleDeg": 122, "torsoAngleDeg": 57 } },
+      { "phase": "FIRST_PULL", "angles": { "hipAngleDeg": 75,  "kneeAngleDeg": 130, "torsoAngleDeg": 56, "torsoLeanBiasDeg": 11 } },
+      { "phase": "KNEE_PASS",  "angles": { "hipAngleDeg": 119, "kneeAngleDeg": 150, "torsoAngleDeg": 40, "torsoLeanBiasDeg": 5 } },
+      { "phase": "LOCKOUT",    "angles": { "hipAngleDeg": 178, "kneeAngleDeg": 180, "torsoAngleDeg": 4 } },
+      { "phase": "KNEE_PASS",  "angles": { "hipAngleDeg": 119, "kneeAngleDeg": 150, "torsoAngleDeg": 40 } },
+      { "phase": "FIRST_PULL", "angles": { "hipAngleDeg": 75,  "kneeAngleDeg": 130, "torsoAngleDeg": 56 } },
+      { "phase": "SETUP",      "angles": { "hipAngleDeg": 66,  "kneeAngleDeg": 122, "torsoAngleDeg": 57 } }
+    ],
+    "mechanicalFacts": [
+      "Setup torso lean sits between the long- and short-femur extremes for a balanced hip height.",
+      "Hips and shoulders rise at a similar rate off the floor, so the sticking point is moderate.",
+      "The bar tracks straight down from the shoulders through the whole pull.",
+      "The torso reaches vertical as the hips finish at lockout."
+    ],
+    "stanceCue": "A hip-width stance with the bar over mid-foot and the shoulders just in front of the bar is a common starting point for this balanced proportion.",
+    "irrelevantCue": "\"There's one correct hip height for the deadlift\" → Where the hips start depends on femur, torso, and arm length — a balanced build still has its own natural setup."
+  },
+  {
+    "archetype": "WIDE_HIP",
+    "lift": "DEADLIFT",
+    "limbRatios": {
+      "thighRatio": 0.230, "shankRatio": 0.270, "torsoRatio": 0.29, "headNeckRatio": 0.16,
+      "footLenRatio": 0.10, "shoulderHalfRatio": 0.090, "hipHalfRatio": 0.105,
+      "kneeHalfRatio": 0.050, "ankleHalfRatio": 0.045, "barRiseRatio": 0.04, "gripHalfRatio": 0.09,
+      "armRatio": 0.35
+    },
+    "keyframes": [
+      { "phase": "SETUP",      "angles": { "hipAngleDeg": 66,  "kneeAngleDeg": 122, "torsoAngleDeg": 57 } },
+      { "phase": "FIRST_PULL", "angles": { "hipAngleDeg": 75,  "kneeAngleDeg": 130, "torsoAngleDeg": 56, "torsoLeanBiasDeg": 11 } },
+      { "phase": "KNEE_PASS",  "angles": { "hipAngleDeg": 119, "kneeAngleDeg": 150, "torsoAngleDeg": 40, "torsoLeanBiasDeg": 5 } },
+      { "phase": "LOCKOUT",    "angles": { "hipAngleDeg": 178, "kneeAngleDeg": 180, "torsoAngleDeg": 4 } },
+      { "phase": "KNEE_PASS",  "angles": { "hipAngleDeg": 119, "kneeAngleDeg": 150, "torsoAngleDeg": 40 } },
+      { "phase": "FIRST_PULL", "angles": { "hipAngleDeg": 75,  "kneeAngleDeg": 130, "torsoAngleDeg": 56 } },
+      { "phase": "SETUP",      "angles": { "hipAngleDeg": 66,  "kneeAngleDeg": 122, "torsoAngleDeg": 57 } }
+    ],
+    "mechanicalFacts": [
+      "A wider hip changes how the thighs clear the arms — the stance and grip often sit a touch wider to give the hips room.",
+      "Hip height and torso lean are otherwise close to a proportional build off the floor.",
+      "The bar still hangs straight under the shoulders through the pull.",
+      "Knee-out at setup is naturally greater to keep the shins clear of a wider hip."
+    ],
+    "stanceCue": "Lifters with this structure often set a slightly wider stance so the hips can drop in without the thighs crowding the arms.",
+    "irrelevantCue": "\"Pull with a narrow, hip-width stance\" → With a wider hip, a narrow stance crowds the arms against the thighs — a little more width is the natural fit, not a fault."
+  }
+]

@@ -1,5 +1,6 @@
 package com.saiyanstrong.domain.util
 
+import com.saiyanstrong.domain.model.LiftType
 import com.saiyanstrong.domain.model.LimbRatios
 import com.saiyanstrong.domain.model.NodeId
 import com.saiyanstrong.domain.model.NodePosition
@@ -98,39 +99,66 @@ object StickmanKinematics {
     private const val COMFORT_SCALE_MIN = 0.6f
     private const val COMFORT_SCALE_MAX = 1.4f
 
-    fun buildNodes(ratios: LimbRatios, angles: PoseAngles): List<NodePosition> {
+    fun buildNodes(
+        ratios: LimbRatios,
+        angles: PoseAngles,
+        lift: LiftType = LiftType.SQUAT
+    ): List<NodePosition> {
         val kneeDeviation = 180f - angles.kneeAngleDeg
         val shankLean = kneeDeviation * 0.15f
-        val comfortScale = (1f + THIGH_TORSO_COMFORT_GAIN * (ratios.torsoRatio - TORSO_REFERENCE_RATIO))
-            .coerceIn(COMFORT_SCALE_MIN, COMFORT_SCALE_MAX)
+        // The femur↔torso comfort nudge is a squat-only stylistic coupling (the squat's torso is
+        // solved from balance); the deadlift's torso is an authored hinge angle, so its thigh is
+        // pure knee-driven with no nudge.
+        val comfortScale = if (lift == LiftType.SQUAT) {
+            (1f + THIGH_TORSO_COMFORT_GAIN * (ratios.torsoRatio - TORSO_REFERENCE_RATIO))
+                .coerceIn(COMFORT_SCALE_MIN, COMFORT_SCALE_MAX)
+        } else 1f
         val thighLean = shankLean - kneeDeviation * comfortScale
 
-        // --- Foot and shank: planted, fixed for the whole rep ---
+        // --- Foot and shank: planted, fixed for the whole rep (shared by every lift) ---
         val ankle = ANKLE_X to ANKLE_Y
         val knee = ankle + rotateUp(ratios.shankRatio * BODY_SCALE, shankLean)
         val toe = (ankle.first + ratios.footLenRatio * BODY_SCALE) to FLOOR_Y
 
-        // --- Hip and up: torso lean solved (rotation, not translation) so segments stay rigid
-        // AND the bar lands back over mid-foot — see class KDoc "Torso angle is solved..." ---
+        // --- Hip and up ---
         val hip = knee + rotateUp(ratios.thighRatio * BODY_SCALE, thighLean)
-        // Solved balance lean, then the authored grind bias (rotation about the hip — never
-        // changes a segment length, so rigidity holds; positive = torso pitched further forward
-        // than balance, bar drifts forward of mid-foot, which is what a real grind looks like).
-        // At bias 0 this is exactly the pre-existing solved lean, so squat's motion is unchanged.
-        val torsoLean = (solveTorsoLean(ratios, ankle.first, hip) + angles.torsoLeanBiasDeg)
-            .coerceIn(0f, 90f)
+        // Torso lean per lift: the squat SOLVES it (balance, bar over mid-foot); the deadlift
+        // USES the authored hinge angle directly (torso pitch IS the defining feature of a
+        // hinge — solving it would erase the archetype differences). Both then add the grind
+        // bias as a rotation about the hip (never changes a segment length, so rigidity holds).
+        // At bias 0 the squat branch is exactly the pre-existing solved lean, so squat is unchanged.
+        val torsoLean = when (lift) {
+            LiftType.DEADLIFT -> (angles.torsoAngleDeg + angles.torsoLeanBiasDeg).coerceIn(0f, 90f)
+            else -> (solveTorsoLean(ratios, ankle.first, hip) + angles.torsoLeanBiasDeg).coerceIn(0f, 90f)
+        }
         val neck = hip + rotateUp(ratios.torsoRatio * BODY_SCALE, torsoLean)
         val head = neck + rotateUp(ratios.headNeckRatio * BODY_SCALE, torsoLean)
-        val bar = neck + rotateUp(ratios.barRiseRatio * BODY_SCALE, torsoLean)
 
-        val gripHalf = ratios.gripHalfRatio * BODY_SCALE
+        val (lShoulder, rShoulder) = side(neck, ratios.shoulderHalfRatio * BODY_SCALE)
+
+        // --- Arms + bar, per lift ---
+        // Squat: bar racked on the upper back (rotates with the torso), wrists grip it either side.
+        // Deadlift: arms hang straight down from the shoulders by a fixed arm length; the bar
+        // spans the wrists and therefore tracks under the shoulders — the correct DL bar path,
+        // with the bar's height falling out of shoulder height + arm reach (no bar-height field).
+        val (bar, lWrist, rWrist) = when (lift) {
+            LiftType.DEADLIFT -> {
+                val armLen = ratios.armRatio * BODY_SCALE
+                val lw = lShoulder.first to (lShoulder.second + armLen)
+                val rw = rShoulder.first to (rShoulder.second + armLen)
+                Triple(midpoint(lw, rw), lw, rw)
+            }
+            else -> {
+                val b = neck + rotateUp(ratios.barRiseRatio * BODY_SCALE, torsoLean)
+                val (lw, rw) = side(b, ratios.gripHalfRatio * BODY_SCALE)
+                Triple(b, lw, rw)
+            }
+        }
 
         val (lHip, rHip) = side(hip, ratios.hipHalfRatio * BODY_SCALE)
         val (lKnee, rKnee) = side(knee, ratios.kneeHalfRatio * BODY_SCALE)
         val (lAnkle, rAnkle) = side(ankle, ratios.ankleHalfRatio * BODY_SCALE)
         val (lToe, rToe) = side(toe, ratios.ankleHalfRatio * BODY_SCALE)
-        val (lShoulder, rShoulder) = side(neck, ratios.shoulderHalfRatio * BODY_SCALE)
-        val (lWrist, rWrist) = side(bar, gripHalf)
         val lElbow = midpoint(lShoulder, lWrist)
         val rElbow = midpoint(rShoulder, rWrist)
 
