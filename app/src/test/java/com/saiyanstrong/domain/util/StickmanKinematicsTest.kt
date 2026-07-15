@@ -312,6 +312,43 @@ class StickmanKinematicsTest {
         }
     }
 
+    // --- Overhead press (Slice 3): press-up arms, near-vertical torso ---
+
+    private val ohpRack = PoseAngles(180f, 180f, 5f, 0f, 0f)
+    private val ohpLockout = PoseAngles(180f, 180f, 2f, 0f, 1f)
+
+    @Test
+    fun `overhead press bar sits in front at the rack and stacks over the shoulders at lockout`() {
+        val rack = StickmanKinematics.buildNodes(proportionalRatios, ohpRack, LiftType.OVERHEAD_PRESS)
+        val lockout = StickmanKinematics.buildNodes(proportionalRatios, ohpLockout, LiftType.OVERHEAD_PRESS)
+        // Rack: bar is forward of the shoulder line (arm angled forward). Lockout: bar is stacked
+        // directly over the shoulder centerline (arm vertical). Each compared against its own
+        // pose's neck x — a slightly different torso angle shifts the neck between the two poses.
+        assertTrue("bar should be forward of the shoulders at the rack", node(rack, NodeId.BAR).x > node(rack, NodeId.NECK_BASE).x)
+        assertEquals("bar over shoulders at lockout", node(lockout, NodeId.NECK_BASE).x, node(lockout, NodeId.BAR).x, 1e-4f)
+    }
+
+    @Test
+    fun `overhead press bar rises from rack to overhead as pressFraction goes to 1`() {
+        val barRack = node(StickmanKinematics.buildNodes(proportionalRatios, ohpRack, LiftType.OVERHEAD_PRESS), NodeId.BAR)
+        val barLockout = node(StickmanKinematics.buildNodes(proportionalRatios, ohpLockout, LiftType.OVERHEAD_PRESS), NodeId.BAR)
+        val shoulder = node(StickmanKinematics.buildNodes(proportionalRatios, ohpLockout, LiftType.OVERHEAD_PRESS), NodeId.L_SHOULDER)
+        // y grows downward: overhead means a smaller y, and the locked-out bar is above the shoulders.
+        assertTrue("bar rises from rack to lockout", barLockout.y < barRack.y)
+        assertTrue("locked-out bar is above the shoulders", barLockout.y < shoulder.y)
+    }
+
+    @Test
+    fun `overhead press arms stay rigid and legs stay straight`() {
+        val bodyScale = 0.80
+        for (angles in listOf(ohpRack, PoseAngles(180f, 180f, 3f, 0f, 0.6f), ohpLockout)) {
+            val nodes = StickmanKinematics.buildNodes(proportionalRatios, angles, LiftType.OVERHEAD_PRESS)
+            assertEquals("arm rigid", proportionalRatios.armRatio * bodyScale, distance(node(nodes, NodeId.L_SHOULDER), node(nodes, NodeId.L_WRIST)), 1e-4)
+            // Straight legs: standing, hip stays above the knee.
+            assertTrue("hip above knee (straight legs)", node(nodes, NodeId.HIP_CENTER).y < node(nodes, NodeId.L_KNEE).y)
+        }
+    }
+
     @Test
     fun `applyYaw at 0 degrees returns nodes unchanged`() {
         val nodes = StickmanKinematics.buildNodes(ratios, PoseAngles(95f, 76f, 55f))

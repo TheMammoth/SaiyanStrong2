@@ -99,6 +99,11 @@ object StickmanKinematics {
     private const val COMFORT_SCALE_MIN = 0.6f
     private const val COMFORT_SCALE_MAX = 1.4f
 
+    /** Overhead press arm lean (degrees from vertical) at the rack — the arm points forward-and-up
+     * so the bar sits in front at roughly shoulder height; it rotates to 0° (straight overhead) as
+     * pressFraction reaches 1. */
+    private const val OHP_RACK_ARM_LEAN = 78f
+
     fun buildNodes(
         ratios: LimbRatios,
         angles: PoseAngles,
@@ -128,8 +133,11 @@ object StickmanKinematics {
         // bias as a rotation about the hip (never changes a segment length, so rigidity holds).
         // At bias 0 the squat branch is exactly the pre-existing solved lean, so squat is unchanged.
         val torsoLean = when (lift) {
-            LiftType.DEADLIFT -> (angles.torsoAngleDeg + angles.torsoLeanBiasDeg).coerceIn(0f, 90f)
-            else -> (solveTorsoLean(ratios, ankle.first, hip) + angles.torsoLeanBiasDeg).coerceIn(0f, 90f)
+            // Only the squat solves torso lean from the bar-over-mid-foot balance equation. Every
+            // other lift authors it directly (a deadlift hinge, a near-vertical press) — solving
+            // would be meaningless for a bar that isn't over the foot.
+            LiftType.SQUAT -> (solveTorsoLean(ratios, ankle.first, hip) + angles.torsoLeanBiasDeg).coerceIn(0f, 90f)
+            else -> (angles.torsoAngleDeg + angles.torsoLeanBiasDeg).coerceIn(0f, 90f)
         }
         val neck = hip + rotateUp(ratios.torsoRatio * BODY_SCALE, torsoLean)
         val head = neck + rotateUp(ratios.headNeckRatio * BODY_SCALE, torsoLean)
@@ -146,6 +154,17 @@ object StickmanKinematics {
                 val armLen = ratios.armRatio * BODY_SCALE
                 val lw = lShoulder.first to (lShoulder.second + armLen)
                 val rw = rShoulder.first to (rShoulder.second + armLen)
+                Triple(midpoint(lw, rw), lw, rw)
+            }
+            LiftType.OVERHEAD_PRESS -> {
+                // Straight-line arm rotating from ~forward-horizontal at the rack to straight
+                // overhead at lockout. pressFraction 0 → arm at OHP_RACK_ARM_LEAN (bar in front at
+                // roughly shoulder height); pressFraction 1 → arm at 0° from vertical (bar over the
+                // head). Arm length is fixed, so the segment stays rigid the whole press.
+                val armLen = ratios.armRatio * BODY_SCALE
+                val armLean = OHP_RACK_ARM_LEAN * (1f - angles.pressFraction)
+                val lw = lShoulder + rotateUp(armLen, armLean)
+                val rw = rShoulder + rotateUp(armLen, armLean)
                 Triple(midpoint(lw, rw), lw, rw)
             }
             else -> {

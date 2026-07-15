@@ -18,6 +18,7 @@ import javax.inject.Singleton
 private const val ARCHETYPES_ASSET = "biomechanics/archetypes.json"
 private const val KEYFRAMES_SQUAT_ASSET = "biomechanics/keyframes_squat.json"
 private const val KEYFRAMES_DEADLIFT_ASSET = "biomechanics/keyframes_deadlift.json"
+private const val KEYFRAMES_OHP_ASSET = "biomechanics/keyframes_ohp.json"
 
 /**
  * Loads and parses the bundled JSON assets once, caches in memory — same
@@ -57,10 +58,11 @@ class BiomechanicsRepositoryImpl @Inject constructor(
     private suspend fun loadAnimations(): List<ArchetypeAnimation> = mutex.withLock {
         animations?.let { return it }
         val squat = readAnimationsAsset(KEYFRAMES_SQUAT_ASSET)
-        // Not yet authored (Phase 1 ships squat only) — a missing file just means "no deadlift
-        // content yet," not an error; the asset is read defensively rather than assumed present.
+        // Each lift's asset is read defensively — a not-yet-authored lift (a missing file) just
+        // means "no content for that lift yet," not an error.
         val deadlift = runCatching { readAnimationsAsset(KEYFRAMES_DEADLIFT_ASSET) }.getOrDefault(emptyList())
-        (squat + deadlift).also { animations = it }
+        val overheadPress = runCatching { readAnimationsAsset(KEYFRAMES_OHP_ASSET) }.getOrDefault(emptyList())
+        (squat + deadlift + overheadPress).also { animations = it }
     }
 
     private fun readAnimationsAsset(assetPath: String): List<ArchetypeAnimation> {

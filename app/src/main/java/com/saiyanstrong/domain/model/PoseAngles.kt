@@ -19,5 +19,9 @@ data class PoseAngles(
     val hipAngleDeg: Float,
     val kneeAngleDeg: Float,
     val torsoAngleDeg: Float,
-    val torsoLeanBiasDeg: Float = 0f
+    val torsoLeanBiasDeg: Float = 0f,
+    /** Arm-extension fraction for the presses: 0 = racked (bar at shoulder height, arms forward),
+     * 1 = locked out (arms fully extended overhead). Ignored by the squat and deadlift. Defaulted
+     * so every pre-existing keyframe JSON still decodes unchanged. */
+    val pressFraction: Float = 0f
 )

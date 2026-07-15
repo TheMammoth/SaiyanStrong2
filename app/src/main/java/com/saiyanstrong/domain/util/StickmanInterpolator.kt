@@ -42,7 +42,8 @@ object StickmanInterpolator {
             hipAngleDeg = lerp(from.hipAngleDeg, to.hipAngleDeg, localT),
             kneeAngleDeg = lerp(from.kneeAngleDeg, to.kneeAngleDeg, localT),
             torsoAngleDeg = lerp(from.torsoAngleDeg, to.torsoAngleDeg, localT),
-            torsoLeanBiasDeg = lerp(from.torsoLeanBiasDeg, to.torsoLeanBiasDeg, localT)
+            torsoLeanBiasDeg = lerp(from.torsoLeanBiasDeg, to.torsoLeanBiasDeg, localT),
+            pressFraction = lerp(from.pressFraction, to.pressFraction, localT)
         )
     }
 

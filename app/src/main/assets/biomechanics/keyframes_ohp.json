@@ -1,0 +1,110 @@
+[
+  {
+    "archetype": "LONG_FEMUR",
+    "lift": "OVERHEAD_PRESS",
+    "limbRatios": {
+      "thighRatio": 0.260, "shankRatio": 0.240, "torsoRatio": 0.26, "headNeckRatio": 0.19,
+      "footLenRatio": 0.10, "shoulderHalfRatio": 0.095, "hipHalfRatio": 0.070,
+      "kneeHalfRatio": 0.050, "ankleHalfRatio": 0.045, "barRiseRatio": 0.04, "gripHalfRatio": 0.10,
+      "armRatio": 0.33
+    },
+    "keyframes": [
+      { "phase": "PRESS_RACK",    "angles": { "hipAngleDeg": 180, "kneeAngleDeg": 180, "torsoAngleDeg": 5, "pressFraction": 0.0 } },
+      { "phase": "PRESS_MID",     "angles": { "hipAngleDeg": 180, "kneeAngleDeg": 180, "torsoAngleDeg": 4, "pressFraction": 0.30 } },
+      { "phase": "PRESS_STICK",   "angles": { "hipAngleDeg": 180, "kneeAngleDeg": 180, "torsoAngleDeg": 3, "pressFraction": 0.60 } },
+      { "phase": "PRESS_LOCKOUT", "angles": { "hipAngleDeg": 180, "kneeAngleDeg": 180, "torsoAngleDeg": 2, "pressFraction": 1.0 } },
+      { "phase": "PRESS_STICK",   "angles": { "hipAngleDeg": 180, "kneeAngleDeg": 180, "torsoAngleDeg": 3, "pressFraction": 0.60 } },
+      { "phase": "PRESS_MID",     "angles": { "hipAngleDeg": 180, "kneeAngleDeg": 180, "torsoAngleDeg": 4, "pressFraction": 0.30 } },
+      { "phase": "PRESS_RACK",    "angles": { "hipAngleDeg": 180, "kneeAngleDeg": 180, "torsoAngleDeg": 5, "pressFraction": 0.0 } }
+    ],
+    "mechanicalFacts": [
+      "The bar starts in front at shoulder height and finishes stacked over the shoulders and mid-foot — a straight vertical line once the head clears.",
+      "The sticking point is around forehead height, where the bar passes in front of the face before locking out overhead.",
+      "Leg length barely affects the press — torso, arm, and shoulder proportions drive the bar path here, not the femur.",
+      "A longer forearm reaches lockout a little higher; the path itself stays vertical."
+    ],
+    "stanceCue": "Bracing the torso and squeezing the glutes keeps the vertical path honest — a stable base matters more than any femur-driven setup here.",
+    "irrelevantCue": "\"Your squat stance sets up your press\" → The overhead press is driven by torso and arm length, not the femur leverages that shape a squat or deadlift setup."
+  },
+  {
+    "archetype": "SHORT_FEMUR",
+    "lift": "OVERHEAD_PRESS",
+    "limbRatios": {
+      "thighRatio": 0.200, "shankRatio": 0.300, "torsoRatio": 0.32, "headNeckRatio": 0.13,
+      "footLenRatio": 0.10, "shoulderHalfRatio": 0.095, "hipHalfRatio": 0.070,
+      "kneeHalfRatio": 0.050, "ankleHalfRatio": 0.045, "barRiseRatio": 0.04, "gripHalfRatio": 0.10,
+      "armRatio": 0.32
+    },
+    "keyframes": [
+      { "phase": "PRESS_RACK",    "angles": { "hipAngleDeg": 180, "kneeAngleDeg": 180, "torsoAngleDeg": 5, "pressFraction": 0.0 } },
+      { "phase": "PRESS_MID",     "angles": { "hipAngleDeg": 180, "kneeAngleDeg": 180, "torsoAngleDeg": 4, "pressFraction": 0.30 } },
+      { "phase": "PRESS_STICK",   "angles": { "hipAngleDeg": 180, "kneeAngleDeg": 180, "torsoAngleDeg": 3, "pressFraction": 0.60 } },
+      { "phase": "PRESS_LOCKOUT", "angles": { "hipAngleDeg": 180, "kneeAngleDeg": 180, "torsoAngleDeg": 2, "pressFraction": 1.0 } },
+      { "phase": "PRESS_STICK",   "angles": { "hipAngleDeg": 180, "kneeAngleDeg": 180, "torsoAngleDeg": 3, "pressFraction": 0.60 } },
+      { "phase": "PRESS_MID",     "angles": { "hipAngleDeg": 180, "kneeAngleDeg": 180, "torsoAngleDeg": 4, "pressFraction": 0.30 } },
+      { "phase": "PRESS_RACK",    "angles": { "hipAngleDeg": 180, "kneeAngleDeg": 180, "torsoAngleDeg": 5, "pressFraction": 0.0 } }
+    ],
+    "mechanicalFacts": [
+      "A longer torso puts the shoulders higher, so the same arm length locks out higher off the ground — the vertical bar path is unchanged.",
+      "The bar still starts in front at shoulder height and finishes stacked over the shoulders.",
+      "The forehead-height sticking point is the same as any build; total travel scales with torso and arm length.",
+      "Leg proportions barely change the press."
+    ],
+    "stanceCue": "A braced torso over a stable base is the whole setup — the press doesn't reward a femur-specific stance the way a squat does.",
+    "irrelevantCue": "\"Lean back to press more upright\" → An exaggerated backward lean turns the press into an incline and moves the bar off the vertical path over mid-foot."
+  },
+  {
+    "archetype": "PROPORTIONAL",
+    "lift": "OVERHEAD_PRESS",
+    "limbRatios": {
+      "thighRatio": 0.230, "shankRatio": 0.270, "torsoRatio": 0.29, "headNeckRatio": 0.16,
+      "footLenRatio": 0.10, "shoulderHalfRatio": 0.095, "hipHalfRatio": 0.070,
+      "kneeHalfRatio": 0.050, "ankleHalfRatio": 0.045, "barRiseRatio": 0.04, "gripHalfRatio": 0.10,
+      "armRatio": 0.33
+    },
+    "keyframes": [
+      { "phase": "PRESS_RACK",    "angles": { "hipAngleDeg": 180, "kneeAngleDeg": 180, "torsoAngleDeg": 5, "pressFraction": 0.0 } },
+      { "phase": "PRESS_MID",     "angles": { "hipAngleDeg": 180, "kneeAngleDeg": 180, "torsoAngleDeg": 4, "pressFraction": 0.30 } },
+      { "phase": "PRESS_STICK",   "angles": { "hipAngleDeg": 180, "kneeAngleDeg": 180, "torsoAngleDeg": 3, "pressFraction": 0.60 } },
+      { "phase": "PRESS_LOCKOUT", "angles": { "hipAngleDeg": 180, "kneeAngleDeg": 180, "torsoAngleDeg": 2, "pressFraction": 1.0 } },
+      { "phase": "PRESS_STICK",   "angles": { "hipAngleDeg": 180, "kneeAngleDeg": 180, "torsoAngleDeg": 3, "pressFraction": 0.60 } },
+      { "phase": "PRESS_MID",     "angles": { "hipAngleDeg": 180, "kneeAngleDeg": 180, "torsoAngleDeg": 4, "pressFraction": 0.30 } },
+      { "phase": "PRESS_RACK",    "angles": { "hipAngleDeg": 180, "kneeAngleDeg": 180, "torsoAngleDeg": 5, "pressFraction": 0.0 } }
+    ],
+    "mechanicalFacts": [
+      "The bar leaves the front-rack, passes the forehead, and stacks over the shoulders and mid-foot in a vertical line.",
+      "The sticking point sits at forehead height as the bar clears the face.",
+      "Torso and arm length set the total travel; the femur leverages that shape a squat don't apply here.",
+      "A vertical forearm at lockout keeps the load over the base of support."
+    ],
+    "stanceCue": "A braced, upright torso over a hip-width base is a common starting point — the press is a vertical bar path, not a proportion-specific setup.",
+    "irrelevantCue": "\"Press the bar out in front and swing it back\" → An arcing path in front of the body loads the shoulder at a long lever; the bar tracks straight up over mid-foot."
+  },
+  {
+    "archetype": "WIDE_HIP",
+    "lift": "OVERHEAD_PRESS",
+    "limbRatios": {
+      "thighRatio": 0.230, "shankRatio": 0.270, "torsoRatio": 0.29, "headNeckRatio": 0.16,
+      "footLenRatio": 0.10, "shoulderHalfRatio": 0.095, "hipHalfRatio": 0.105,
+      "kneeHalfRatio": 0.050, "ankleHalfRatio": 0.045, "barRiseRatio": 0.04, "gripHalfRatio": 0.10,
+      "armRatio": 0.33
+    },
+    "keyframes": [
+      { "phase": "PRESS_RACK",    "angles": { "hipAngleDeg": 180, "kneeAngleDeg": 180, "torsoAngleDeg": 5, "pressFraction": 0.0 } },
+      { "phase": "PRESS_MID",     "angles": { "hipAngleDeg": 180, "kneeAngleDeg": 180, "torsoAngleDeg": 4, "pressFraction": 0.30 } },
+      { "phase": "PRESS_STICK",   "angles": { "hipAngleDeg": 180, "kneeAngleDeg": 180, "torsoAngleDeg": 3, "pressFraction": 0.60 } },
+      { "phase": "PRESS_LOCKOUT", "angles": { "hipAngleDeg": 180, "kneeAngleDeg": 180, "torsoAngleDeg": 2, "pressFraction": 1.0 } },
+      { "phase": "PRESS_STICK",   "angles": { "hipAngleDeg": 180, "kneeAngleDeg": 180, "torsoAngleDeg": 3, "pressFraction": 0.60 } },
+      { "phase": "PRESS_MID",     "angles": { "hipAngleDeg": 180, "kneeAngleDeg": 180, "torsoAngleDeg": 4, "pressFraction": 0.30 } },
+      { "phase": "PRESS_RACK",    "angles": { "hipAngleDeg": 180, "kneeAngleDeg": 180, "torsoAngleDeg": 5, "pressFraction": 0.0 } }
+    ],
+    "mechanicalFacts": [
+      "Hip width has little effect on the press — the standing base is wide but the bar path stays vertical over mid-foot.",
+      "The bar starts in the front rack, passes the forehead, and stacks overhead.",
+      "Torso and arm length drive the travel, the same as any other build.",
+      "A stable, braced trunk keeps the load stacked over the base."
+    ],
+    "stanceCue": "A slightly wider stance can feel natural with a wider hip, but the press itself is still a vertical bar path over mid-foot.",
+    "irrelevantCue": "\"A wider hip needs a wider grip to press\" → Grip width is set by forearm and shoulder structure, not hip width; the bar still finishes stacked over the shoulders."
+  }
+]

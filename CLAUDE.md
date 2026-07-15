@@ -2849,6 +2849,37 @@ _(Claude Code appends here after each completed task)_
   puts it around knee height, a touch high) and the archetype torso/knee angles are a first-pass,
   tunable after a real look. Slices 3 (OHP press-up) and 4 (bench supine) not started.
   versionCode 79, versionName 0.57.0.
+- [x] Sprint — Stickman animation, Slice 3: overhead press (v0.58.0), per SPEC.md §4/§6. Third of
+  four lifts.
+  (1) **`pressFraction`** added to `PoseAngles` (defaulted 0, so squat/deadlift JSON still decodes),
+  lerped by `StickmanInterpolator`. New `LiftType.OVERHEAD_PRESS`; new `BiomechanicsPhase`
+  PRESS_RACK/PRESS_MID/PRESS_STICK/PRESS_LOCKOUT.
+  (2) **Kinematics**: the torso branch was flipped from "DEADLIFT authored, else solve" to
+  "SQUAT solves, else authored" — cleaner and correct, since only the squat's bar is over the foot
+  (deadlift and press both author their near-vertical/hinge lean; solving would be meaningless).
+  New **press-up arm/bar mode**: the arm is a single rigid segment rotating from `OHP_RACK_ARM_LEAN`
+  (78° from vertical — bar forward at shoulder height, the front rack) at `pressFraction`=0 to 0°
+  (straight overhead) at `pressFraction`=1; the bar spans the wrists. A straight-line stick arm
+  can't fold, so the rack is modelled as the arm pointing forward-up rather than a bent elbow —
+  reads as a press, stays rigid (unit-tested: arm length constant across the whole press). Legs are
+  straight and static (knee 180 every keyframe).
+  (3) **`keyframes_ohp.json`** — 4 archetypes, full-rep timeline (RACK → STICK(forehead) → LOCKOUT →
+  STICK → RACK), `pressFraction` driving the bar up and back down. Content is honest that the press
+  is the lift where the femur archetype matters *least* — torso and arm length drive the bar path,
+  not the leverages that shape a squat/deadlift setup (a valid observation, not a gap). Repository
+  loads the new asset defensively like the others.
+  (4) **UI**: Lift Selector enables OVERHEAD PRESS (bench remains the only "SOON"); `displayName`
+  + phase-tick labels (RACK/STICK/LOCK) extended.
+  (5) **Tests**: 3 new in `StickmanKinematicsTest` (bar forward at the rack, stacked over the
+  shoulders at lockout; bar rises overhead as pressFraction→1; arms rigid + legs straight). One
+  test-only bug caught and fixed while writing them — compared the lockout bar.x against the *rack*
+  pose's neck.x, but a slightly different torso angle shifts the neck between poses, so each is now
+  compared against its own pose's neck. Full Stickman suite + `assembleGithubDebug` green, no `" lb"`.
+  KNOWN GAP: not visually validated on a device this session. At full lockout the bar sits very near
+  the top of the canvas (a tall figure pressing overhead adds an arm length above the head) — within
+  bounds, but framing/headroom is a first-pass tunable. Slice 4 (bench, supine orientation — the
+  heaviest, to be confirmed on a device before finishing per SPEC.md §10) not started.
+  versionCode 80, versionName 0.58.0.
 
 ## Release rules
 
