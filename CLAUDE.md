@@ -2909,6 +2909,19 @@ _(Claude Code appends here after each completed task)_
   amount, bench-line height) is a first pass, tunable after the user's real look. The OHP
   high-lockout framing and deadlift setup-bar-height flags from the prior slices also still stand.
   versionCode 81, versionName 0.59.0.
+- [x] VBT tracking fix — small-marker robustness (v0.59.1): user's first colored-marker footage
+  (screenshot) showed the tracked dot sitting off the marker, on the floor/rack. Root cause: the
+  marker was a small yellow-green sticker on a plate hub, and `BarPathFrameTracker.trackMarker`
+  downscaled every frame to 25% (`downscaleFactor = 0.25`) before the color scan — a ~30px marker
+  collapses to ~7px, which falls below `MIN_MARKER_PIXELS` or gets dropped by the nearest-neighbor
+  downscale, so a larger background blob wins. Fix: raised the default to 0.5 (half-res) — 4× the
+  marker pixels survive; frame count is still capped by `MAX_SAMPLES` so scan time stays bounded.
+  Also rewrote the "couldn't track" message to give real guidance (bigger marker — fist-sized patch
+  or a tape band on the sleeve — in pink/magenta/orange, avoid green/yellow which competes with the
+  gym windows, chrome, and the app's own green overlay). Told the user the marker change (size +
+  colour) matters more than the code lever. Tests + `assembleGithubDebug` green. NOT re-tested on
+  real footage this session — awaiting the user's retry with a bigger, higher-contrast marker.
+  versionCode 82, versionName 0.59.1.
 
 ## Release rules
 

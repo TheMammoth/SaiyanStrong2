@@ -444,7 +444,7 @@ class BarPathCaptureViewModel @Inject constructor(
             // the player so they can re-mark rather than bouncing to a dead-end error screen.
             if (samples.size < 2) {
                 _uiState.update {
-                    it.copy(errorMessage = "Couldn't track the marker — use a brighter, more distinct colour that stands out from the background.")
+                    it.copy(errorMessage = "Couldn't track the marker. Use a BIGGER marker (a fist-sized patch or a tape band on the sleeve) in a colour that appears nowhere else in the gym — bright pink, magenta, or orange work best. Avoid green/yellow.")
                 }
             } else {
                 _uiState.update { it.copy(trackedSamples = samples) }

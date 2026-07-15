@@ -156,7 +156,11 @@ class BarPathFrameTracker @Inject constructor(
      * (not guaranteed present on every device/encoder).
      * @param downscaleFactor frames are shrunk before scanning for the marker — exact pixel
      * precision isn't needed for a centroid, and scanning a full-resolution frame per sample is
-     * needlessly slow.
+     * needlessly slow. 0.5 (half-res) rather than a more aggressive shrink: a real gym marker is
+     * often small in frame (a sticker/tape band on the sleeve), and at 0.25 it collapsed to a
+     * handful of pixels that fell below [MIN_MARKER_PIXELS] or got dropped by the nearest-neighbor
+     * downscale entirely — the "dot doesn't sit on the marker" failure. Half-res keeps 4× the
+     * marker pixels; the frame count is still capped by MAX_SAMPLES so total scan time stays bounded.
      * @param useStreamingDecode opt-in: extract frames via [BarPathVideoDecoder]'s sequential
      * MediaCodec decode instead of per-timestamp getFrameAtTime seeks (faster at high fps, but
      * device-fragile and unmeasured — falls back to the retriever path automatically on any
@@ -166,7 +170,7 @@ class BarPathFrameTracker @Inject constructor(
         videoPath: String,
         colorProfile: MarkerColorProfile,
         sampleIntervalMs: Long? = null,
-        downscaleFactor: Double = 0.25,
+        downscaleFactor: Double = 0.5,
         useStreamingDecode: Boolean = false,
         gyroTimeline: GyroTimeline? = null,
         focalMm: Double = 0.0,
