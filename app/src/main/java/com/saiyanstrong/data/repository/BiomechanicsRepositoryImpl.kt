@@ -19,6 +19,7 @@ private const val ARCHETYPES_ASSET = "biomechanics/archetypes.json"
 private const val KEYFRAMES_SQUAT_ASSET = "biomechanics/keyframes_squat.json"
 private const val KEYFRAMES_DEADLIFT_ASSET = "biomechanics/keyframes_deadlift.json"
 private const val KEYFRAMES_OHP_ASSET = "biomechanics/keyframes_ohp.json"
+private const val KEYFRAMES_BENCH_ASSET = "biomechanics/keyframes_bench.json"
 
 /**
  * Loads and parses the bundled JSON assets once, caches in memory — same
@@ -62,7 +63,8 @@ class BiomechanicsRepositoryImpl @Inject constructor(
         // means "no content for that lift yet," not an error.
         val deadlift = runCatching { readAnimationsAsset(KEYFRAMES_DEADLIFT_ASSET) }.getOrDefault(emptyList())
         val overheadPress = runCatching { readAnimationsAsset(KEYFRAMES_OHP_ASSET) }.getOrDefault(emptyList())
-        (squat + deadlift + overheadPress).also { animations = it }
+        val bench = runCatching { readAnimationsAsset(KEYFRAMES_BENCH_ASSET) }.getOrDefault(emptyList())
+        (squat + deadlift + overheadPress + bench).also { animations = it }
     }
 
     private fun readAnimationsAsset(assetPath: String): List<ArchetypeAnimation> {

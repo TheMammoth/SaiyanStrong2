@@ -349,6 +349,48 @@ class StickmanKinematicsTest {
         }
     }
 
+    // --- Bench press (Slice 4): supine layout ---
+
+    private val benchChest = PoseAngles(0f, 0f, 0f, 0f, 0f)
+    private val benchTop = PoseAngles(0f, 0f, 0f, 0f, 1f)
+
+    @Test
+    fun `bench torso lies flat and the feet are planted on the floor`() {
+        val nodes = StickmanKinematics.buildNodes(proportionalRatios, benchChest, LiftType.BENCH)
+        val hip = node(nodes, NodeId.HIP_CENTER)
+        val neck = node(nodes, NodeId.NECK_BASE)
+        assertEquals("torso lies flat (hip and neck at the same height)", hip.y, neck.y, 1e-4f)
+        // Feet on the floor (FLOOR_Y = 0.93 in the rig).
+        assertEquals("foot planted on the floor", 0.93f, node(nodes, NodeId.L_ANKLE).y, 1e-4f)
+        assertEquals(NodeId.entries.toSet(), nodes.map { it.id }.toSet())
+    }
+
+    @Test
+    fun `bench bar sits over the chest and travels up from chest to lockout`() {
+        val chest = StickmanKinematics.buildNodes(proportionalRatios, benchChest, LiftType.BENCH)
+        val top = StickmanKinematics.buildNodes(proportionalRatios, benchTop, LiftType.BENCH)
+        val neck = node(chest, NodeId.NECK_BASE)
+        // Bar is stacked over the shoulders (chest), not off to one side.
+        assertEquals("bar over the chest", neck.x, node(chest, NodeId.BAR).x, 1e-4f)
+        // y grows downward: the locked-out bar is higher (smaller y) than at the chest, and both
+        // are above the chest (bar never sits below the torso).
+        assertTrue("bar rises from chest to lockout", node(top, NodeId.BAR).y < node(chest, NodeId.BAR).y)
+        assertTrue("bar stays above the chest", node(chest, NodeId.BAR).y < neck.y)
+    }
+
+    @Test
+    fun `bench torso and leg segments stay rigid`() {
+        val bodyScale = 0.80
+        for (angles in listOf(benchChest, PoseAngles(0f, 0f, 0f, 0f, 0.5f), benchTop)) {
+            val nodes = StickmanKinematics.buildNodes(proportionalRatios, angles, LiftType.BENCH)
+            val ankleCenter = centerline(nodes, NodeId.L_ANKLE, NodeId.R_ANKLE)
+            val kneeCenter = centerline(nodes, NodeId.L_KNEE, NodeId.R_KNEE)
+            assertEquals("torso", proportionalRatios.torsoRatio * bodyScale, distance(node(nodes, NodeId.HIP_CENTER), node(nodes, NodeId.NECK_BASE)), 1e-4)
+            assertEquals("shank", proportionalRatios.shankRatio * bodyScale, distance(ankleCenter, kneeCenter), 1e-4)
+            assertEquals("thigh", proportionalRatios.thighRatio * bodyScale, distance(kneeCenter, node(nodes, NodeId.HIP_CENTER)), 1e-4)
+        }
+    }
+
     @Test
     fun `applyYaw at 0 degrees returns nodes unchanged`() {
         val nodes = StickmanKinematics.buildNodes(ratios, PoseAngles(95f, 76f, 55f))

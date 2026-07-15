@@ -1,0 +1,102 @@
+[
+  {
+    "archetype": "LONG_FEMUR",
+    "lift": "BENCH",
+    "limbRatios": {
+      "thighRatio": 0.260, "shankRatio": 0.240, "torsoRatio": 0.26, "headNeckRatio": 0.19,
+      "footLenRatio": 0.10, "shoulderHalfRatio": 0.095, "hipHalfRatio": 0.070,
+      "kneeHalfRatio": 0.050, "ankleHalfRatio": 0.045, "barRiseRatio": 0.04, "gripHalfRatio": 0.10,
+      "armRatio": 0.34
+    },
+    "keyframes": [
+      { "phase": "BENCH_TOP",   "angles": { "hipAngleDeg": 0, "kneeAngleDeg": 0, "torsoAngleDeg": 0, "pressFraction": 1.0 } },
+      { "phase": "BENCH_MID",   "angles": { "hipAngleDeg": 0, "kneeAngleDeg": 0, "torsoAngleDeg": 0, "pressFraction": 0.5 } },
+      { "phase": "BENCH_CHEST", "angles": { "hipAngleDeg": 0, "kneeAngleDeg": 0, "torsoAngleDeg": 0, "pressFraction": 0.0 } },
+      { "phase": "BENCH_MID",   "angles": { "hipAngleDeg": 0, "kneeAngleDeg": 0, "torsoAngleDeg": 0, "pressFraction": 0.5 } },
+      { "phase": "BENCH_TOP",   "angles": { "hipAngleDeg": 0, "kneeAngleDeg": 0, "torsoAngleDeg": 0, "pressFraction": 1.0 } }
+    ],
+    "mechanicalFacts": [
+      "The bar travels up and down over the chest and shoulders — a near-vertical path over the base of support.",
+      "The sticking point sits just off the chest, where the press is weakest and the elbows are most bent.",
+      "Arm length sets the range of motion: longer arms move the bar farther to lock out. The femur plays no role in the bench.",
+      "Planted feet and a braced torso keep the trunk rigid so the path stays vertical."
+    ],
+    "stanceCue": "Feet flat and a stable upper back give the arms something to press against — the setup is about the trunk and arms, not the legs.",
+    "irrelevantCue": "\"Your leg drive comes from squat mechanics\" → Leg drive on the bench braces the torso; it isn't the femur-lever setup that shapes a squat or deadlift."
+  },
+  {
+    "archetype": "SHORT_FEMUR",
+    "lift": "BENCH",
+    "limbRatios": {
+      "thighRatio": 0.200, "shankRatio": 0.300, "torsoRatio": 0.32, "headNeckRatio": 0.13,
+      "footLenRatio": 0.10, "shoulderHalfRatio": 0.095, "hipHalfRatio": 0.070,
+      "kneeHalfRatio": 0.050, "ankleHalfRatio": 0.045, "barRiseRatio": 0.04, "gripHalfRatio": 0.10,
+      "armRatio": 0.33
+    },
+    "keyframes": [
+      { "phase": "BENCH_TOP",   "angles": { "hipAngleDeg": 0, "kneeAngleDeg": 0, "torsoAngleDeg": 0, "pressFraction": 1.0 } },
+      { "phase": "BENCH_MID",   "angles": { "hipAngleDeg": 0, "kneeAngleDeg": 0, "torsoAngleDeg": 0, "pressFraction": 0.5 } },
+      { "phase": "BENCH_CHEST", "angles": { "hipAngleDeg": 0, "kneeAngleDeg": 0, "torsoAngleDeg": 0, "pressFraction": 0.0 } },
+      { "phase": "BENCH_MID",   "angles": { "hipAngleDeg": 0, "kneeAngleDeg": 0, "torsoAngleDeg": 0, "pressFraction": 0.5 } },
+      { "phase": "BENCH_TOP",   "angles": { "hipAngleDeg": 0, "kneeAngleDeg": 0, "torsoAngleDeg": 0, "pressFraction": 1.0 } }
+    ],
+    "mechanicalFacts": [
+      "A shorter arm reaches lockout sooner — the bar travels a slightly shorter distance for the same press.",
+      "The bar still tracks up and down over the chest in a near-vertical path.",
+      "A longer torso gives more surface on the bench, but the press itself is driven by arm length, not the femur.",
+      "A braced trunk and planted feet keep the path honest."
+    ],
+    "stanceCue": "Set the shoulder blades down and back on the bench — the shorter arm locks out early, so a stable base matters more than reach.",
+    "irrelevantCue": "\"Touch lower on the belly to shorten the stroke\" → Moving the touch point off the chest changes the bar path away from vertical rather than working with arm length."
+  },
+  {
+    "archetype": "PROPORTIONAL",
+    "lift": "BENCH",
+    "limbRatios": {
+      "thighRatio": 0.230, "shankRatio": 0.270, "torsoRatio": 0.29, "headNeckRatio": 0.16,
+      "footLenRatio": 0.10, "shoulderHalfRatio": 0.095, "hipHalfRatio": 0.070,
+      "kneeHalfRatio": 0.050, "ankleHalfRatio": 0.045, "barRiseRatio": 0.04, "gripHalfRatio": 0.10,
+      "armRatio": 0.34
+    },
+    "keyframes": [
+      { "phase": "BENCH_TOP",   "angles": { "hipAngleDeg": 0, "kneeAngleDeg": 0, "torsoAngleDeg": 0, "pressFraction": 1.0 } },
+      { "phase": "BENCH_MID",   "angles": { "hipAngleDeg": 0, "kneeAngleDeg": 0, "torsoAngleDeg": 0, "pressFraction": 0.5 } },
+      { "phase": "BENCH_CHEST", "angles": { "hipAngleDeg": 0, "kneeAngleDeg": 0, "torsoAngleDeg": 0, "pressFraction": 0.0 } },
+      { "phase": "BENCH_MID",   "angles": { "hipAngleDeg": 0, "kneeAngleDeg": 0, "torsoAngleDeg": 0, "pressFraction": 0.5 } },
+      { "phase": "BENCH_TOP",   "angles": { "hipAngleDeg": 0, "kneeAngleDeg": 0, "torsoAngleDeg": 0, "pressFraction": 1.0 } }
+    ],
+    "mechanicalFacts": [
+      "The bar tracks up and down over the chest and shoulders in a near-vertical path.",
+      "The sticking point sits just off the chest, where the elbows are most bent.",
+      "Range of motion follows arm length; the femur leverages that shape a squat setup don't apply on the bench.",
+      "A stable arch and planted feet keep the trunk rigid under the press."
+    ],
+    "stanceCue": "A braced upper back and flat feet give a stable base — the bench rewards a rigid trunk, not a proportion-specific stance.",
+    "irrelevantCue": "\"Everyone should touch the same spot on the chest\" → The touch point follows shoulder and arm structure; forcing a universal spot moves the bar off its vertical path."
+  },
+  {
+    "archetype": "WIDE_HIP",
+    "lift": "BENCH",
+    "limbRatios": {
+      "thighRatio": 0.230, "shankRatio": 0.270, "torsoRatio": 0.29, "headNeckRatio": 0.16,
+      "footLenRatio": 0.10, "shoulderHalfRatio": 0.095, "hipHalfRatio": 0.105,
+      "kneeHalfRatio": 0.050, "ankleHalfRatio": 0.045, "barRiseRatio": 0.04, "gripHalfRatio": 0.10,
+      "armRatio": 0.34
+    },
+    "keyframes": [
+      { "phase": "BENCH_TOP",   "angles": { "hipAngleDeg": 0, "kneeAngleDeg": 0, "torsoAngleDeg": 0, "pressFraction": 1.0 } },
+      { "phase": "BENCH_MID",   "angles": { "hipAngleDeg": 0, "kneeAngleDeg": 0, "torsoAngleDeg": 0, "pressFraction": 0.5 } },
+      { "phase": "BENCH_CHEST", "angles": { "hipAngleDeg": 0, "kneeAngleDeg": 0, "torsoAngleDeg": 0, "pressFraction": 0.0 } },
+      { "phase": "BENCH_MID",   "angles": { "hipAngleDeg": 0, "kneeAngleDeg": 0, "torsoAngleDeg": 0, "pressFraction": 0.5 } },
+      { "phase": "BENCH_TOP",   "angles": { "hipAngleDeg": 0, "kneeAngleDeg": 0, "torsoAngleDeg": 0, "pressFraction": 1.0 } }
+    ],
+    "mechanicalFacts": [
+      "Hip width sets how the feet plant for leg drive, but the bar path stays near-vertical over the chest.",
+      "The bar tracks up and down over the shoulders through the press.",
+      "Range of motion follows arm length, the same as any other build.",
+      "A braced trunk over planted feet keeps the load stacked and the path vertical."
+    ],
+    "stanceCue": "A wider hip can suit a slightly wider foot plant for leg drive, but the press is still a vertical bar path over the chest.",
+    "irrelevantCue": "\"A wider hip means a wider grip\" → Grip width follows forearm and shoulder structure, not hip width; the bar still tracks over the chest."
+  }
+]

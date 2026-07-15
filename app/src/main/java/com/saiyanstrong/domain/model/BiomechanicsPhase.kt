@@ -17,5 +17,6 @@ enum class BiomechanicsPhase {
     STANDING, DESCENT_MID, PARALLEL, BOTTOM,           // squat descent
     ASCENT_STICK, ASCENT_MID,                          // squat ascent (the grind, hips-lead)
     SETUP, FIRST_PULL, KNEE_PASS, LOCKOUT,             // deadlift
-    PRESS_RACK, PRESS_MID, PRESS_STICK, PRESS_LOCKOUT  // overhead press
+    PRESS_RACK, PRESS_MID, PRESS_STICK, PRESS_LOCKOUT, // overhead press
+    BENCH_TOP, BENCH_MID, BENCH_CHEST                  // bench press
 }

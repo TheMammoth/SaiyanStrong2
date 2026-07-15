@@ -95,6 +95,8 @@ class BiomechanicsVisualizerViewModel @Inject constructor(
         com.saiyanstrong.domain.model.BiomechanicsPhase.PRESS_RACK -> "RACK"
         com.saiyanstrong.domain.model.BiomechanicsPhase.PRESS_STICK -> "STICK"
         com.saiyanstrong.domain.model.BiomechanicsPhase.PRESS_LOCKOUT -> "LOCK"
+        com.saiyanstrong.domain.model.BiomechanicsPhase.BENCH_TOP -> "LOCK"
+        com.saiyanstrong.domain.model.BiomechanicsPhase.BENCH_CHEST -> "CHEST"
         else -> null
     }
 }
@@ -115,4 +117,5 @@ fun LiftType.displayName(): String = when (this) {
     LiftType.SQUAT -> "Squat"
     LiftType.DEADLIFT -> "Deadlift"
     LiftType.OVERHEAD_PRESS -> "Overhead Press"
+    LiftType.BENCH -> "Bench Press"
 }

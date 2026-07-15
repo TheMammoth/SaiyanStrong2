@@ -2880,6 +2880,35 @@ _(Claude Code appends here after each completed task)_
   bounds, but framing/headroom is a first-pass tunable. Slice 4 (bench, supine orientation — the
   heaviest, to be confirmed on a device before finishing per SPEC.md §10) not started.
   versionCode 80, versionName 0.58.0.
+- [x] Sprint — Stickman animation, Slice 4: bench press, supine (v0.59.0) — the last of four lifts
+  and the "ask-first" slice per SPEC.md §10 (biggest change: the body flips horizontal). Shipped as
+  a first render for the user to confirm the look before any tuning.
+  (1) **Bench is a whole separate layout**, not a branch inside the shared standing chain — it
+  doesn't use the ankle→knee→hip→torso stack at all. `buildNodes` early-returns to a new private
+  `buildBenchNodes(ratios, angles)`: the torso lies flat along a bench line (`BENCH_Y`), head to the
+  left, hips to the right; the legs drop to the floor with the shins vertical and feet planted
+  (the thigh's horizontal reach is solved from its fixed length so the foot lands on `FLOOR_Y` for
+  every archetype while the leg links stay rigid); the bar travels straight up over the chest as
+  `pressFraction` goes 0→1, and the elbows flare toward the feet at the bottom (a single
+  straight-line arm can't show a bending elbow, so the flare stands in for it). Torso/head/leg
+  segments are exactly rigid; the arm intentionally is not (the elbow bends), so it isn't asserted
+  rigid. Verified the exact geometry by rendering it to SVG offline (scratchpad, not shipped) and
+  sending the user the chest+lockout poses before finalizing — the confirm-the-look step, since no
+  emulator is available this session.
+  (2) **`keyframes_bench.json`** — 4 archetypes, 5-keyframe timeline (TOP → MID → CHEST → MID → TOP,
+  chest at slider 0.5), `pressFraction` the only driver (hip/knee/torso angles are unused by the
+  supine layout, set to 0). Content is honest that arm length — not the femur — sets the bench ROM.
+  (3) **UI**: Lift Selector enables BENCH PRESS (no more "SOON" rows — all four lifts live);
+  `displayName` + phase-tick labels (LOCK/CHEST) extended; repository loads the asset defensively.
+  (4) **Tests**: 3 new in `StickmanKinematicsTest` (torso lies flat + feet on the floor + all node
+  ids present; bar over the chest travelling up from chest to lockout; torso/leg segments rigid).
+  Full Stickman suite + `assembleGithubDebug` green, no `" lb"`.
+  This completes the 4-slice stickman-animation spec (squat ascent + scrub/rotate, deadlift, OHP,
+  bench). KNOWN GAP: none of the four is visually validated on a real device this session — the SVG
+  preview confirms the bench geometry is correct, but on-screen feel (framing, the elbow-flare
+  amount, bench-line height) is a first pass, tunable after the user's real look. The OHP
+  high-lockout framing and deadlift setup-bar-height flags from the prior slices also still stand.
+  versionCode 81, versionName 0.59.0.
 
 ## Release rules
 

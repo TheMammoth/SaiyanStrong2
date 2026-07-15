@@ -61,13 +61,10 @@ fun LiftSelectorScreen(
             modifier = Modifier.fillMaxWidth().padding(top = 10.dp)
         ) { Text("OVERHEAD PRESS", fontWeight = FontWeight.Black, letterSpacing = 1.sp) }
 
-        // Bench is the last slice — shown disabled rather than omitted so it reads as "coming
-        // soon" instead of quietly missing.
         OutlinedButton(
-            onClick = {},
-            enabled = false,
+            onClick = { onLiftChosen(LiftType.BENCH) },
             modifier = Modifier.fillMaxWidth().padding(top = 10.dp)
-        ) { Text("BENCH PRESS (SOON)", fontWeight = FontWeight.Black, letterSpacing = 1.sp) }
+        ) { Text("BENCH PRESS", fontWeight = FontWeight.Black, letterSpacing = 1.sp) }
     }
 }
 

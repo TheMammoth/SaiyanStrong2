@@ -8,6 +8,7 @@ import com.saiyanstrong.domain.model.PoseAngles
 import kotlin.math.asin
 import kotlin.math.cos
 import kotlin.math.sin
+import kotlin.math.sqrt
 
 /**
  * Pure forward kinematics (no IK solver — matches the spec's explicit Phase 1/2 scope) that
@@ -104,11 +105,27 @@ object StickmanKinematics {
      * pressFraction reaches 1. */
     private const val OHP_RACK_ARM_LEAN = 78f
 
+    // --- Bench press (supine layout — see [buildBenchNodes]) ---
+    /** Y of the bench surface the torso lies along (y grows downward; the floor is at FLOOR_Y). */
+    private const val BENCH_Y = 0.66f
+    /** X of the hip on the bench; the torso runs from here toward the head (−x). */
+    private const val BENCH_HIP_X = 0.58f
+    /** How far above the chest the bar sits at the bottom of the press (pressFraction 0). */
+    private const val BENCH_CHEST_GAP = 0.05f
+    /** How far the elbows flare toward the feet at the bottom (0 at lockout) — reads as the elbow
+     * bending, which a single straight-line arm can't show on its own. */
+    private const val BENCH_ELBOW_FLARE = 0.13f
+
     fun buildNodes(
         ratios: LimbRatios,
         angles: PoseAngles,
         lift: LiftType = LiftType.SQUAT
     ): List<NodePosition> {
+        // Bench is supine — a completely different layout (body horizontal on a bench, legs down to
+        // the floor, bar pressing straight up over the chest). It doesn't share the standing
+        // ankle→knee→hip→torso chain, so it builds its own node set rather than branch inside it.
+        if (lift == LiftType.BENCH) return buildBenchNodes(ratios, angles)
+
         val kneeDeviation = 180f - angles.kneeAngleDeg
         val shankLean = kneeDeviation * 0.15f
         // The femur↔torso comfort nudge is a squat-only stylistic coupling (the squat's torso is
@@ -180,6 +197,67 @@ object StickmanKinematics {
         val (lToe, rToe) = side(toe, ratios.ankleHalfRatio * BODY_SCALE)
         val lElbow = midpoint(lShoulder, lWrist)
         val rElbow = midpoint(rShoulder, rWrist)
+
+        val nodes = mapOf(
+            NodeId.HEAD to head, NodeId.NECK_BASE to neck,
+            NodeId.L_SHOULDER to lShoulder, NodeId.R_SHOULDER to rShoulder,
+            NodeId.L_ELBOW to lElbow, NodeId.R_ELBOW to rElbow,
+            NodeId.L_WRIST to lWrist, NodeId.R_WRIST to rWrist,
+            NodeId.HIP_CENTER to hip, NodeId.L_HIP to lHip, NodeId.R_HIP to rHip,
+            NodeId.L_KNEE to lKnee, NodeId.R_KNEE to rKnee,
+            NodeId.L_ANKLE to lAnkle, NodeId.R_ANKLE to rAnkle,
+            NodeId.L_TOE to lToe, NodeId.R_TOE to rToe,
+            NodeId.BAR to bar
+        )
+        return nodes.map { (id, point) -> NodePosition(id, point.first, point.second) }
+    }
+
+    /**
+     * Supine bench-press layout (side view, head to the left). The torso lies flat along the bench
+     * at [BENCH_Y]; the legs drop to the floor with the shins vertical and the feet planted; the
+     * bar travels straight up over the chest as [PoseAngles.pressFraction] goes 0 → 1, and the
+     * elbows flare toward the feet at the bottom (which a single straight-line arm can't show on
+     * its own). Segments that are truly rigid on a real bench — torso, head, and the leg links —
+     * hold their exact ratio length; the arm intentionally does not (the elbow bends), so it isn't
+     * asserted rigid.
+     */
+    private fun buildBenchNodes(ratios: LimbRatios, angles: PoseAngles): List<NodePosition> {
+        val scale = BODY_SCALE
+
+        // Torso lies flat along the bench, head to the left.
+        val hip = BENCH_HIP_X to BENCH_Y
+        val neck = (hip.first - ratios.torsoRatio * scale) to BENCH_Y
+        val head = (neck.first - ratios.headNeckRatio * scale) to BENCH_Y
+
+        // Legs: shins vertical to the floor, thigh spans hip → knee toward the feet (+x). Solving
+        // the thigh's horizontal reach from its fixed length keeps every leg link rigid AND lands
+        // the foot on the floor for every archetype.
+        val kneeY = FLOOR_Y - ratios.shankRatio * scale
+        val thighLen = ratios.thighRatio * scale
+        val verticalGap = kneeY - BENCH_Y
+        val thighDx = sqrt((thighLen * thighLen - verticalGap * verticalGap).coerceAtLeast(0f))
+        val kneeCenter = (hip.first + thighDx) to kneeY
+        val ankleCenter = kneeCenter.first to FLOOR_Y
+        val toeCenter = (ankleCenter.first + ratios.footLenRatio * scale) to FLOOR_Y
+
+        // Arms + bar: the bar sits over the shoulders and travels straight up. Bottom (pressFraction
+        // 0) = a small gap above the chest; lockout (1) = a full arm length above.
+        val (lShoulder, rShoulder) = side(neck, ratios.shoulderHalfRatio * scale)
+        val armLen = ratios.armRatio * scale
+        val barY = neck.second - (BENCH_CHEST_GAP + (armLen - BENCH_CHEST_GAP) * angles.pressFraction)
+        val lWrist = lShoulder.first to barY
+        val rWrist = rShoulder.first to barY
+        val bar = ((lWrist.first + rWrist.first) / 2f) to barY
+        val flare = BENCH_ELBOW_FLARE * scale * (1f - angles.pressFraction)
+        val lElbowMid = midpoint(lShoulder, lWrist)
+        val rElbowMid = midpoint(rShoulder, rWrist)
+        val lElbow = (lElbowMid.first + flare) to lElbowMid.second
+        val rElbow = (rElbowMid.first + flare) to rElbowMid.second
+
+        val (lHip, rHip) = side(hip, ratios.hipHalfRatio * scale)
+        val (lKnee, rKnee) = side(kneeCenter, ratios.kneeHalfRatio * scale)
+        val (lAnkle, rAnkle) = side(ankleCenter, ratios.ankleHalfRatio * scale)
+        val (lToe, rToe) = side(toeCenter, ratios.ankleHalfRatio * scale)
 
         val nodes = mapOf(
             NodeId.HEAD to head, NodeId.NECK_BASE to neck,
