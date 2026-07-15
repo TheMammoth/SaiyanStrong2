@@ -2766,6 +2766,51 @@ _(Claude Code appends here after each completed task)_
   bright marker (the whole reason to choose it). If a real marker tracks cleanly, the tracking
   problem is solved with no OpenCV. If the user later insists on markerless, OpenCV becomes its own
   dependency-heavy sprint. versionCode 77, versionName 0.55.0.
+- [x] Sprint — Stickman animation, Slice 1: real ascent + rep-timeline scrub + rotate feel
+  (v0.56.0), per SPEC.md /spec round. User asked to improve the biomechanics stickman; clarifying
+  questions scoped it to motion (not visuals — stays a line-figure), more lifts, and controls, with
+  "better scrub only" and "real ascent" (hips lead, torso lags). Four slices planned; this is
+  Slice 1 (squat), the self-contained highest-value piece. Deadlift/OHP/bench are Slices 2–4.
+  **Root cause of "no real ascent," found by reading the kinematics before touching it**: a squat
+  pose was a pure function of `kneeAngleDeg` — thigh derived from the knee, torso *solved* from the
+  bar-over-mid-foot balance equation, `hipAngleDeg`/`torsoAngleDeg` unused by the geometry. So at a
+  given knee angle, descending and ascending were *geometrically identical* — the ascent literally
+  could not differ from the descent reversed. Fixing it needed a new degree of freedom, not tuning.
+  (1) **`torsoLeanBiasDeg`** (new optional `PoseAngles` field, defaulted 0 so all existing keyframe
+  JSON still decodes): an authored torso-lean bias applied in `StickmanKinematics.buildNodes` as a
+  *rotation about the hip* on top of the solved lean — a rotation never changes segment length, so
+  every prior sprint's rigidity guarantee holds (unit-tested: thigh/torso/head lengths identical
+  with bias 0 vs +15). Positive = torso pitches further forward than balance (bar drifts forward of
+  mid-foot — what a real grind looks like). The sum is `coerceIn(0f, 90f)`; at bias 0 that's exactly
+  the pre-existing clamped solved lean, so squat's motion is byte-identical (locked by a
+  `zero bias leaves the pose identical` test + the untouched bar-over-mid-foot test). This one knob
+  is the grind mechanism for every future lift too. `StickmanInterpolator` lerps the new field.
+  (2) **Full-rep scrub**: `keyframes_squat.json` extended from 4 keyframes (descent only) to 7 (full
+  rep: STANDING→DESCENT_MID→PARALLEL→BOTTOM→ASCENT_STICK→ASCENT_MID→STANDING). The ascent keyframes
+  carry a positive `torsoLeanBiasDeg` (long-femur worst at +16, short-femur mildest at +9, decaying
+  to 0 by lockout) so on the way up the torso stays pitched forward through the sticking point while
+  the knee opens — the hips-lead grind. Bottom sits at slider 0.5. New `BiomechanicsPhase` values
+  `ASCENT_STICK`/`ASCENT_MID`. Angle/bias values are a hand-authored first pass, flagged tunable
+  after a device look.
+  (3) **Scrub UX**: the old two-label STANDING/BOTTOM row (meaningless once the slider is a whole
+  rep) replaced with a `PhaseTickBar` — a single Canvas drawing tick marks + centered labels
+  (STAND · PARALLEL · BOTTOM · GRIND · STAND) at each milestone's fraction, edge labels nudged
+  inward by half their measured width so they don't clip. Tick data (`UiState.PhaseTick`) computed
+  in the ViewModel from the keyframe list's phases, so it stays correct automatically when the new
+  lifts add their own phases.
+  (4) **Rotate feel**: `StickmanCanvas`'s turntable yaw moved from a plain float to an `Animatable` —
+  on drag release it animates a snap to the nearest of front 0° / three-quarter ±45° / side ±80°
+  (`StickmanKinematics.nearestYawDetent`, a pure unit-tested helper), and double-tap animates back
+  to the front. Drag sensitivity/clamp unchanged (still named constants).
+  Tests: 3 new in `StickmanKinematicsTest` (bias pitches torso ~15° forward with all segments rigid;
+  zero-bias identity; `nearestYawDetent` picks the closest detent) + 1 in `StickmanInterpolatorTest`
+  (bias lerps and lands exactly on keyframe values). Full Stickman suite + `assembleGithubDebug`
+  green, no `" lb"`.
+  KNOWN GAP (standing for this feature since it was first built): not visually validated on a device
+  this session — the grind bias magnitudes and the tick layout are a first pass, tuned after the
+  user's real look. Slices 2–4 (deadlift hanging-arm/bar, OHP press-up, bench supine) not started;
+  bench's supine orientation to be confirmed on a device before finishing, per SPEC.md §10.
+  versionCode 78, versionName 0.56.0.
 
 ## Release rules
 

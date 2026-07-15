@@ -113,7 +113,12 @@ object StickmanKinematics {
         // --- Hip and up: torso lean solved (rotation, not translation) so segments stay rigid
         // AND the bar lands back over mid-foot — see class KDoc "Torso angle is solved..." ---
         val hip = knee + rotateUp(ratios.thighRatio * BODY_SCALE, thighLean)
-        val torsoLean = solveTorsoLean(ratios, ankle.first, hip)
+        // Solved balance lean, then the authored grind bias (rotation about the hip — never
+        // changes a segment length, so rigidity holds; positive = torso pitched further forward
+        // than balance, bar drifts forward of mid-foot, which is what a real grind looks like).
+        // At bias 0 this is exactly the pre-existing solved lean, so squat's motion is unchanged.
+        val torsoLean = (solveTorsoLean(ratios, ankle.first, hip) + angles.torsoLeanBiasDeg)
+            .coerceIn(0f, 90f)
         val neck = hip + rotateUp(ratios.torsoRatio * BODY_SCALE, torsoLean)
         val head = neck + rotateUp(ratios.headNeckRatio * BODY_SCALE, torsoLean)
         val bar = neck + rotateUp(ratios.barRiseRatio * BODY_SCALE, torsoLean)
@@ -153,6 +158,14 @@ object StickmanKinematics {
             node.copy(x = ANKLE_X + (node.x - ANKLE_X) * scale)
         }
     }
+
+    /** The turntable's snap detents: front, three-quarter (±45°), and near-side (±80°, just
+     * short of the degenerate ±90° sliver). Used by [StickmanCanvas] to snap yaw on drag release. */
+    val YAW_DETENTS: List<Float> = listOf(-80f, -45f, 0f, 45f, 80f)
+
+    /** Nearest snap detent to a given yaw — pure so it's unit-testable without a Canvas. */
+    fun nearestYawDetent(yawDegrees: Float): Float =
+        YAW_DETENTS.minByOrNull { kotlin.math.abs(it - yawDegrees) } ?: 0f
 
     /** Vector from the lower joint to the upper joint: [leanDeg] measured from vertical, positive
      * leans toward +x (the direction the lifter faces). */

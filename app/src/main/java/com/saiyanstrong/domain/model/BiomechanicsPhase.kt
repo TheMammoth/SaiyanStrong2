@@ -14,6 +14,7 @@ import kotlinx.serialization.Serializable
  */
 @Serializable
 enum class BiomechanicsPhase {
-    STANDING, DESCENT_MID, PARALLEL, BOTTOM,           // squat
+    STANDING, DESCENT_MID, PARALLEL, BOTTOM,           // squat descent
+    ASCENT_STICK, ASCENT_MID,                          // squat ascent (the grind, hips-lead)
     SETUP, FIRST_PULL, KNEE_PASS, LOCKOUT               // deadlift (not yet populated)
 }

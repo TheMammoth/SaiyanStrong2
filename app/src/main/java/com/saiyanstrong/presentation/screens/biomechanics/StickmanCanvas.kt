@@ -1,18 +1,20 @@
 package com.saiyanstrong.presentation.screens.biomechanics
 
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.launch
 import com.saiyanstrong.domain.model.NodeId
 import com.saiyanstrong.domain.model.NodeId.L_WRIST
 import com.saiyanstrong.domain.model.NodeId.R_WRIST
@@ -49,18 +51,32 @@ fun StickmanCanvas(
     showBar: Boolean = true,
     modifier: Modifier = Modifier
 ) {
-    var yawDegrees by remember { mutableFloatStateOf(0f) }
-    val rotatedNodes = remember(nodes, yawDegrees) { StickmanKinematics.applyYaw(nodes, yawDegrees) }
+    val scope = rememberCoroutineScope()
+    val yaw = remember { Animatable(0f) }
+    val rotatedNodes = remember(nodes, yaw.value) { StickmanKinematics.applyYaw(nodes, yaw.value) }
 
     Canvas(
         modifier
             .fillMaxSize()
+            // Drag to spin; on release, snap to the nearest detent (front / three-quarter / side)
+            // with a short animation instead of leaving it at an arbitrary angle.
             .pointerInput(Unit) {
-                detectDragGestures { change, dragAmount ->
+                detectDragGestures(
+                    onDragEnd = {
+                        scope.launch {
+                            yaw.animateTo(StickmanKinematics.nearestYawDetent(yaw.value), tween(220))
+                        }
+                    }
+                ) { change, dragAmount ->
                     change.consume()
-                    yawDegrees = (yawDegrees + dragAmount.x * DEGREES_PER_PIXEL)
+                    val next = (yaw.value + dragAmount.x * DEGREES_PER_PIXEL)
                         .coerceIn(-YAW_CLAMP, YAW_CLAMP)
+                    scope.launch { yaw.snapTo(next) }
                 }
+            }
+            // Double-tap to reset to the front view.
+            .pointerInput(Unit) {
+                detectTapGestures(onDoubleTap = { scope.launch { yaw.animateTo(0f, tween(220)) } })
             }
     ) {
         val w = size.width

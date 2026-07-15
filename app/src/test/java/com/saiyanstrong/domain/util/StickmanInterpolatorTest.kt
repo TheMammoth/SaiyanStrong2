@@ -98,6 +98,17 @@ class StickmanInterpolatorTest {
     }
 
     @Test
+    fun `torsoLeanBiasDeg interpolates linearly and lands exactly on keyframe values`() {
+        val ascent = listOf(
+            StickmanKeyframe(BiomechanicsPhase.BOTTOM, PoseAngles(72f, 57f, 47f, 0f)),
+            StickmanKeyframe(BiomechanicsPhase.ASCENT_STICK, PoseAngles(102f, 87f, 45f, 16f))
+        )
+        assertEquals(0f, StickmanInterpolator.interpolateAngles(ascent, 0f).torsoLeanBiasDeg)
+        assertEquals(16f, StickmanInterpolator.interpolateAngles(ascent, 1f).torsoLeanBiasDeg, 1e-3f)
+        assertEquals(8f, StickmanInterpolator.interpolateAngles(ascent, 0.5f).torsoLeanBiasDeg, 1e-3f)
+    }
+
+    @Test
     fun `empty keyframe list returns empty nodes`() {
         assertTrue(StickmanInterpolator.interpolate(emptyList(), ratios, 0.5f).isEmpty())
     }

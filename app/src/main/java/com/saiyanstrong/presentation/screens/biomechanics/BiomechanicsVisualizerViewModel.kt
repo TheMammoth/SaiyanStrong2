@@ -24,6 +24,9 @@ class BiomechanicsVisualizerViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle
 ) : ViewModel() {
 
+    /** A labelled marker under the rep-timeline slider. [fraction] is 0..1 along the track. */
+    data class PhaseTick(val fraction: Float, val label: String)
+
     data class UiState(
         val nodes: List<NodePosition> = emptyList(),
         val archetypeName: String = "",
@@ -32,7 +35,8 @@ class BiomechanicsVisualizerViewModel @Inject constructor(
         val stanceCue: String = "",
         val irrelevantCue: String = "",
         val isLoading: Boolean = true,
-        val sliderProgress: Float = 0f
+        val sliderProgress: Float = 0f,
+        val phaseTicks: List<PhaseTick> = emptyList()
     )
 
     private val _uiState = MutableStateFlow(UiState())
@@ -55,6 +59,7 @@ class BiomechanicsVisualizerViewModel @Inject constructor(
                     mechanicalFacts = animation.mechanicalFacts,
                     stanceCue = animation.stanceCue,
                     irrelevantCue = animation.irrelevantCue,
+                    phaseTicks = buildPhaseTicks(animation.keyframes),
                     isLoading = false
                 )
             }
@@ -66,6 +71,25 @@ class BiomechanicsVisualizerViewModel @Inject constructor(
         val currentRatios = ratios ?: return
         val nodes = StickmanInterpolator.interpolate(keyframes, currentRatios, progress)
         _uiState.update { it.copy(nodes = nodes, sliderProgress = progress) }
+    }
+
+    private fun buildPhaseTicks(keyframes: List<StickmanKeyframe>): List<PhaseTick> {
+        if (keyframes.size < 2) return emptyList()
+        val lastIndex = keyframes.size - 1
+        return keyframes.mapIndexedNotNull { index, keyframe ->
+            phaseLabel(keyframe.phase)?.let {
+                PhaseTick(fraction = index.toFloat() / lastIndex, label = it)
+            }
+        }
+    }
+
+    /** Short label per phase; unlabelled phases produce no tick (keeps the track uncrowded). */
+    private fun phaseLabel(phase: com.saiyanstrong.domain.model.BiomechanicsPhase): String? = when (phase) {
+        com.saiyanstrong.domain.model.BiomechanicsPhase.STANDING -> "STAND"
+        com.saiyanstrong.domain.model.BiomechanicsPhase.PARALLEL -> "PARALLEL"
+        com.saiyanstrong.domain.model.BiomechanicsPhase.BOTTOM -> "BOTTOM"
+        com.saiyanstrong.domain.model.BiomechanicsPhase.ASCENT_STICK -> "GRIND"
+        else -> null
     }
 }
 

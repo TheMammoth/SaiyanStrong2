@@ -1,11 +1,13 @@
 package com.saiyanstrong.presentation.screens.biomechanics
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -23,7 +25,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.PreviewLightDark
@@ -91,9 +97,15 @@ fun BiomechanicsVisualizerContent(
                 valueRange = 0f..1f,
                 colors = SliderDefaults.colors(thumbColor = NeonGreen, activeTrackColor = NeonGreen)
             )
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("STANDING", color = Color.White.copy(alpha = 0.6f), fontSize = 10.sp, fontWeight = FontWeight.Black)
-                Text("BOTTOM", color = Color.White.copy(alpha = 0.6f), fontSize = 10.sp, fontWeight = FontWeight.Black)
+            // Rep timeline: the slider now spans a whole rep (standing → bottom → ascent → standing),
+            // so a two-label row no longer describes it. Phase ticks mark the milestones instead.
+            if (uiState.phaseTicks.isNotEmpty()) {
+                PhaseTickBar(ticks = uiState.phaseTicks)
+            } else {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("STANDING", color = Color.White.copy(alpha = 0.6f), fontSize = 10.sp, fontWeight = FontWeight.Black)
+                    Text("BOTTOM", color = Color.White.copy(alpha = 0.6f), fontSize = 10.sp, fontWeight = FontWeight.Black)
+                }
             }
         }
 
@@ -141,6 +153,41 @@ fun BiomechanicsVisualizerContent(
                     Text("COMPARE WITH ANOTHER BUILD →", fontWeight = FontWeight.Black, fontSize = 11.sp)
                 }
             }
+        }
+    }
+}
+
+/** Marks the rep-timeline milestones (STAND / PARALLEL / BOTTOM / GRIND / STAND) under the
+ * slider. Drawn via a single Canvas so tick lines and centered labels position exactly on each
+ * fraction; edge labels are nudged inward by half their measured width so they don't clip. */
+@Composable
+private fun PhaseTickBar(ticks: List<BiomechanicsVisualizerViewModel.PhaseTick>) {
+    val density = LocalDensity.current
+    val labelArgb = Color.White.copy(alpha = 0.7f).toArgb()
+    val tickColor = NeonGreen
+    val textSizePx = with(density) { 9.sp.toPx() }
+    Canvas(modifier = Modifier.fillMaxWidth().height(26.dp)) {
+        val w = size.width
+        val paint = android.graphics.Paint().apply {
+            color = labelArgb
+            textAlign = android.graphics.Paint.Align.CENTER
+            textSize = textSizePx
+            isAntiAlias = true
+            isFakeBoldText = true
+        }
+        val tickBottom = 6.dp.toPx()
+        val textBaseline = 20.dp.toPx()
+        ticks.forEach { tick ->
+            val x = (tick.fraction * w).coerceIn(0f, w)
+            drawLine(
+                color = tickColor,
+                start = Offset(x, 0f),
+                end = Offset(x, tickBottom),
+                strokeWidth = 1.5.dp.toPx()
+            )
+            val half = paint.measureText(tick.label) / 2f
+            val textX = x.coerceIn(half, (w - half).coerceAtLeast(half))
+            drawContext.canvas.nativeCanvas.drawText(tick.label, textX, textBaseline, paint)
         }
     }
 }

@@ -35,7 +35,8 @@ object StickmanInterpolator {
         return PoseAngles(
             hipAngleDeg = lerp(from.hipAngleDeg, to.hipAngleDeg, localT),
             kneeAngleDeg = lerp(from.kneeAngleDeg, to.kneeAngleDeg, localT),
-            torsoAngleDeg = lerp(from.torsoAngleDeg, to.torsoAngleDeg, localT)
+            torsoAngleDeg = lerp(from.torsoAngleDeg, to.torsoAngleDeg, localT),
+            torsoLeanBiasDeg = lerp(from.torsoLeanBiasDeg, to.torsoLeanBiasDeg, localT)
         )
     }
 

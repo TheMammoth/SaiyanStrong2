@@ -208,6 +208,50 @@ class StickmanKinematicsTest {
     }
 
     @Test
+    fun `torsoLeanBiasDeg pitches the torso further forward without changing any segment length`() {
+        // The mechanism behind "real ascent": at the same knee angle, a positive bias must lean
+        // the torso further forward (bigger torsoLeanOf) yet leave every limb exactly rigid,
+        // because the bias is a rotation about the hip, not a translation.
+        val base = StickmanKinematics.buildNodes(ratios, PoseAngles(95f, 76f, 55f, 0f))
+        val biased = StickmanKinematics.buildNodes(ratios, PoseAngles(95f, 76f, 55f, 15f))
+
+        val leanBase = torsoLeanOf(base)
+        val leanBiased = torsoLeanOf(biased)
+        assertTrue(
+            "expected ~15° more forward lean with a +15 bias, got ${leanBiased - leanBase}",
+            (leanBiased - leanBase) in 13.0..17.0
+        )
+
+        val bodyScale = 0.80
+        val kneeCenter = centerline(biased, NodeId.L_KNEE, NodeId.R_KNEE)
+        val thigh = distance(kneeCenter, node(biased, NodeId.HIP_CENTER))
+        val torso = distance(node(biased, NodeId.HIP_CENTER), node(biased, NodeId.NECK_BASE))
+        val head = distance(node(biased, NodeId.NECK_BASE), node(biased, NodeId.HEAD))
+        assertEquals("thigh rigid under bias", ratios.thighRatio * bodyScale, thigh, 1e-4)
+        assertEquals("torso rigid under bias", ratios.torsoRatio * bodyScale, torso, 1e-4)
+        assertEquals("head-neck rigid under bias", ratios.headNeckRatio * bodyScale, head, 1e-4)
+    }
+
+    @Test
+    fun `zero bias leaves the pose identical to the solved-only lean`() {
+        // Guarantees squat's existing motion is unchanged: PoseAngles built with the default bias
+        // must produce exactly the same nodes as before the bias field existed.
+        val a = StickmanKinematics.buildNodes(ratios, PoseAngles(72f, 57f, 47f))
+        val b = StickmanKinematics.buildNodes(ratios, PoseAngles(72f, 57f, 47f, 0f))
+        assertEquals(a, b)
+    }
+
+    @Test
+    fun `nearestYawDetent snaps to the closest of front, three-quarter, and side`() {
+        assertEquals(0f, StickmanKinematics.nearestYawDetent(5f))
+        assertEquals(0f, StickmanKinematics.nearestYawDetent(-8f))
+        assertEquals(45f, StickmanKinematics.nearestYawDetent(40f))
+        assertEquals(80f, StickmanKinematics.nearestYawDetent(70f))
+        assertEquals(-45f, StickmanKinematics.nearestYawDetent(-52f))
+        assertEquals(-80f, StickmanKinematics.nearestYawDetent(-72f))
+    }
+
+    @Test
     fun `applyYaw at 0 degrees returns nodes unchanged`() {
         val nodes = StickmanKinematics.buildNodes(ratios, PoseAngles(95f, 76f, 55f))
         val rotated = StickmanKinematics.applyYaw(nodes, 0f)
