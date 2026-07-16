@@ -56,11 +56,20 @@ data class MarkerColorProfile(
          */
         fun sample(r: Int, g: Int, b: Int): MarkerColorProfile {
             val (hue, saturation, value) = MarkerColorMatcher.rgbToHsv(r, g, b)
+            // Pale/pastel markers (an office sticky note) have UNSTABLE hue and drop below a tight
+            // saturation floor in highlights — the "tap doesn't mark it" failure on real footage.
+            // Widen the bands as the sampled saturation falls: a pale sample gets a much looser hue
+            // window and a lower saturation floor so it still tracks; a vivid marker keeps tight,
+            // precise bands. Safe against warm skin/wood (hue ~25°) even at the widest window, since a
+            // pink/magenta marker sits ~55-70° away.
+            val paleness = (1.0 - saturation).coerceIn(0.0, 1.0)
+            val hueTol = 18.0 + 32.0 * paleness                       // 18° vivid → ~50° very pale
+            val satFloor = (saturation - (0.20 + 0.18 * paleness)).coerceAtLeast(0.10)
             return MarkerColorProfile(
                 hueCenter = hue,
-                hueTolerance = 20.0,
-                minSaturation = (saturation - 0.25).coerceAtLeast(0.2),
-                minValue = (value - 0.25).coerceAtLeast(0.2),
+                hueTolerance = hueTol,
+                minSaturation = satFloor,
+                minValue = (value - 0.30).coerceAtLeast(0.15),
                 satCenter = saturation,
                 satTolerance = 0.25,
                 valCenter = value,
