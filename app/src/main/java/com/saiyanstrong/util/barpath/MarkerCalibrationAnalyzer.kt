@@ -18,7 +18,12 @@ data class CalibrationFrameResult(
     val markerRegion: CalibrationRegion?,
     val clashRegions: List<CalibrationRegion>,
     val clash: Boolean,
-    val locked: Boolean
+    val locked: Boolean,
+    /** Scene-scan colour recommendation (which marker colour to use / avoid). Present every frame,
+     * even before a tap — it's the "read the room" hint. */
+    val advice: MarkerAdvice? = null,
+    /** Grade of the tapped marker's colour against the current scene (null until a tap). */
+    val markerGrade: MarkerGrade? = null
 )
 
 /**
@@ -53,13 +58,20 @@ class MarkerCalibrationAnalyzer(
     private var postTapFramesLeft = 0
     private var consecutiveDetections = 0
 
+    // Smoothed scene hue histogram (EMA across frames) so the colour recommendation doesn't
+    // flicker frame-to-frame. Crowdedness is normalized, so the smoothed magnitude doesn't matter.
+    private val smoothedHist = DoubleArray(HIST_BINS)
+    private var markerHue: Double? = null
+
     fun reset() {
         accumulated.clear()
         profile = null
         trackedPoint = null
         postTapFramesLeft = 0
         consecutiveDetections = 0
+        markerHue = null
         pendingTap = null
+        smoothedHist.fill(0.0)
     }
 
     override fun analyze(image: ImageProxy) {
@@ -69,11 +81,20 @@ class MarkerCalibrationAnalyzer(
             val w = frame.width
             val h = frame.height
 
+            // Scene scan (every frame, even before a tap) — smooth the hue histogram and recommend.
+            val frameHist = MarkerColourAdvisor.buildHueHistogram(pixels, w, h, HIST_BINS)
+            for (i in smoothedHist.indices) {
+                smoothedHist[i] = smoothedHist[i] * HIST_SMOOTHING + frameHist[i] * (1.0 - HIST_SMOOTHING)
+            }
+            val sceneHist = IntArray(HIST_BINS) { smoothedHist[it].toInt() }
+            val advice = MarkerColourAdvisor.recommend(sceneHist)
+
             consumePendingTap(image, pixels, w, h)
+            val grade = markerHue?.let { MarkerColourAdvisor.grade(sceneHist, it) }
 
             val current = profile
             if (current == null) {
-                onResult(CalibrationFrameResult(null, null, emptyList(), clash = false, locked = false))
+                onResult(CalibrationFrameResult(null, null, emptyList(), clash = false, locked = false, advice = advice, markerGrade = grade))
                 return
             }
 
@@ -122,7 +143,7 @@ class MarkerCalibrationAnalyzer(
                 emptyList()
             }
 
-            onResult(CalibrationFrameResult(profile, markerRegion, clashRegions, clash, locked))
+            onResult(CalibrationFrameResult(profile, markerRegion, clashRegions, clash, locked, advice, grade))
         } catch (_: Throwable) {
             // A single bad frame must never crash the camera pipeline.
         } finally {
@@ -139,6 +160,7 @@ class MarkerCalibrationAnalyzer(
         if (samples.isEmpty()) return
         addSamples(samples)
         profile = MarkerColorRangeBuilder.build(accumulated)
+        markerHue = profile?.hueCenter
         trackedPoint = bufX.toDouble() to bufY.toDouble()
         postTapFramesLeft = POST_TAP_FRAMES
         consecutiveDetections = 0
@@ -163,5 +185,7 @@ class MarkerCalibrationAnalyzer(
         const val POST_TAP_FRAMES = 20   // ~1-2 s of extra samples after the tap (multi-sample range)
         const val LOCK_FRAMES = 8        // consecutive detections before START RECORDING enables
         const val MAX_ACCUM = 4000       // cap accumulated samples (memory + build cost)
+        const val HIST_BINS = 24         // scene hue histogram resolution (15° per bin)
+        const val HIST_SMOOTHING = 0.85  // EMA weight on the previous scene histogram (anti-flicker)
     }
 }

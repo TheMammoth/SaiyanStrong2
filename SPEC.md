@@ -1,177 +1,126 @@
-# SPEC — VBT Marker Calibration ("train the marker before recording")
+# SPEC — VBT Marker Colour Advisor ("tell me which marker to use")
 
 ## Status: Draft — awaiting confirmation before implementation.
 
-(Replaces the stickman-animation spec — the 4 stickman slices shipped in v0.56.0–v0.59.0.)
+(Builds on the shipped marker-calibration step, v0.60.0.)
 
 ## 1. Objective
 
-Different users have different marker colors and different gym lighting, and the current
-flow only samples the marker color **after** recording — from a possibly motion-blurred
-frame under whatever lighting the lift happened in. That's the root of the "I tap the
-marker and it doesn't mark it" failure.
+Right now the user has to GUESS a marker colour, then find out it clashes with their room
+(yellow-green matched the green drawer; pale pink matched the background). Flip it: the
+calibration screen already has live camera frames, so the app can **read the scene and
+tell the user which marker colour to use** — the saturated colour most ABSENT from their
+room — and **grade the marker they hold up** against the scene. No separate photo/upload;
+it's automatic on the screen they already open.
 
-Add a short **calibration step before recording**: the user points the live camera at
-their marker, taps it, and the app *learns* that marker's color under *their* lighting —
-sampling it across a couple seconds of live frames to build a robust color range, showing
-a live green "detection mask" so the user can *see* it isolates the marker cleanly, and
-warning if the chosen color also lights up the background. Recording then tracks with that
-locked-in profile.
-
-This is **not machine learning** — it's live color enrollment. "Train the marker," not
-"train a model."
-
-**Target user:** anyone recording a lift for velocity, in a real gym/room with real
-lighting and their own marker (a taped patch / bright sticky note on the sleeve).
+**Target user:** anyone setting up a VBT recording who doesn't want to trial-and-error
+marker colours.
 
 ## 2. Decisions (locked via clarifying questions)
 
-1. **Per-recording calibration.** A quick "lock your marker" step every time, before the
-   record button is live. Always matches the current lighting — no stale saved profile.
-   (No DataStore persistence of the profile; it lives for the capture session only.)
-2. **Live preview + tap, with a detection mask.** Live camera; tap the marker; the app
-   overlays a green mask on *every* matching pixel each frame so the user confirms the
-   marker glows and the background stays dark before recording.
-3. **Multi-sample color range.** Sample the marker across ~1–2 s of live frames (or a few
-   taps) and build a hue/sat/val *range* across that window — robust to glare/shadow
-   through the rep — not a single point ± a fixed tolerance.
-4. **Background-clash warning.** After sampling, scan the frame for other large blobs of
-   the same color; if the marker color also matches the windows/walls/clothing, warn the
-   user to move it out of frame or pick a different marker color.
+1. **Automatic, live on the calibrate screen.** The moment the camera opens (before any
+   tap) a banner reads the scene and shows the best marker colour(s) for this spot, plus
+   which colours to avoid (already in the scene). Updates as the camera moves.
+2. **Recommend AND grade.** After the user taps their marker it's rated GOOD / OK / BAD vs
+   the scene (how crowded that colour is), so they get a clear "this clashes, switch"
+   verdict — not just an upfront hint. Advisory; never blocks recording.
+3. **Fixed palette of nameable colours.** Rank a small fixed palette (blue, purple,
+   magenta, red, orange, yellow, green, cyan) by how absent each is from the scene, and
+   name the winner(s) — easy to go find that colour on a real object.
 
-## 3. How it fits the existing flow
+## 3. How it works (design)
 
-Current capture flow (`BarPathCaptureViewModel.CaptureStep`):
-
-```
-RECORDING → PLAYER (tap marker post-record, samples color there) → SCALE → RESULTS
-```
-
-New flow:
-
-```
-CALIBRATE → RECORDING → PLAYER (tap = position/time seed only) → SCALE → RESULTS
-                                   ↑ color comes from CALIBRATE, not the tap
-```
-
-- **CALIBRATE** is a new first step (live camera). Produces a `MarkerColorProfile` stored
-  in `BarPathCaptureUiState.colorProfile`.
-- **RECORDING** unchanged except it's entered *after* calibration. The live ImageAnalysis
-  loop used for calibration is **unbound before video recording starts** — recording stays
-  Preview + VideoCapture only (never the device-fragile 3-stream bind that v0.51.0
-  deliberately removed).
-- **PLAYER**: `onMarkTap` no longer samples color from the tapped pixel. The tap now only
-  sets the **start position seed + start time** (`initialVideoX/Y`, `startMs`); the color
-  is the pre-calibrated profile. This removes the "tapped a blurry frame → bad color"
-  failure entirely.
-- **Gallery import** has no live camera, so it **keeps today's tap-to-sample-color path**
-  as a fallback (calibration is skipped; `colorProfile` stays null → `onMarkTap` samples
-  on tap as it does now). This is the one branch where post-record color sampling remains.
+- The scene is summarised as a **saturated-hue histogram**: count only pixels above a
+  saturation AND value floor (so grey walls, black plates, beige floor, shadows don't
+  drown the signal), bucketed into hue bins (e.g. 24 bins × 15°).
+- **Recommend:** for each palette candidate, measure how crowded its hue neighbourhood is
+  in the histogram (fraction of counted pixels within ±tolerance of the candidate hue).
+  Rank ascending → the least-present colours are recommended; the most-present are the
+  "avoid" list. If the scene has almost no saturated colour at all, fall back to a sensible
+  default order (blue, purple first — rarely in an indoor scene).
+- **Grade a tapped marker:** take the sampled marker's hue, measure its neighbourhood
+  crowdedness the same way → GOOD (empty band) / OK / BAD (crowded band).
+- Both run on the downsampled frame the calibration analyzer already decodes — no extra
+  decode, cheap per frame. The histogram is smoothed over the last few frames so the
+  recommendation doesn't flicker.
 
 ## 4. Core features & acceptance criteria
 
-### 4.1 Calibration step (live)
-- Live camera preview (CameraX Preview + ImageAnalysis; **no** VideoCapture yet).
-- Instruction: "Point at your marker and tap it."
-- Tapping the marker samples an averaged color patch (reuses `ColorPatchSampler` /
-  `sampleMarkerColor` neighborhood averaging).
-- **Multi-sample:** after the first tap, the app keeps sampling the region around the
-  tapped point over the next ~1–2 s of frames (or additional taps), accumulating HSV
-  samples into a range builder.
-- **Live mask overlay:** each analyzed frame, matching pixels are drawn as a translucent
-  green overlay aligned to the preview, so the user sees exactly what's detected.
-- **Clean-lock gate:** the "START RECORDING" button enables only once detection is a single
-  dominant blob for N consecutive frames (a stable, isolated marker). Until then it shows
-  "aim / tap the marker."
-- **AC:** with a well-saturated marker in frame, tapping it produces a green mask that
-  covers the marker and little else, and START RECORDING enables within ~2 s.
+### 4.1 Pure advisor (`MarkerColourAdvisor`, no Android dependency, unit-tested)
+- `buildHueHistogram(pixels, width, height, bins, minSaturation, minValue): IntArray` —
+  counts sufficiently-saturated/bright pixels into hue bins (uses `MarkerColorMatcher
+  .rgbToHsv`, the [0,360) hue convention shared across the pipeline).
+- `recommend(histogram): MarkerAdvice` — `MarkerAdvice(recommended: List<MarkerCandidate>,
+  avoid: List<MarkerCandidate>)`, ranked. `MarkerCandidate(name, hueDeg)` from a fixed
+  palette.
+- `grade(histogram, hueDeg): MarkerGrade` — `GOOD | OK | BAD`.
+- **AC:** a scene that is mostly green + orange recommends blue/purple and lists green &
+  orange under avoid; a hue in a crowded bin grades BAD, a hue in an empty bin grades GOOD;
+  a scene with no saturated colour returns the default recommendation without crashing.
 
-### 4.2 Multi-sample range model (pure)
-- New pure builder `MarkerColorRangeBuilder` (domain/util or util/barpath, pure — no
-  Android): accepts a list of sampled `(h,s,v)` and produces a `MarkerColorProfile`:
-  - `hueCenter` = circular mean of sampled hues; `hueTolerance` = max circular deviation
-    from center + a margin (respecting a sensible min/max band).
-  - `minSaturation` = min sampled saturation − margin (floored); `minValue` = min sampled
-    value − margin (floored).
-  - `satCenter/valCenter` = means; tolerances from spread.
-- Maps onto the **existing** `MarkerColorProfile` shape — no new profile type, no
-  downstream tracker changes. Keeps the pale-adaptive widening from v0.59.2 as the
-  single-sample fallback path.
-- **AC:** several samples of the same marker under varying brightness yield a profile that
-  `matches()` all of them; a clearly different color does not match.
+### 4.2 Analyzer integration (`MarkerCalibrationAnalyzer`)
+- Accumulates a smoothed scene histogram across recent frames; emits `MarkerAdvice` every
+  frame in the existing `CalibrationFrameResult`.
+- On a tap (when it samples the marker colour), also computes and emits the tapped
+  marker's `MarkerGrade`.
+- **AC:** the recommendation appears immediately (before any tap); the grade appears right
+  after a tap and reflects the sampled colour.
 
-### 4.3 Background-clash check (pure)
-- Pure classifier `BackgroundClashDetector`: given the per-frame blob list (from the
-  existing `findBlobs`) and the tapped marker's position, returns a verdict —
-  `CLEAN` (one dominant blob at the marker) vs `CLASH` (a second large blob elsewhere, or
-  matched-pixel fraction over a threshold).
-- Surfaced as a non-blocking warning card: "This color also shows up in the background —
-  move it out of frame or use a different marker." The user can still proceed.
-- **AC:** a frame with only the marker → CLEAN; a frame with the marker plus a large
-  same-color background patch → CLASH.
-
-### 4.4 Wiring
-- `BarPathCaptureUiState` gains a `CALIBRATE` step + calibration sub-state (sampled color,
-  live blob count, clash verdict, lock-ready flag).
-- `onMarkTap` gains a branch: if `colorProfile != null` (calibrated), use it and treat the
-  tap as position/time seed only; else (gallery import) sample on tap as today.
-- The live analysis loop reuses/extends `BarPathLiveAnalyzer` to emit, per frame, the
-  matched-blob list and a coarse mask for the overlay.
+### 4.3 UI (in the existing calibrate view, `BarPathCaptureScreen`)
+- A banner above/over the preview: "Best marker here:" + coloured swatches + names for the
+  top recommendations, and a small "avoid: …" row of swatches for colours already in the
+  scene. Swatch colours drawn from each candidate's representative RGB (Compose Canvas
+  circles — no image assets, no hardcoded theme-violating colours in normal UI chrome;
+  these are data swatches, allowed).
+- After a tap, the lock-status line also shows the marker grade: "Marker: GOOD ✓" /
+  "OK" / "BAD — clashes, try blue" (colour: green/amber/red theme tokens).
+- Recommendation is advisory — START RECORDING still gates only on the stable lock, exactly
+  as today.
 
 ## 5. Project structure (new / changed)
 
 ```
 util/barpath/
-  MarkerColorRangeBuilder.kt      NEW  pure — list of HSV samples → MarkerColorProfile
-  BackgroundClashDetector.kt      NEW  pure — blobs + marker pos → CLEAN | CLASH
-  BarPathLiveAnalyzer.kt          EDIT emit matched-blob list + coarse mask for calibrate
-  MarkerColorProfile.kt           (unchanged; range builder targets its existing fields)
+  MarkerColourAdvisor.kt          NEW  pure — scene histogram → recommended/avoid + grade
+  MarkerCalibrationAnalyzer.kt    EDIT accumulate scene histogram; emit advice + tap grade
 presentation/screens/barpath/
-  BarPathCaptureViewModel.kt      EDIT CALIBRATE step, multi-sample accumulation, clash,
-                                       onMarkTap uses calibrated color (seed-only tap)
-  BarPathCaptureScreen.kt         EDIT CalibrateStep composable: live preview + mask
-                                       overlay + clash warning + START RECORDING gate
-  CalibrationMaskOverlay.kt       NEW  Compose overlay drawing the green match mask
+  BarPathCaptureScreen.kt         EDIT recommendation banner + swatches + marker grade line
 ```
 
-No Room schema change. No new dependencies (CameraX + Compose already present). No new
-permission (CAMERA already declared).
+`CalibrationFrameResult` gains `advice: MarkerAdvice?` and `markerGrade: MarkerGrade?`.
+No Room change, no new dependency, no new permission.
 
 ## 6. Code style / constraints
-- Compose only (no XML/Views). Kotlin only.
-- Pure computational cores (`MarkerColorRangeBuilder`, `BackgroundClashDetector`) live in
-  pure files with **no Android imports**, unit-tested; the CameraX/Compose shell is the
-  untested-on-device layer, same split as the rest of the VBT feature.
-- No hardcoded colors in UI (theme tokens / existing overlay colors).
-- Two-stream calibration bind (Preview + ImageAnalysis); recording stays Preview +
-  VideoCapture. Never bind all three.
+- Compose only. Kotlin only. Metric units unaffected.
+- `MarkerColourAdvisor` is pure (no Android imports), unit-tested; the analyzer/Compose
+  layer stays the untested-on-device shell — same split as the rest of VBT.
+- Reuse `MarkerColorMatcher.rgbToHsv` — do not introduce a second hue convention.
 
 ## 7. Testing strategy
-- `MarkerColorRangeBuilderTest`: circular hue mean across wrap (350°, 10° → ~0°); range
-  covers all input samples; floors applied; single-sample equals the adaptive fallback.
-- `BackgroundClashDetectorTest`: one blob → CLEAN; large second blob → CLASH; small
-  incidental blob near the marker → still CLEAN.
-- Build: `.\gradlew testGithubDebugUnitTest` green, `.\gradlew assembleGithubDebug` green,
-  no `" lb"` in `app/src` Kotlin/strings.
-- Device (owed, no emulator this session): calibrate → mask isolates marker → record →
-  post-record dot follows without re-sampling color.
+- `MarkerColourAdvisorTest`: histogram counts only saturated/bright pixels; a green+orange
+  scene recommends blue/purple and avoids green/orange; grade BAD in a crowded band, GOOD
+  in an empty band; empty/desaturated scene → safe default, no crash; hue-wrap handled
+  (red near 0/360 grades against both ends).
+- Build: `.\gradlew testGithubDebugUnitTest` + `.\gradlew assembleGithubDebug` green; no
+  `" lb"` in `app/src` Kotlin/strings.
+- Device (owed): open calibrate → banner recommends a colour absent from the room → a
+  clashing marker grades BAD, a recommended-colour marker grades GOOD and locks cleanly.
 
 ## 8. Boundaries
 
-**Always:** keep the pure cores Android-free + unit-tested; keep gallery-import's
-tap-to-sample fallback working; unbind the analysis stream before video recording.
+**Always:** keep the advisor pure + unit-tested; keep the recommendation advisory (never a
+gate); reuse the shared hue conversion.
 
-**Ask first:** persisting a calibrated profile across sessions (explicitly out of scope
-now — decision was per-recording); any real ML/on-device model (out of scope — this is
-color enrollment, not training a network); changing the SCALE/analysis math.
+**Ask first:** persisting a "preferred marker colour" across sessions (out of scope now —
+the scene can change); auto-picking/forcing a colour; any real ML.
 
-**Never:** bind 3 camera streams during actual video recording; add a camera/storage
-permission (none needed); block recording on the clash warning (it's advisory, not a
-gate — only the clean-lock stability gate enables START RECORDING).
+**Never:** block recording on a BAD grade or a clash; add a permission; introduce a second
+hue/HSV convention.
 
 ## 9. Known gaps / deferred
-- Marker-tracking core (blob detection + nearest-neighbor) is unchanged; this makes the
-  *color profile* far more reliable, not the tracker's motion logic.
-- No cross-session saved profiles (per decision).
-- Not device-validated this session (no emulator) — the live mask is itself the on-device
-  self-check once the user runs it.
+- Recommends from a fixed nameable palette, not an exact swatch (per decision — easier to
+  match to a real object).
+- Doesn't know what marker objects the user actually owns — it names a colour, not a
+  product.
+- Not device-validated this session (no emulator); the live banner + grade are themselves
+  the on-device check.

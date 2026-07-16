@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -265,6 +266,10 @@ private fun RecordingStep(
             }
             if (!showCamera) return@Column
 
+            if (calibrating) {
+                calib?.advice?.let { CalibrationAdviceBanner(it, modifier = Modifier.padding(bottom = 8.dp)) }
+            }
+
             if (hasPermission) {
                 Box(Modifier.fillMaxWidth().height(360.dp)) {
                     AndroidView(
@@ -413,8 +418,65 @@ private fun CalibrationOverlay(
     }
 }
 
+/** Maps a nameable palette colour to a representative swatch colour for the recommendation UI.
+ * These are data swatches (showing which real-world colour to use), not theme chrome — a fixed,
+ * intentional mapping, not a hardcoded-colour rule violation. */
+private fun swatchColor(name: String): Color = when (name) {
+    "Blue" -> Color(0xFF2979FF)
+    "Purple" -> Color(0xFFAA00FF)
+    "Magenta" -> Color(0xFFFF00AA)
+    "Cyan" -> Color(0xFF00E5FF)
+    "Orange" -> Color(0xFFFF9100)
+    "Red" -> Color(0xFFFF1744)
+    "Yellow" -> Color(0xFFFFEA00)
+    "Green" -> Color(0xFF00E676)
+    else -> Color.White
+}
+
+/** The "read the room" banner: which marker colour to use here (most absent from the scene) and
+ * which to avoid (already present). Live on the calibrate screen, before/regardless of any tap. */
+@Composable
+private fun CalibrationAdviceBanner(
+    advice: com.saiyanstrong.util.barpath.MarkerAdvice,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier.fillMaxWidth().background(SaiyanGray, RoundedCornerShape(6.dp)).padding(10.dp)
+    ) {
+        Text(
+            "BEST MARKER COLOUR HERE", color = PowerAmber, fontSize = 10.sp,
+            fontWeight = FontWeight.Black, letterSpacing = 1.sp, modifier = Modifier.padding(bottom = 6.dp)
+        )
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            advice.recommended.forEach { c -> ColourSwatch(c.name, big = true) }
+        }
+        if (advice.avoid.isNotEmpty()) {
+            Spacer(Modifier.height(6.dp))
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("avoid:", color = Color.White.copy(alpha = 0.5f), fontSize = 11.sp)
+                advice.avoid.forEach { c -> ColourSwatch(c.name, big = false) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ColourSwatch(name: String, big: Boolean) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Canvas(Modifier.size(if (big) 16.dp else 11.dp)) {
+            drawCircle(color = swatchColor(name))
+        }
+        Spacer(Modifier.size(5.dp))
+        Text(
+            name, color = Color.White.copy(alpha = if (big) 0.9f else 0.5f),
+            fontSize = if (big) 13.sp else 11.sp,
+            fontWeight = if (big) FontWeight.Black else FontWeight.Normal
+        )
+    }
+}
+
 /** Status + RE-TAP + START RECORDING for the calibration step. START enables only on a stable lock;
- * the clash warning is advisory (does not block recording), per SPEC.md. */
+ * the clash warning + marker grade are advisory (do not block recording), per SPEC.md. */
 @Composable
 private fun CalibrationControls(
     result: com.saiyanstrong.util.barpath.CalibrationFrameResult?,
@@ -428,12 +490,22 @@ private fun CalibrationControls(
         !locked -> "Locking on… hold steady."
         else -> "Marker locked ✓ — ready to record."
     }
+    val topPick = result?.advice?.recommended?.firstOrNull()?.name
     Column(Modifier.fillMaxWidth()) {
         Text(
             status,
             color = if (locked) NeonGreen else PowerAmber, fontSize = 13.sp, fontWeight = FontWeight.Black,
             modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
         )
+        result?.markerGrade?.let { grade ->
+            val (label, color) = when (grade) {
+                com.saiyanstrong.util.barpath.MarkerGrade.GOOD -> "Marker: GOOD ✓ — stands out from the scene" to NeonGreen
+                com.saiyanstrong.util.barpath.MarkerGrade.OK -> "Marker: OK — usable, but not ideal" to PowerAmber
+                com.saiyanstrong.util.barpath.MarkerGrade.BAD ->
+                    ("Marker: BAD — clashes with the scene" + (topPick?.let { ", try $it" } ?: "")) to DangerRed
+            }
+            Text(label, color = color, fontSize = 12.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(bottom = 8.dp))
+        }
         if (result?.clash == true) {
             Text(
                 "⚠ This color also shows up in the background (red). Move it out of frame or use a different marker color.",

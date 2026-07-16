@@ -2971,6 +2971,40 @@ _(Claude Code appends here after each completed task)_
   crop-region alignment (tap mapping + overlay placement) is the standing CameraX caveat — but the
   live green mask is itself the on-device self-check: if it isolates the marker cleanly, calibration
   worked. Pure cores are fully unit-tested. versionCode 84, versionName 0.60.0.
+- [x] Sprint — VBT marker colour advisor ("tell me which marker to use"), v0.61.0, per SPEC.md
+  /spec round: first real-device test of the v0.60.0 calibration step WORKED (locked on, overlay
+  mapped correctly) but exposed that the user's marker CHOICE kept clashing — a yellow-green note
+  matched the green drawer behind it (the lock box swallowed both), a translucent pale-pink paper
+  matched the background. The fix is to stop the user guessing: the calibrate screen already has
+  live frames, so the app reads the scene and RECOMMENDS the marker colour most absent from the
+  room, and GRADES the marker they hold up. Four locked decisions (clarifying questions): automatic
+  + live on the calibrate screen (no separate scan/upload), recommend AND grade, from a fixed
+  nameable palette. NOT machine learning — a saturated-hue histogram.
+  (1) Pure core (unit-tested, Android-free): `MarkerColourAdvisor` — `buildHueHistogram` counts only
+  sufficiently saturated+bright pixels into 24 hue bins (so grey walls / black plates / beige floor
+  don't drown the signal), `recommend(histogram)` ranks a fixed palette (Blue/Purple/Magenta/Cyan/
+  Orange/Red/Yellow/Green) by how ABSENT each hue neighbourhood is (least-crowded first, ties broken
+  by a preferred order so a blank scene recommends blue/purple), returning `recommended` + `avoid`
+  lists; `grade(histogram, hueDeg)` → GOOD/OK/BAD by how crowded the marker's own hue band is.
+  Reuses `MarkerColorMatcher.rgbToHsv` (the one shared hue convention) and
+  `MarkerColorProfile.hueDistance` (circular). 6 new tests (`MarkerColourAdvisorTest`) incl. the
+  green+orange→recommend-blue/avoid-green/orange case, hue-wrap for red near 0/360, and the empty-
+  scene safe default.
+  (2) `MarkerCalibrationAnalyzer`: builds an EMA-smoothed scene histogram every frame (anti-flicker;
+  crowdedness is normalized so the smoothed magnitude is irrelevant), emits `MarkerAdvice` in
+  `CalibrationFrameResult` even before any tap, and on a tap stores the marker's hue and emits a live
+  `MarkerGrade` recomputed each frame against the current scene. Both fields defaulted so nothing
+  else breaks.
+  (3) UI (`BarPathCaptureScreen`): a `CalibrationAdviceBanner` above the preview — "BEST MARKER
+  COLOUR HERE" + coloured swatches (drawn Canvas circles, `swatchColor(name)` — data swatches, not
+  theme chrome) + names for the top 2, and an "avoid:" row for colours already in the scene. After a
+  tap, `CalibrationControls` shows the grade line ("Marker: GOOD ✓ / OK / BAD — clashes, try
+  <topPick>"). Advisory only — START RECORDING still gates solely on the stable lock.
+  No new deps / permissions / Room change; the advisor runs on the frame the calibration analyzer
+  already decodes.
+  KNOWN GAP: unverified on a real device this session — the live banner + grade are themselves the
+  on-device check. For the user's actual room this recommends blue/purple and flags green/pink/
+  orange, matching the manual call made from their screenshots. versionCode 85, versionName 0.61.0.
 
 ## Release rules
 
