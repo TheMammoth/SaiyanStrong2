@@ -116,6 +116,18 @@ class BarPathCaptureViewModel @Inject constructor(
     /** The in-flight background tracking job, cancelled when the user re-marks. */
     private var trackJob: Job? = null
 
+    /** The marker color profile "trained" during the pre-record calibration step (SPEC.md). Kept
+     * separate from the ephemeral per-video [BarPathCaptureUiState.colorProfile] so it survives the
+     * record→player transition (loadVideo resets that). Null for the gallery-import path (no live
+     * camera to calibrate) — that path falls back to sampling color from the tapped frame. */
+    @Volatile
+    private var calibratedProfile: MarkerColorProfile? = null
+
+    /** Called when the pre-record calibration locks a marker color under the user's real lighting. */
+    fun onMarkerCalibrated(profile: MarkerColorProfile) {
+        calibratedProfile = profile
+    }
+
     val tipsDismissed: StateFlow<Boolean> = userRepository.getBarPathTipsDismissed()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), true)
 
@@ -418,8 +430,13 @@ class BarPathCaptureViewModel @Inject constructor(
         _uiState.update { it.copy(markMs = atMs, markerSamplePoint = TapPoint(videoX, videoY), errorMessage = null) }
 
         trackJob = viewModelScope.launch(Dispatchers.Default) {
-            val frame = runCatching { barPathFrameTracker.extractFrameAt(videoPath, atMs) }.getOrNull()
-            val profile = sampleMarkerColor(frame, TapPoint(videoX, videoY))
+            // Calibrated flow: the color was already trained pre-record under the user's real
+            // lighting — the tap is only the start position/time seed, no color sampling off a
+            // possibly-blurred playback frame. Gallery import (no calibration) samples on tap.
+            val profile = calibratedProfile ?: run {
+                val frame = runCatching { barPathFrameTracker.extractFrameAt(videoPath, atMs) }.getOrNull()
+                sampleMarkerColor(frame, TapPoint(videoX, videoY))
+            }
             if (profile == null) {
                 _uiState.update { it.copy(errorMessage = "Couldn't read the marker there — tap the bright marker on the bar.") }
                 return@launch
@@ -631,6 +648,7 @@ class BarPathCaptureViewModel @Inject constructor(
     }
 
     fun onRetry() {
+        calibratedProfile = null
         _uiState.value = BarPathCaptureUiState()
     }
 }

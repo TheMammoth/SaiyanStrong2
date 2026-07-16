@@ -54,6 +54,8 @@ class BarPathVideoRecorder {
     private var activeRecording: Recording? = null
     private var analyzerExecutor: ExecutorService? = null
     private var liveAnalyzer: BarPathLiveAnalyzer? = null
+    private var calibrationExecutor: ExecutorService? = null
+    private var calibrationAnalyzer: MarkerCalibrationAnalyzer? = null
 
     private var sensorManager: SensorManager? = null
     private var gyroSensor: Sensor? = null
@@ -126,6 +128,10 @@ class BarPathVideoRecorder {
             analyzerExecutor?.shutdown()
             analyzerExecutor = null
             liveAnalyzer = null
+            // Leaving calibration behind (transition to recording) — release its analysis thread.
+            calibrationExecutor?.shutdown()
+            calibrationExecutor = null
+            calibrationAnalyzer = null
 
             val imageAnalysis = onLiveResult?.let { callback ->
                 val executor = Executors.newSingleThreadExecutor().also { analyzerExecutor = it }
@@ -169,6 +175,69 @@ class BarPathVideoRecorder {
             onError("Camera failed to start")
           }
         }, ContextCompat.getMainExecutor(context))
+    }
+
+    /**
+     * The pre-record marker-calibration bind: Preview + ImageAnalysis ONLY (no VideoCapture), so
+     * it's a two-stream bind supported on effectively all devices — deliberately NOT the fragile
+     * three-stream (preview+video+analysis) combination v0.51.0 removed. Feeds a
+     * [MarkerCalibrationAnalyzer]; the caller transitions to [bindCamera] (preview+video) for the
+     * actual recording, which unbinds this and releases its analysis thread.
+     */
+    fun bindCalibration(
+        context: Context,
+        lifecycleOwner: LifecycleOwner,
+        previewView: PreviewView,
+        onResult: (CalibrationFrameResult) -> Unit,
+        onError: (String) -> Unit = {},
+        onBound: () -> Unit = {}
+    ) {
+        val providerFuture = ProcessCameraProvider.getInstance(context)
+        providerFuture.addListener({
+            try {
+                val provider = providerFuture.get()
+                val preview = Preview.Builder().build().also {
+                    it.surfaceProvider = previewView.surfaceProvider
+                }
+
+                provider.unbindAll()
+                analyzerExecutor?.shutdown(); analyzerExecutor = null; liveAnalyzer = null
+                calibrationExecutor?.shutdown(); calibrationExecutor = null
+
+                val executor = Executors.newSingleThreadExecutor().also { calibrationExecutor = it }
+                val analyzer = MarkerCalibrationAnalyzer(onResult).also { calibrationAnalyzer = it }
+                val imageAnalysis = ImageAnalysis.Builder()
+                    .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                    .build()
+                    .also { it.setAnalyzer(executor, analyzer) }
+
+                runCatching {
+                    provider.bindToLifecycle(
+                        lifecycleOwner, CameraSelector.DEFAULT_BACK_CAMERA, preview, imageAnalysis
+                    )
+                }.onSuccess {
+                    onBound()
+                }.onFailure { e ->
+                    Log.e("BarPathVideoRecorder", "Calibration bind failed", e)
+                    onError("Camera unavailable on this device")
+                }
+            } catch (t: Throwable) {
+                Log.e("BarPathVideoRecorder", "Calibration setup failed", t)
+                onError("Camera failed to start")
+            }
+        }, ContextCompat.getMainExecutor(context))
+    }
+
+    /** User tapped their marker in the live calibration preview — [normX]/[normY] must come from
+     * `PreviewView.meteringPointFactory.createPoint(...)` (see [PendingColorSample]). No-op if the
+     * calibration loop isn't bound. */
+    fun requestCalibrationSample(normX: Float, normY: Float) {
+        calibrationAnalyzer?.pendingTap = PendingColorSample(normX, normY)
+    }
+
+    /** Clear accumulated calibration samples so the next tap starts a fresh marker (RE-TAP). */
+    fun resetCalibration() {
+        calibrationAnalyzer?.reset()
     }
 
     /** User tapped "Start rep" — drives the live phase machine's settling window. Independent of

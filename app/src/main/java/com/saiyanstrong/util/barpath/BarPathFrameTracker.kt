@@ -14,7 +14,14 @@ internal data class Blob(
     val centroidY: Double,
     val size: Int,
     /** Bounding-box diameter (larger of width/height, in pixels) — feeds depth-drift correction. */
-    val diameterPx: Double = 0.0
+    val diameterPx: Double = 0.0,
+    // Bounding box (inclusive pixel extents) — feeds the calibration region-highlight overlay and
+    // the background-clash check. Defaulted so existing test fixtures that build a Blob positionally
+    // (centroid/size only) still compile.
+    val minX: Int = 0,
+    val minY: Int = 0,
+    val maxX: Int = 0,
+    val maxY: Int = 0
 )
 
 /**
@@ -75,7 +82,7 @@ internal fun findBlobs(mask: BooleanArray, weights: DoubleArray, width: Int, hei
             sumX / size to sumY / size
         }
         val diameterPx = maxOf(maxX - minX + 1, maxY - minY + 1).toDouble()
-        blobs += Blob(centroidX, centroidY, size, diameterPx)
+        blobs += Blob(centroidX, centroidY, size, diameterPx, minX, minY, maxX, maxY)
     }
     return blobs
 }

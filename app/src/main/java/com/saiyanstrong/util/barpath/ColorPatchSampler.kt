@@ -1,26 +1,15 @@
 package com.saiyanstrong.util.barpath
 
-import kotlin.math.atan2
-import kotlin.math.cos
-import kotlin.math.ln
-import kotlin.math.sin
-import kotlin.math.sqrt
-
 /**
- * Builds a [MarkerColorProfile] from a small patch of pixels around a tap point, rather than a
- * single pixel — a lone sensor-noise pixel or a specular highlight would poison the whole
- * profile. Pure, no Android/Bitmap dependency: operates on the same flat ARGB [IntArray] the live
- * pipeline already decodes ([BarPathLiveAnalyzer]'s downsampled frame), so no extra Bitmap
- * allocation is needed and this is directly unit-testable.
+ * Collects a small patch of pixels around a tap point and builds a [MarkerColorProfile] from them
+ * (via [MarkerColorRangeBuilder]) — a single pixel would be poisoned by sensor noise or a specular
+ * highlight. Pure, no Android/Bitmap dependency: operates on the same flat ARGB [IntArray] the live
+ * pipeline already decodes, so no extra Bitmap allocation is needed and this is unit-testable.
  *
  * Saturation-filtered pixels are preferred (drops near-grey specular highlights on a metal
  * bar/plate within the patch), but if too few pixels clear the filter the patch is re-sampled
- * without it — the user may have deliberately tapped a low-saturation marker, and a
- * too-small sample is unreliable either way.
- *
- * Uses [MarkerColorMatcher.rgbToHsv] (hue in degrees [0,360)), the same convention every other
- * color-matching path in this pipeline uses — NOT `android.graphics.Color.colorToHSV`'s [0,180]
- * hue range, which would silently desync from [MarkerColorProfile]'s own hue math.
+ * without it — the user may have deliberately tapped a low-saturation marker, and a too-small
+ * sample is unreliable either way.
  */
 internal fun sampleColorPatch(
     pixels: IntArray,
@@ -32,7 +21,29 @@ internal fun sampleColorPatch(
     minSaturationForFilter: Double = 0.15,
     minFilteredSamples: Int = 20
 ): MarkerColorProfile? {
-    if (width <= 0 || height <= 0 || pixels.isEmpty()) return null
+    val samples = collectPatchSamples(
+        pixels, width, height, centerX, centerY, patchRadius, minSaturationForFilter, minFilteredSamples
+    )
+    return MarkerColorRangeBuilder.build(samples)
+}
+
+/**
+ * The raw (hue°, sat, val) samples inside the patch — exposed so the calibration flow can
+ * ACCUMULATE samples across many frames (multi-sample color range) and build one profile from the
+ * whole set, instead of one profile per frame. Uses [MarkerColorMatcher.rgbToHsv] (hue [0,360)),
+ * the same convention every other color-matching path uses — NOT `android.graphics.Color`'s [0,180].
+ */
+internal fun collectPatchSamples(
+    pixels: IntArray,
+    width: Int,
+    height: Int,
+    centerX: Int,
+    centerY: Int,
+    patchRadius: Int = 8,
+    minSaturationForFilter: Double = 0.15,
+    minFilteredSamples: Int = 20
+): List<Triple<Double, Double, Double>> {
+    if (width <= 0 || height <= 0 || pixels.isEmpty()) return emptyList()
     val cx = centerX.coerceIn(0, width - 1)
     val cy = centerY.coerceIn(0, height - 1)
 
@@ -55,68 +66,6 @@ internal fun sampleColorPatch(
         return out
     }
 
-    var samples = collect(applySaturationFilter = true)
-    if (samples.size < minFilteredSamples) samples = collect(applySaturationFilter = false)
-    if (samples.isEmpty()) return null
-
-    val hues = samples.map { it.first }
-    val sats = samples.map { it.second }
-    val vals = samples.map { it.third }
-
-    val hueCenter = circularMeanDegrees(hues)
-    val hueStd = circularStdDegrees(hues, hueCenter)
-    val satMean = sats.average()
-    val satStd = stdDev(sats, satMean)
-    val valMean = vals.average()
-    val valStd = stdDev(vals, valMean)
-
-    return MarkerColorProfile(
-        hueCenter = hueCenter,
-        // 2.5 std + a floor, so a very uniform patch (near-zero std) doesn't over-tighten the range.
-        hueTolerance = (hueStd * 2.5).coerceAtLeast(8.0),
-        minSaturation = (satMean - satStd * 2.0 - 0.1).coerceIn(0.0, 1.0),
-        minValue = (valMean - valStd * 2.0 - 0.15).coerceIn(0.0, 1.0),
-        satCenter = satMean.coerceIn(0.0, 1.0),
-        satTolerance = (satStd * 2.0 + 0.1).coerceIn(0.05, 1.0),
-        valCenter = valMean.coerceIn(0.0, 1.0),
-        valTolerance = (valStd * 2.0 + 0.15).coerceIn(0.05, 1.0)
-    )
-}
-
-/** Circular mean of hue values in degrees [0,360) — atan2(mean(sin), mean(cos)), wrapped positive. */
-internal fun circularMeanDegrees(degrees: List<Double>): Double {
-    var sumSin = 0.0
-    var sumCos = 0.0
-    for (d in degrees) {
-        val rad = Math.toRadians(d)
-        sumSin += sin(rad); sumCos += cos(rad)
-    }
-    val meanRad = atan2(sumSin / degrees.size, sumCos / degrees.size)
-    val meanDeg = Math.toDegrees(meanRad)
-    return if (meanDeg < 0) meanDeg + 360.0 else meanDeg
-}
-
-/**
- * Circular standard deviation in degrees via the standard circular-statistics formula
- * (Fisher): std = sqrt(-2 ln R), where R is the mean resultant length. R is recomputed from
- * the raw samples rather than derived from [meanDegrees] algebraically — simpler and exactly
- * equivalent, since R only depends on the samples themselves.
- */
-internal fun circularStdDegrees(degrees: List<Double>, meanDegrees: Double): Double {
-    if (degrees.isEmpty()) return 0.0
-    var sumSin = 0.0
-    var sumCos = 0.0
-    for (d in degrees) {
-        val rad = Math.toRadians(d)
-        sumSin += sin(rad); sumCos += cos(rad)
-    }
-    val n = degrees.size
-    val r = sqrt((sumSin / n) * (sumSin / n) + (sumCos / n) * (sumCos / n)).coerceIn(1e-6, 1.0)
-    return Math.toDegrees(sqrt(-2.0 * ln(r)))
-}
-
-private fun stdDev(values: List<Double>, mean: Double): Double {
-    if (values.size < 2) return 0.0
-    val variance = values.sumOf { (it - mean) * (it - mean) } / values.size
-    return sqrt(variance)
+    val filtered = collect(applySaturationFilter = true)
+    return if (filtered.size >= minFilteredSamples) filtered else collect(applySaturationFilter = false)
 }

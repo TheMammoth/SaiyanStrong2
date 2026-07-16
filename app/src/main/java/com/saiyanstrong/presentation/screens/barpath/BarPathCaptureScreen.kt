@@ -43,6 +43,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
@@ -129,7 +130,8 @@ fun BarPathCaptureScreen(
                     tipsDismissed = tipsDismissed,
                     onDismissTips = viewModel::onDismissTips,
                     onFinished = viewModel::onRecordingFinished,
-                    onGalleryVideoPicked = viewModel::onGalleryVideoPicked
+                    onGalleryVideoPicked = viewModel::onGalleryVideoPicked,
+                    onCalibrated = viewModel::onMarkerCalibrated
                 )
                 CaptureStep.SCALE -> ScaleStep(
                     uiState = uiState,
@@ -178,7 +180,8 @@ private fun RecordingStep(
     tipsDismissed: Boolean,
     onDismissTips: () -> Unit,
     onFinished: (String?, GyroTimeline?, Double, Double, Long, String?) -> Unit,
-    onGalleryVideoPicked: (Uri) -> Unit
+    onGalleryVideoPicked: (Uri) -> Unit,
+    onCalibrated: (com.saiyanstrong.util.barpath.MarkerColorProfile) -> Unit
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -210,6 +213,26 @@ private fun RecordingStep(
         snackbarMessage?.let {
             snackbarHostState.showSnackbar(it)
             snackbarMessage = null
+        }
+    }
+
+    // Pre-record marker calibration ("train the marker"): live Preview+Analysis session, tap the
+    // marker → mask/region overlay + clash warning, START RECORDING gated on a stable lock. On
+    // transition, the recording camera (Preview+Video) rebinds on the same PreviewView.
+    var calibrating by remember { mutableStateOf(true) }
+    var calib by remember { mutableStateOf<com.saiyanstrong.util.barpath.CalibrationFrameResult?>(null) }
+    var previewRef by remember { mutableStateOf<PreviewView?>(null) }
+    var tapFlash by remember { mutableStateOf<Offset?>(null) }
+    LaunchedEffect(tapFlash) { if (tapFlash != null) { kotlinx.coroutines.delay(700); tapFlash = null } }
+    LaunchedEffect(calibrating) {
+        if (!calibrating) {
+            previewRef?.let { pv ->
+                isCameraBound = false
+                recorder.bindCamera(
+                    context, lifecycleOwner, pv,
+                    onError = { snackbarMessage = it }, onBound = { isCameraBound = true }
+                )
+            }
         }
     }
 
@@ -247,15 +270,33 @@ private fun RecordingStep(
                     AndroidView(
                         factory = { ctx ->
                             PreviewView(ctx).also { previewView ->
-                                recorder.bindCamera(
+                                previewRef = previewView
+                                // Start in CALIBRATION (Preview + Analysis). Recording rebinds this
+                                // same PreviewView once the marker is locked (LaunchedEffect above).
+                                recorder.bindCalibration(
                                     ctx, lifecycleOwner, previewView,
-                                    onError = { msg -> snackbarMessage = msg },
-                                    onBound = { isCameraBound = true }
+                                    onResult = { calib = it },
+                                    onError = { msg -> snackbarMessage = msg }
                                 )
                             }
                         },
                         modifier = Modifier.fillMaxSize()
                     )
+                    if (calibrating) {
+                        CalibrationOverlay(
+                            result = calib,
+                            tapFlash = tapFlash,
+                            modifier = Modifier.fillMaxSize().pointerInput(previewRef) {
+                                detectTapGestures { offset ->
+                                    previewRef?.let { pv ->
+                                        val point = pv.meteringPointFactory.createPoint(offset.x, offset.y)
+                                        recorder.requestCalibrationSample(point.x, point.y)
+                                        tapFlash = offset
+                                    }
+                                }
+                            }
+                        )
+                    }
                 }
             } else {
                 Box(
@@ -266,27 +307,38 @@ private fun RecordingStep(
                 }
             }
 
-            Spacer(Modifier.height(20.dp))
+            Spacer(Modifier.height(16.dp))
 
-            OutlinedButton(
-                onClick = {
-                    if (!isRecording) {
-                        isRecording = true
-                        recorder.startRecording(context) { path, timeline, focal, sensor, startUptime, errorDetail ->
-                            onFinished(path, timeline, focal, sensor, startUptime, errorDetail)
-                            isRecording = false
-                        }
-                    } else {
-                        recorder.stopRecording()
+            if (calibrating) {
+                CalibrationControls(
+                    result = calib,
+                    onRetap = { recorder.resetCalibration(); calib = null },
+                    onStartRecording = {
+                        calib?.profile?.let(onCalibrated)
+                        calibrating = false
                     }
-                },
-                enabled = hasPermission && (isRecording || isCameraBound),
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = if (isRecording) DangerRed else NeonGreen)
-            ) {
-                Text(
-                    if (isRecording) "STOP" else if (isCameraBound) "RECORD" else "STARTING CAMERA…",
-                    fontWeight = FontWeight.Black, letterSpacing = 1.sp
                 )
+            } else {
+                OutlinedButton(
+                    onClick = {
+                        if (!isRecording) {
+                            isRecording = true
+                            recorder.startRecording(context) { path, timeline, focal, sensor, startUptime, errorDetail ->
+                                onFinished(path, timeline, focal, sensor, startUptime, errorDetail)
+                                isRecording = false
+                            }
+                        } else {
+                            recorder.stopRecording()
+                        }
+                    },
+                    enabled = hasPermission && (isRecording || isCameraBound),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = if (isRecording) DangerRed else NeonGreen)
+                ) {
+                    Text(
+                        if (isRecording) "STOP" else if (isCameraBound) "RECORD" else "STARTING CAMERA…",
+                        fontWeight = FontWeight.Black, letterSpacing = 1.sp
+                    )
+                }
             }
         }
 
@@ -324,6 +376,77 @@ private fun BarPathTipsCard(onDismiss: () -> Unit, modifier: Modifier = Modifier
                 "•  $tip", color = Color.White.copy(alpha = 0.7f), fontSize = 11.sp,
                 modifier = Modifier.padding(top = 3.dp)
             )
+        }
+    }
+}
+
+/**
+ * The live calibration overlay drawn over the camera preview: the detected marker region glows
+ * green, background clashes of the same color glow red, and a white flash marks the last tap. This
+ * IS the "see it isolate" feedback — a marker that lights up cleanly with a dark background tracks
+ * well; red patches elsewhere mean the color clashes.
+ *
+ * Regions are in normalized [0,1] analysis-frame coords; they're scaled onto the preview box
+ * assuming Preview and ImageAnalysis share a crop (the known CameraX caveat, unverified on device).
+ */
+@Composable
+private fun CalibrationOverlay(
+    result: com.saiyanstrong.util.barpath.CalibrationFrameResult?,
+    tapFlash: Offset?,
+    modifier: Modifier = Modifier
+) {
+    Canvas(modifier) {
+        result?.clashRegions?.forEach { r ->
+            drawRect(
+                color = DangerRed.copy(alpha = 0.30f),
+                topLeft = Offset(r.nx * size.width, r.ny * size.height),
+                size = Size(r.nw * size.width, r.nh * size.height)
+            )
+        }
+        result?.markerRegion?.let { r ->
+            val topLeft = Offset(r.nx * size.width, r.ny * size.height)
+            val boxSize = Size(r.nw * size.width, r.nh * size.height)
+            drawRect(color = NeonGreen.copy(alpha = 0.30f), topLeft = topLeft, size = boxSize)
+            drawRect(color = NeonGreen, topLeft = topLeft, size = boxSize, style = androidx.compose.ui.graphics.drawscope.Stroke(width = 3f))
+        }
+        tapFlash?.let { drawCircle(color = Color.White, radius = 26f, center = it, style = androidx.compose.ui.graphics.drawscope.Stroke(width = 3f)) }
+    }
+}
+
+/** Status + RE-TAP + START RECORDING for the calibration step. START enables only on a stable lock;
+ * the clash warning is advisory (does not block recording), per SPEC.md. */
+@Composable
+private fun CalibrationControls(
+    result: com.saiyanstrong.util.barpath.CalibrationFrameResult?,
+    onRetap: () -> Unit,
+    onStartRecording: () -> Unit
+) {
+    val hasProfile = result?.profile != null
+    val locked = result?.locked == true
+    val status = when {
+        !hasProfile -> "Point at your marker and tap it to train the color."
+        !locked -> "Locking on… hold steady."
+        else -> "Marker locked ✓ — ready to record."
+    }
+    Column(Modifier.fillMaxWidth()) {
+        Text(
+            status,
+            color = if (locked) NeonGreen else PowerAmber, fontSize = 13.sp, fontWeight = FontWeight.Black,
+            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
+        )
+        if (result?.clash == true) {
+            Text(
+                "⚠ This color also shows up in the background (red). Move it out of frame or use a different marker color.",
+                color = DangerRed, fontSize = 11.sp, modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
+            )
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = onRetap, enabled = hasProfile, modifier = Modifier.weight(1f)) {
+                Text("RE-TAP", fontSize = 12.sp, fontWeight = FontWeight.Black)
+            }
+            SaiyanButton(onClick = onStartRecording, enabled = locked, modifier = Modifier.weight(1f)) {
+                Text("START RECORDING", fontWeight = FontWeight.Black, fontSize = 12.sp)
+            }
         }
     }
 }

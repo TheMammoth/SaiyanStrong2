@@ -2922,6 +2922,55 @@ _(Claude Code appends here after each completed task)_
   colour) matters more than the code lever. Tests + `assembleGithubDebug` green. NOT re-tested on
   real footage this session — awaiting the user's retry with a bigger, higher-contrast marker.
   versionCode 82, versionName 0.59.1.
+- [x] VBT adaptive color tolerance for pale markers (v0.59.2): user tried a pale pink sticky-note
+  marker — "kinda worked on a controlled video, but most of the time after recording when i tap
+  the colour it doesn't mark it." Root cause: a pastel marker has LOW saturation, so its HSV hue is
+  noisy and it drops below a fixed saturation floor in bright spots — most frames fail
+  `MarkerColorProfile.matches` and the tracked dot never lands. `MarkerColorProfile.sample()` now
+  adapts to paleness: as sampled saturation falls, the hue window widens (18°→~50°) and the
+  saturation floor drops; a vivid marker keeps tight, precise bands. Safe against warm skin/wood
+  (~25° hue, ~55-70° from a pink marker). Told the user a saturated marker (neon hot-pink/orange)
+  beats any code tweak. versionCode 83, versionName 0.59.2.
+- [x] Sprint — VBT marker calibration ("train the marker before recording"), v0.60.0, per SPEC.md
+  /spec round: the marker colour was only ever sampled AFTER recording, off a possibly-blurred
+  playback frame under whatever lighting the lift happened in — the root of the "tap doesn't mark
+  it" failures. Added a pre-record LIVE calibration step so the app learns the marker's colour under
+  the user's real lighting, with visible confirmation. Four locked decisions (clarifying questions):
+  per-recording calibration (matches current lighting, not persisted), live preview + tap with a
+  detection overlay, multi-sample colour RANGE, and a background-clash warning. NOT machine
+  learning — live colour enrollment.
+  (1) Pure cores (unit-tested, Android-free): `MarkerColorRangeBuilder` (list of HSV samples → one
+  `MarkerColorProfile` via circular-mean hue + spread-based tolerances/floors — the samples→profile
+  math extracted out of `ColorPatchSampler`, which now delegates to it; `collectPatchSamples`
+  exposed so calibration can ACCUMULATE samples across frames). `BackgroundClashDetector` (blob list
+  + marker centroid → CLEAN/CLASH: a clash is a blob both large AND far from the marker, so the
+  marker's own halo isn't flagged). 10 new tests (`MarkerColorRangeBuilderTest`,
+  `BackgroundClashDetectorTest`).
+  (2) `Blob` (in `BarPathFrameTracker`) gained a bounding box (minX/minY/maxX/maxY, defaulted so
+  existing positional test fixtures compile) — feeds the region overlay + clash check.
+  (3) `MarkerCalibrationAnalyzer` (new CameraX `ImageAnalysis.Analyzer`): per frame detects the
+  calibrated colour (reusing the exact offline `findBlobs`/`chooseTrackedBlob`), reports the marker
+  region + any clash regions as normalized bboxes, runs the multi-sample accumulation for ~20 frames
+  after a tap, and reports a stable-lock signal (8 consecutive detections). The YUV→ARGB downsample
+  was extracted from `BarPathLiveAnalyzer` into shared `ImageProxyPixels.kt` (one implementation,
+  both analyzers use it).
+  (4) `BarPathVideoRecorder.bindCalibration` — a TWO-stream bind (Preview + ImageAnalysis only, no
+  VideoCapture), deliberately NOT the fragile 3-stream combo v0.51.0 removed; the recording camera
+  (Preview + Video) rebinds on the same `PreviewView` at transition, releasing the analysis thread.
+  `requestCalibrationSample`/`resetCalibration` added.
+  (5) UI: calibration is folded into `RecordingStep`'s camera view (not a separate CaptureStep, so
+  the gallery-import path is untouched and keeps its tap-to-sample-colour fallback). Live preview +
+  `CalibrationOverlay` (marker region glows green, background clashes glow red, white tap flash) +
+  `CalibrationControls` (status, advisory clash warning, RE-TAP, START RECORDING gated on lock).
+  Tapping uses `PreviewView.meteringPointFactory` (same mechanism as the offline tap-to-sample).
+  (6) `BarPathCaptureViewModel`: the calibrated profile is stored in a field that survives the
+  record→player transition (not the ephemeral per-video `colorProfile` which `loadVideo` resets);
+  `onMarkTap` uses it — the post-record tap becomes POSITION/TIME SEED ONLY, no colour sampling off
+  a blurred frame. Gallery import (no calibration) still samples on tap.
+  KNOWN GAP: unverified on a real device this session (no emulator). The Preview-vs-ImageAnalysis
+  crop-region alignment (tap mapping + overlay placement) is the standing CameraX caveat — but the
+  live green mask is itself the on-device self-check: if it isolates the marker cleanly, calibration
+  worked. Pure cores are fully unit-tested. versionCode 84, versionName 0.60.0.
 
 ## Release rules
 
