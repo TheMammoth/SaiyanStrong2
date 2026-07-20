@@ -3093,6 +3093,37 @@ _(Claude Code appends here after each completed task)_
   + progress bar + finished path ARE the on-device self-check. First-pass constants (default box
   0.18×shorter-side, pinch clamp 24px..shorterSide, smoothing window 9) tunable after a real look.
   versionCode 87, versionName 0.63.0.
+- [x] Sprint — VBT: track the bar-end/sleeve hub + magnifier placement (v0.64.0), per SPEC.md /spec
+  round. User asked whether to track the plate or the bar centre (reasoning a smaller target
+  distorts less under camera tilt). Honest CV answer given: the bar is rigid so any fixed point
+  gives the same velocity — the choice affects LOCK reliability, not the number; the literal bar
+  centre is occluded on squat/OHP, so the real small-target is the bright chrome **sleeve hub** in
+  the plate centre (round → its centre is tilt-invariant, high-contrast, rigidly on the bar). Since
+  the movable box (v0.63.0) already tracks whatever the user places, this sprint is **guidance +
+  small-target tuning, not an algorithm change** (flagged as such — tracking the hub does NOT change
+  the physics/velocity math). Three approved decisions: recommend the hub, add a magnifier loupe,
+  start the box hub-sized.
+  (1) **Guidance/copy** (`BarPathTrackPlaybackContent` prompt, `BarPathCaptureViewModel` failure
+  copy): "tap the bar end / sleeve hub (the bright centre)" / "frame a distinct target — the sleeve
+  hub, a collar, or a plate". Plate stays a fallback (big = best lock + blur resistance).
+  (2) **Hub-sized default box**: default side fraction `0.18 → 0.07` of the shorter side; pinch
+  range unchanged (`24px..shorterSide`) so it still grows to a plate.
+  (3) **Magnifier loupe** (`PlacementLoupe`): while placing, a circular 110dp 3× zoom of the paused
+  frame under the box centre with a crosshair on the exact tracked point — lands a small hub
+  precisely (fixes "when I tap I'm not accurate"). Needs the paused pixels: new
+  `BarPathCaptureUiState.placementFrame` + `onPlaceFrame(atMs)` (extracts the frame off-thread via
+  `extractFrameAt`, guarded); the player calls it on each box drop/reposition; cleared on RE-MARK.
+  The crosshair is mapped to the box centre's position WITHIN the edge-clamped magnified window, so
+  it stays accurate near a frame edge. New pure `loupeSource(centerX, centerY, bitmapW, bitmapH,
+  loupePx, zoom): LoupeSrc?` (window centred, shifted-not-shrunk at edges, degenerate → null) — 3
+  new unit tests.
+  Scale unchanged: the two-tap plate SCALE step is independent of the tracked target (track the hub,
+  still tap a plate's edges for the metre scale); `apparentDiameterPx` depth correction still works
+  from the box width (small but ~constant). No new deps / permissions / Room / analysis-math change.
+  Build + full suite green, zero `" lb"`, APK badged versionCode 88.
+  KNOWN GAP: not device-verified — the loupe render, the hub-track reliability (small target = more
+  blur/lost-lock risk on fast reps, why the plate stays offered), and the placement feel need a real
+  look. Constants (default 0.07, loupe 110dp/3×) tunable after. versionCode 88, versionName 0.64.0.
 
 ## Release rules
 

@@ -32,8 +32,13 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
@@ -76,8 +81,10 @@ fun BarPathTrackPlaybackContent(
     isMarked: Boolean,
     isTracking: Boolean,
     trackingProgress: Float,
+    placementFrame: android.graphics.Bitmap?,
     errorMessage: String?,
     onConfirmTrack: (centerX: Float, centerY: Float, sidePx: Float, atMs: Long) -> Unit,
+    onPlaceFrame: (atMs: Long) -> Unit,
     onReMark: () -> Unit,
     onGetVelocityNumbers: () -> Unit
 ) {
@@ -128,8 +135,8 @@ fun BarPathTrackPlaybackContent(
                 when {
                     isTracking -> "Tracking the plate…"
                     isMarked -> "TRACKING — watch the dot follow the plate"
-                    pendingBox != null -> "Drag the box onto the plate, pinch to size it, then TRACK"
-                    else -> "Scrub to the lift, then tap a weight plate on the bar"
+                    pendingBox != null -> "Drag the box onto the hub, pinch to size it, then TRACK"
+                    else -> "Scrub to the lift, then tap the bar end / sleeve hub (the bright centre)"
                 },
                 color = PowerAmber, fontSize = 12.sp, fontWeight = FontWeight.Black, letterSpacing = 1.sp,
                 modifier = Modifier.weight(1f)
@@ -155,8 +162,10 @@ fun BarPathTrackPlaybackContent(
                         ) ?: return@detectTapGestures
                         exoPlayer.pause()
                         placedAtMs = exoPlayer.currentPosition
-                        val defaultSide = minOf(videoWidthPx, videoHeightPx) * 0.18f
+                        // Hub-sized default (a bar end / collar / sleeve hub) — pinch out for a plate.
+                        val defaultSide = minOf(videoWidthPx, videoHeightPx) * 0.07f
                         pendingBox = PendingBox(videoPx.first, videoPx.second, pendingBox?.side ?: defaultSide)
+                        onPlaceFrame(exoPlayer.currentPosition)
                     }
                 }
                 // Drag to move, pinch to resize the box (only while placing and a box exists).
@@ -201,6 +210,17 @@ fun BarPathTrackPlaybackContent(
                     pendingBox?.let { box ->
                         StartBoxOverlay(box, videoWidthPx, videoHeightPx, Modifier.fillMaxSize())
                     }
+                }
+            }
+            // Magnifier loupe — zoomed crop of the paused frame under the box centre, so a small
+            // hub can be landed precisely. Pinned top-start, away from where the box usually sits.
+            if (placing && placementFrame != null) {
+                pendingBox?.let { box ->
+                    PlacementLoupe(
+                        frame = placementFrame,
+                        centerX = box.cx, centerY = box.cy,
+                        modifier = Modifier.align(Alignment.TopStart).padding(12.dp)
+                    )
                 }
             }
             if (isTracking) {
@@ -304,6 +324,46 @@ private fun StartBoxOverlay(
     }
 }
 
+/**
+ * Circular magnifier of the paused frame around the box centre ([centerX],[centerY] in bitmap-px),
+ * zoomed 3×, with a crosshair on the exact tracked point — so a small hub can be centred precisely.
+ * The crosshair is placed at the box centre's position WITHIN the (edge-clamped) magnified window,
+ * so it stays accurate even when the window shifts near a frame edge.
+ */
+@Composable
+private fun PlacementLoupe(
+    frame: android.graphics.Bitmap,
+    centerX: Float,
+    centerY: Float,
+    modifier: Modifier = Modifier
+) {
+    val image = remember(frame) { frame.asImageBitmap() }
+    Canvas(modifier.size(110.dp)) {
+        val loupePx = size.minDimension.toInt()
+        val src = loupeSource(centerX.toDouble(), centerY.toDouble(), frame.width, frame.height, loupePx, 3f)
+            ?: return@Canvas
+        val circle = Path().apply {
+            addOval(androidx.compose.ui.geometry.Rect(0f, 0f, size.width, size.height))
+        }
+        clipPath(circle) {
+            drawImage(
+                image = image,
+                srcOffset = IntOffset(src.x, src.y),
+                srcSize = IntSize(src.size, src.size),
+                dstOffset = IntOffset.Zero,
+                dstSize = IntSize(loupePx, loupePx)
+            )
+        }
+        drawCircle(NeonGreen, radius = size.minDimension / 2f, style = Stroke(width = 3.dp.toPx()))
+        // Box centre mapped into the loupe (accounts for edge-clamping of the source window).
+        val cxL = ((centerX - src.x) / src.size) * loupePx
+        val cyL = ((centerY - src.y) / src.size) * loupePx
+        val cross = 10.dp.toPx()
+        drawLine(NeonGreen, Offset(cxL - cross, cyL), Offset(cxL + cross, cyL), strokeWidth = 2.dp.toPx())
+        drawLine(NeonGreen, Offset(cxL, cyL - cross), Offset(cxL, cyL + cross), strokeWidth = 2.dp.toPx())
+    }
+}
+
 /** Single-colour growing trail + a marker dot at the current playback moment. Draws nothing until
  * playback reaches a tracked sample (tracking starts at the mark time), so no phantom dot appears
  * before the marked point. Nothing cached — sample counts are small (one rep), redraw is cheap. */
@@ -365,6 +425,31 @@ internal fun smoothedPathPoints(samples: List<BarPathSample>, window: Int = 9): 
         }
         (sx / n) to (sy / n)
     }
+}
+
+/** Source crop for the placement magnifier loupe, in bitmap pixels (integer offset + size). */
+internal data class LoupeSrc(val x: Int, val y: Int, val size: Int)
+
+/**
+ * The square region of the paused frame to magnify in the loupe: a [loupePx]/[zoom]-sized window
+ * centred on the box centre ([centerX], [centerY] in bitmap px), shifted (not shrunk) to stay
+ * inside the [bitmapW]×[bitmapH] bitmap so it never reads out of bounds near an edge. Null for a
+ * degenerate bitmap. Pure/unit-tested; the Compose drawImage src→dst is the shell.
+ */
+internal fun loupeSource(
+    centerX: Double,
+    centerY: Double,
+    bitmapW: Int,
+    bitmapH: Int,
+    loupePx: Int,
+    zoom: Float
+): LoupeSrc? {
+    if (bitmapW <= 0 || bitmapH <= 0 || loupePx <= 0 || zoom <= 0f) return null
+    val src = (loupePx / zoom).toInt().coerceIn(1, minOf(bitmapW, bitmapH))
+    val half = src / 2.0
+    val x = (centerX - half).toInt().coerceIn(0, bitmapW - src)
+    val y = (centerY - half).toInt().coerceIn(0, bitmapH - src)
+    return LoupeSrc(x, y, src)
 }
 
 /**

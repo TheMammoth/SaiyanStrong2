@@ -114,4 +114,32 @@ class BarPathTrackPlaybackContentTest {
         assertTrue("spike should be smoothed down, was ${smoothed[2].second}", smoothed[2].second < 40.0)
         assertEquals(f.size, smoothed.size)
     }
+
+    // ── loupeSource (magnifier crop) ───────────────────────────────────────────────────
+
+    @Test
+    fun `loupe window is centred and sized by zoom in the interior`() {
+        // 120px loupe at 3x → 40px source window, centred on (500,500).
+        val src = loupeSource(500.0, 500.0, 1080, 1920, 120, 3f)!!
+        assertEquals(40, src.size)
+        assertEquals(480, src.x) // 500 - 20
+        assertEquals(480, src.y)
+    }
+
+    @Test
+    fun `loupe window near an edge is shifted fully inside, not shrunk`() {
+        val src = loupeSource(5.0, 5.0, 1080, 1920, 120, 3f)!!
+        assertEquals(40, src.size) // unchanged size
+        assertEquals(0, src.x)
+        assertEquals(0, src.y)
+        val br = loupeSource(1079.0, 1919.0, 1080, 1920, 120, 3f)!!
+        assertEquals(1080 - br.size, br.x)
+        assertEquals(1920 - br.size, br.y)
+    }
+
+    @Test
+    fun `loupe returns null for a degenerate bitmap`() {
+        assertNull(loupeSource(10.0, 10.0, 0, 100, 120, 3f))
+        assertNull(loupeSource(10.0, 10.0, 100, 100, 120, 0f))
+    }
 }

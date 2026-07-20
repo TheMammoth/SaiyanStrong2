@@ -51,6 +51,8 @@ data class BarPathCaptureUiState(
     val step: CaptureStep = CaptureStep.RECORDING,
     val videoPath: String? = null,
     val calibrationFrame: Bitmap? = null,
+    /** The paused frame under the start box, for the placement magnifier loupe. */
+    val placementFrame: Bitmap? = null,
     val markerSamplePoint: TapPoint? = null,
     val colorProfile: MarkerColorProfile? = null,
     /** Playback time (ms) the user tapped the bar to mark it; tracking runs from here. Null = not
@@ -462,11 +464,21 @@ class BarPathCaptureViewModel @Inject constructor(
             // bouncing to a dead-end error screen.
             if (samples.size < 2) {
                 _uiState.update {
-                    it.copy(isTracking = false, errorMessage = "Couldn't track the plate. Re-mark and frame the plate snugly inside the box.")
+                    it.copy(isTracking = false, errorMessage = "Couldn't track that. Re-mark and frame a distinct target snugly in the box — the bright sleeve hub, a collar, or a plate.")
                 }
             } else {
                 _uiState.update { it.copy(isTracking = false, trackedSamples = samples) }
             }
+        }
+    }
+
+    /** Player placement — extract the paused frame at [atMs] so the magnifier loupe can show a
+     * zoomed crop of the region under the start box (helps land a small hub precisely). */
+    fun onPlaceFrame(atMs: Long) {
+        val videoPath = _uiState.value.videoPath ?: return
+        viewModelScope.launch(Dispatchers.Default) {
+            val frame = runCatching { barPathFrameTracker.extractFrameAt(videoPath, atMs) }.getOrNull()
+            if (frame != null) _uiState.update { it.copy(placementFrame = frame) }
         }
     }
 
@@ -477,7 +489,7 @@ class BarPathCaptureViewModel @Inject constructor(
         _uiState.update {
             it.copy(
                 markMs = null, colorProfile = null, markerSamplePoint = null, trackedSamples = emptyList(),
-                isTracking = false, trackingProgress = 0f, errorMessage = null
+                placementFrame = null, isTracking = false, trackingProgress = 0f, errorMessage = null
             )
         }
     }

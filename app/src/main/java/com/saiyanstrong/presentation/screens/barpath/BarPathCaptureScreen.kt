@@ -112,8 +112,10 @@ fun BarPathCaptureScreen(
             isMarked = uiState.markMs != null && !uiState.isTracking,
             isTracking = uiState.isTracking,
             trackingProgress = uiState.trackingProgress,
+            placementFrame = uiState.placementFrame,
             errorMessage = uiState.errorMessage,
             onConfirmTrack = viewModel::onConfirmTrack,
+            onPlaceFrame = viewModel::onPlaceFrame,
             onReMark = viewModel::onReMark,
             onGetVelocityNumbers = viewModel::onGetVelocityNumbers
         )

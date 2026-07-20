@@ -1,38 +1,39 @@
-# SPEC — VBT tracking polish: movable start box, track-then-watch, smoother trail
+# SPEC — VBT: track the bar-end/sleeve hub (small, tilt-robust) + magnifier placement
 
 ## Status: Draft — awaiting confirmation before implementation.
 
-Builds on v0.62.0 (OpenCV TrackerVit, tap the plate). First real-footage test: it works —
-the dot follows the plate, plausible numbers (peak 0.66 m/s, ROM 0.57 m on an OHP). Three
-issues to fix, all confirmed via clarifying questions.
+Builds on v0.63.0 (movable/resizable start box, track-then-watch). This sprint is mostly
+**guidance + small-target tuning**, not an algorithm change — TrackerVit already tracks whatever
+box the user places. Decided via clarifying questions: recommend the **bar end / sleeve hub**,
+add a **magnifier loupe** for precise placement, and start the box **smaller (hub-sized)**.
 
 ---
 
 ## 1. Objective
 
-Take the working TrackerVit flow from "works" to "accurate and forgiving":
+The user asked whether to track the plate or the bar centre, reasoning a smaller target distorts
+less under camera tilt. The honest CV answer: the whole bar is rigid, so any fixed point gives the
+same velocity; the tracked-point choice affects *lock reliability*, not the number much. The
+**sleeve hub** (the bright chrome bar-end poking through the plate centre — visible in the user's
+footage) is a strong target: small, round (so its **centre is tilt-invariant** — a circle projects
+to an ellipse but the centre stays the centre), high-contrast, rigidly on the bar. The literal
+"centre of the bar" is occluded behind the neck on a squat/OHP, so the hub is what "small central
+bar target" actually means.
 
-1. **Movable + resizable start box.** Today a tap immediately starts tracking from that exact
-   point — an inaccurate tap seeds the tracker off the plate. Instead: a tap drops an
-   **adjustable box** on the paused frame; the user **drags it onto the plate and pinches to
-   size it to the plate**, then presses TRACK. A tight, well-placed box is also the single
-   biggest accuracy lever for TrackerVit (it tracks the region it's initialized on).
-2. **Track fully first, then watch.** Today tracking streams in the background while the video
-   loops, so the path only fills in after replaying 2–3×. Instead: pressing TRACK runs the
-   whole tracking pass once behind a **determinate progress bar**, then plays the **complete**
-   path — accurate on the first watch, no replay-to-catch-up.
-3. **Smoother displayed trail.** The drawn path is jagged (tracker jitter). Smooth the DISPLAYED
-   trail more — both the live player overlay and the velocity-coloured replay overlay (the
-   replay currently draws raw positions with no smoothing at all). The velocity NUMBERS keep
-   their existing Savitzky-Golay smoothing in analysis — this is display-only.
+The movable box already lets the user place the tracker anywhere — so the work is: **guide them to
+the hub, make a small target easy to place accurately, and start the box hub-sized.**
+
+**Target user:** a lifter filming side-on, sometimes with a slightly tilted camera, who wants the
+most accurate/robust tracking without fiddling.
 
 ### Acceptance criteria
-1. Tapping the plate drops a box that can be dragged and pinch-resized on the paused frame; a
-   TRACK button confirms and runs tracking from that box.
-2. After TRACK, a progress bar runs to 100%, then the video plays with the full path already
-   drawn — no second loop needed to see the complete trail.
-3. Both the live trail and the replay path read as clean lines, not jagged.
-4. `assembleGithubDebug` green; new pure helpers unit-tested; all existing tests green; zero `" lb"`.
+1. The player guidance recommends tapping the bar end / sleeve hub (plate offered as fallback).
+2. Tapping drops a **hub-sized** box (~0.07×shorter side) by default; pinch still scales up to a plate.
+3. While placing, a **magnifier loupe** shows a zoomed view of the frame under the box centre with a
+   crosshair, so a small hub can be centred precisely.
+4. Tracking a small hub still produces a clean path + plausible numbers (the two-tap plate SCALE
+   step is unchanged — scale reference is independent of what's tracked).
+5. `assembleGithubDebug` green; new pure helper unit-tested; existing tests green; zero `" lb"`.
 
 ---
 
@@ -47,82 +48,64 @@ Release per CLAUDE.md `## Release rules` (bump versionCode+versionName BEFORE th
 
 ## 3. Changes
 
-### A. Adjustable init box — `BarPathTrackPlaybackContent.kt`
-- New local state `pendingBox: PendingBox?` where `PendingBox` = box centre + side in
-  **video-pixel** space (so it survives container resize and maps straight to the tracker).
-- When not yet tracking:
-  - A **tap** (`detectTapGestures`) pauses the player and drops/repositions `pendingBox`
-    centred on the tap, default side = `min(w,h) × 0.18` (today's fixed fraction, now a start
-    value the user adjusts).
-  - Once a box exists, `detectTransformGestures` on the same area **pans** (drag → move centre)
-    and **zooms** (pinch → scale side, clamped to a sane min/max), both in video-px via
-    `computeFittedVideoRect`.
-  - Overlay: a neon rounded-rect outline + centre crosshair + corner ticks over the paused
-    frame, drawn from `pendingBox` through the existing fitted-rect mapping.
-  - A **TRACK THIS PLATE** `SaiyanButton` (shown while `pendingBox != null` and not tracking)
-    calls the new `onConfirmTrack(centerXVideo, centerYVideo, sideVideo, atMs)`.
-- `onMarkTap` is replaced by this place-then-confirm flow. RE-MARK clears `pendingBox` and the
-  tracked path back to the placing state.
-- Coordinate mapping reuses `computeFittedVideoRect` / `screenToVideoPx` unchanged (the proven
-  letterbox math — same mapping that already lands the dot where tapped).
+### A. Guidance / copy — `BarPathTrackPlaybackContent.kt`, tips
+- Player prompt (unmarked): "Scrub to the lift, then tap the **bar end / sleeve hub** (the bright
+  centre) — or a plate". Placing prompt unchanged ("Drag the box onto it, pinch to size, then TRACK").
+- Retry/failure copy broadened away from "plate" to "the hub, a collar, or a plate".
 
-### B. Track-then-watch — `BarPathCaptureViewModel.kt` + player
-- New `onConfirmTrack(centerX, centerY, sidePx, atMs)`:
-  - Build a `BarInitBox` from the user's centre+side via a new pure
-    `VitBarTrackerSupport.initBox(centerX, centerY, sidePx, frameW, frameH)` (clamps the box
-    fully inside the frame; min side floor).
-  - Set `isTracking = true`, `trackingProgress = 0f`, `markMs = atMs`.
-  - Launch `trackWithVit(..., startMs = atMs, onProgress = { progress → update trackingProgress })`
-    to completion (no reliance on live streaming for display now). On done: set `trackedSamples`,
-    `isTracking = false`; the player seeks to `markMs` and plays the complete path.
-- `BarPathCaptureUiState` gains `isTracking: Boolean = false` (`trackingProgress` already exists).
-- Player: while `isTracking`, pause playback and show a **determinate** progress overlay
-  ("Tracking the plate… NN%") over the frame; hide the tap/transform handlers. When it clears,
-  auto-play from `markMs`.
-- The old immediate-streaming `onMarkTap` path is removed from this flow (kept in the ViewModel
-  only if still referenced by the gallery/other path — otherwise dropped). `onSample` streaming
-  is no longer needed for display; `trackWithVit`'s `onProgress` drives the bar.
+### B. Hub-sized default box — `BarPathTrackPlaybackContent.kt`
+- Default box side fraction `0.18 → 0.07` of the shorter video side (a hub/collar). Pinch range
+  unchanged (`24px .. shorterSide`), so the user can still grow it to a full plate.
 
-### C. Smoother trail — display only
-- Live player (`TrackTrailOverlay`): bump `smoothedPathPoints` window `5 → 9`.
-- Replay (`BarPathReplayContent`): it currently draws **raw** `TrackedFrame.xPx/yPx` for the
-  ghost, the velocity-coloured progress line, and the cursor. Add a pure
-  `smoothedFramePoints(frames, window = 9): List<Offset-source pairs>` (position-only moving
-  average, index-aligned) and draw all three layers from it. Peak/sticking/start/end indices
-  stay velocity-based (unchanged) — only the drawn positions are smoothed.
+### C. Magnifier loupe — `BarPathTrackPlaybackContent.kt` + ViewModel
+- While placing (box exists, not tracking/marked), show a circular **loupe** (~110 dp) pinned to a
+  top corner: a zoomed (~3×) crop of the paused frame centred on the box centre, with a crosshair
+  at the exact centre — so a small hub can be landed precisely (directly fixes "when I tap I'm not
+  accurate").
+- The loupe needs the paused frame's pixels. New `BarPathCaptureUiState.placementFrame: Bitmap?`;
+  new `BarPathCaptureViewModel.onPlaceFrame(atMs)` extracts the frame via
+  `barPathFrameTracker.extractFrameAt` (off-thread) and stores it. The player calls `onPlaceFrame`
+  when it drops/repositions the box (paused); the loupe draws from `placementFrame.asImageBitmap()`.
+  Cleared on RE-MARK and on leaving the player.
+- Loupe source-rect math is a pure helper `loupeSource(centerX, centerY, bitmapW, bitmapH, loupePx,
+  zoom): LoupeSrc` (src offset+size clamped inside the bitmap) — unit-tested. The Compose `drawImage`
+  (src→dst) is the untestable shell.
 
-### New/changed pure helpers (unit-tested)
-- `VitBarTrackerSupport.initBox(centerX, centerY, sidePx, frameW, frameH): BarInitBox?` — explicit
-  user-chosen side; clamp inside frame; min-side floor; null for a degenerate frame.
-- `smoothedFramePoints(...)` (in `BarPathReplayContent.kt`, mirrors `smoothedPathPoints`).
-- `smoothedPathPoints` window default `5 → 9` (existing tests still hold; add a window-N case).
+### D. Scale / correction — unchanged
+- The two-tap plate SCALE step is independent of the tracked target (you track the hub, you still
+  tap a plate's edges for the metre scale) — no change. `apparentDiameterPx` depth-drift correction
+  still works from the box width (small but ~constant → correction ≈ 1). Auto-plate-scale stays
+  deferred (it would only apply when the box IS a plate).
+
+### New/changed pure helper (unit-tested)
+- `loupeSource(...)` in `BarPathTrackPlaybackContent.kt` — clamps the zoom window inside the bitmap
+  (near an edge it shifts, doesn't read out of bounds); returns integer src offset + size.
 
 ---
 
 ## 4. Code style
-- Kotlin/Compose only; pure helpers Android-free and unit-tested; TrackerVit/CameraX/ExoPlayer in
-  the untestable shell. No hardcoded colors (theme tokens). Metric only.
+- Kotlin/Compose only; pure helper Android-free + unit-tested; frame extraction / `drawImage` in the
+  untestable shell. No hardcoded colors (theme tokens). Metric only.
 
 ## 5. Testing strategy
-- Pure unit tests: `initBox` (placement, clamp-inside-frame at edges, min side, degenerate null),
-  `smoothedFramePoints` (short series unchanged, interior averaged), `smoothedPathPoints` window.
-- The box UI / progress / TrackerVit are the untestable shell — verified on device. The live box +
-  progress + finished path ARE the on-device self-check.
+- Pure unit tests: `loupeSource` (centre window, edge clamp both axes, zoom size, degenerate bitmap).
+- The loupe rendering, box gestures, and TrackerVit are the shell — verified on device. The loupe +
+  the tracked path following the hub ARE the on-device self-check.
 
 ## 6. Boundaries
-**Always** — keep record-then-analyze; reuse `computeFittedVideoRect`/`screenToVideoPx`; keep the
-analysis SG smoothing untouched (display smoothing is separate); bump versions + progress log.
-**Ask first** — auto-plate-scale from the box width (deferred lever); deleting the dormant
-colour/marker files; any live-camera-preview change.
-**Never** — touch the velocity math; introduce `" lb"`; XML/Java; hardcode colors; add a dependency
-(all of this is Compose + the existing OpenCV path).
+**Always** — keep record-then-analyze; reuse `computeFittedVideoRect`/`extractFrameAt`; keep the
+two-tap scale + analysis math untouched; bump versions + progress log; guard frame extraction
+(`runCatching`).
+**Ask first** — auto-scale from a plate box; deleting dormant colour/marker files; any live-camera
+change.
+**Never** — claim tracking the hub changes the physics/velocity math (it doesn't — same rigid bar);
+`" lb"`; XML/Java; hardcode colors; add a dependency (all Compose + existing OpenCV/retriever path).
 
 ## 7. Known risks
-- `detectTapGestures` + `detectTransformGestures` coexistence (place vs adjust) needs care — a
-  tap must place, a drag must move, a pinch must resize, without fighting each other.
-- Box → tracker init-box mapping is the same fitted-rect math already proven to land the dot on
-  the tap; the resize just changes the side.
-- Full-pass tracking time is bounded by `MAX_SAMPLES = 150` but is still a real wait on a long
-  clip — the progress bar makes it honest; a frame-downscale speed-up is a deferred lever if it's
-  still too slow.
-- Not device-verified this session — the on-device flow is the acceptance gate.
+- Small target = more motion-blur / lost-lock risk on fast reps than a big plate; mitigated by the
+  hub's high contrast + the existing hold-on-low-confidence guard, but a very fast/blurry hub may
+  still need the user to grow the box or track the plate instead — that fallback is why plate stays
+  offered.
+- Loupe adds a frame extraction on placement (~tens of ms, off-thread) — a brief delay before it
+  appears; acceptable.
+- Not device-verified this session — the on-device loupe + hub-track path is the acceptance gate.
