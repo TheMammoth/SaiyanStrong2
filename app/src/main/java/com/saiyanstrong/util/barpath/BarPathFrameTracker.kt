@@ -109,6 +109,37 @@ internal fun chooseTrackedBlob(blobs: List<Blob>, previousCentroid: Pair<Double,
     }
 }
 
+/** Anti-drift guard outcome for one tracked frame (see [trackGuardDecision]). */
+internal enum class TrackGuard { REJECT, ACCEPT, ACCEPT_AND_ADAPT }
+
+/**
+ * Decides whether to trust TrackerVit's box this frame, given how much the tracked patch still
+ * looks like the marked target ([ncc], normalized cross-correlation in [-1,1]) and how far the box
+ * moved from the last accepted position ([displacementPx]).
+ *
+ * - [ncc] below [acceptNcc] → REJECT: the box has drifted onto something different (a leg, the
+ *   backlit window) — the caller holds the last good position and snaps the tracker back.
+ * - [ncc] at/above [adaptNcc] AND a small move → ACCEPT_AND_ADAPT: a confident on-target frame;
+ *   refresh the template so it follows gradual lighting/rotation change without the template itself
+ *   walking off-target (a big jump is NOT allowed to adapt, so a lucky distractor match can't seed
+ *   a bad template).
+ * - otherwise → ACCEPT the position but keep the template fixed.
+ *
+ * Pure/unit-tested.
+ */
+internal fun trackGuardDecision(
+    ncc: Double,
+    displacementPx: Double,
+    boxSide: Double,
+    acceptNcc: Double = 0.30,
+    adaptNcc: Double = 0.55,
+    maxAdaptDispFraction: Double = 0.6
+): TrackGuard = when {
+    ncc < acceptNcc -> TrackGuard.REJECT
+    ncc >= adaptNcc && displacementPx <= boxSide * maxAdaptDispFraction -> TrackGuard.ACCEPT_AND_ADAPT
+    else -> TrackGuard.ACCEPT
+}
+
 /**
  * Extracts frames from a recorded video and tracks the marker's centroid per frame against a
  * [MarkerColorProfile] sampled from the user's actual marker (not a fixed guessed threshold —
@@ -154,28 +185,75 @@ class BarPathFrameTracker @Inject constructor(
 
         val samples = mutableListOf<BarPathSample>()
         var initialized = false
+        // Anti-drift guard: keep an (adaptive) grayscale template of what the user marked, and each
+        // frame check that TrackerVit's box still LOOKS like it (NCC). When the box drifts onto
+        // something different — the lifter's leg, or the blown-out window behind the plate at lockout
+        // — reject it, hold the last good position, and re-init the tracker there so it can't run
+        // away. This is what stops the dot sliding onto the leg when the plate gets hard to see.
+        var template: IntArray? = null
+        var tpSide = 0
+        var lastGoodX = 0.0
+        var lastGoodY = 0.0
+        var lastGoodBox = initBox
         driveRetrieverFrames(videoPath, intervalMs, fromMs, durationMs) { frame, timestampMs ->
             if (trackedSpanMs > 0L) {
                 onProgress?.invoke(((timestampMs - fromMs).toFloat() / trackedSpanMs).coerceIn(0f, 1f))
             }
-            val box: TrackedBox? = if (!initialized) {
+            val gw = (frame.width * GUARD_DOWNSCALE).toInt().coerceAtLeast(1)
+            val gh = (frame.height * GUARD_DOWNSCALE).toInt().coerceAtLeast(1)
+            val gray = toGray(frame, gw, gh)
+
+            if (!initialized) {
                 runCatching { tracker.init(frame, initBox) }.onFailure { return@driveRetrieverFrames }
                 initialized = true
-                TrackedBox(initBox.x, initBox.y, initBox.width, initBox.height)
-            } else {
-                tracker.update(frame)
+                val (cx0, cy0) = VitBarTrackerSupport.boxCenter(initBox.x, initBox.y, initBox.width, initBox.height)
+                lastGoodX = cx0; lastGoodY = cy0; lastGoodBox = initBox
+                tpSide = (minOf(initBox.width, initBox.height) * GUARD_DOWNSCALE).toInt()
+                    .coerceIn(GUARD_MIN_PATCH, GUARD_MAX_PATCH)
+                template = extractPatch(gray, gw, gh, (cx0 * GUARD_DOWNSCALE).toInt(), (cy0 * GUARD_DOWNSCALE).toInt(), tpSide)
+                val sample = BarPathSample(timestampMs, cx0, cy0, initBox.width.toDouble())
+                samples += sample; onSample?.invoke(sample)
+                return@driveRetrieverFrames
             }
-            val sample = if (box != null) {
+
+            val box = tracker.update(frame)
+            var outX = lastGoodX
+            var outY = lastGoodY
+            var outDiam = lastGoodBox.width.toDouble()
+            val tpl = template
+            if (box != null) {
                 val (cx, cy) = VitBarTrackerSupport.boxCenter(box.x, box.y, box.width, box.height)
-                BarPathSample(timestampMs, cx, cy, box.width.toDouble())
+                val trackedBox = BarInitBox(box.x, box.y, box.width, box.height)
+                if (tpl == null) {
+                    outX = cx; outY = cy; outDiam = box.width.toDouble()
+                    lastGoodX = cx; lastGoodY = cy; lastGoodBox = trackedBox
+                } else {
+                    val cxG = (cx * GUARD_DOWNSCALE).toInt()
+                    val cyG = (cy * GUARD_DOWNSCALE).toInt()
+                    val ncc = TemplateMatcher.bestMatch(gray, gw, gh, tpl, tpSide, tpSide, cxG, cyG, 0, 0)?.score ?: -1.0
+                    val disp = hypot(cx - lastGoodX, cy - lastGoodY)
+                    when (trackGuardDecision(ncc, disp, box.width.toDouble())) {
+                        TrackGuard.REJECT ->
+                            // Drifted off-target — snap the tracker back to the last good box; hold.
+                            runCatching { tracker.init(frame, lastGoodBox) }
+                        TrackGuard.ACCEPT -> {
+                            outX = cx; outY = cy; outDiam = box.width.toDouble()
+                            lastGoodX = cx; lastGoodY = cy; lastGoodBox = trackedBox
+                        }
+                        TrackGuard.ACCEPT_AND_ADAPT -> {
+                            outX = cx; outY = cy; outDiam = box.width.toDouble()
+                            lastGoodX = cx; lastGoodY = cy; lastGoodBox = trackedBox
+                            // Refresh the template so it follows gradual lighting/rotation change.
+                            extractPatch(gray, gw, gh, cxG, cyG, tpSide)?.let { template = it }
+                        }
+                    }
+                }
             } else {
-                // Lost this frame — hold the last position rather than teleport (never seed 0,0).
-                samples.lastOrNull()?.copy(timestampMs = timestampMs)
+                // TrackerVit lost confidence — hold last good and re-seed there.
+                runCatching { tracker.init(frame, lastGoodBox) }
             }
-            if (sample != null) {
-                samples += sample
-                onSample?.invoke(sample)
-            }
+            val sample = BarPathSample(timestampMs, outX, outY, outDiam)
+            samples += sample; onSample?.invoke(sample)
         }
         return samples
     }
@@ -628,6 +706,13 @@ class BarPathFrameTracker @Inject constructor(
 
     private companion object {
         const val MIN_MARKER_PIXELS = 10
+
+        // Anti-drift guard (trackWithVit): grayscale working resolution + the NCC template patch
+        // size range (in that downscaled space). A patch too small has no structure to lock onto;
+        // too big is slow and over-includes background.
+        const val GUARD_DOWNSCALE = 0.5
+        const val GUARD_MIN_PATCH = 16
+        const val GUARD_MAX_PATCH = 48
 
         // A matching pixel always contributes at least a little weight, even if matchScore()
         // rounds to 0 at the tolerance boundary — keeps its contribution to the centroid

@@ -98,4 +98,39 @@ class BarPathFrameTrackerTest {
     fun `no blobs returns null regardless of previous position`() {
         assertNull(chooseTrackedBlob(emptyList(), previousCentroid = 10.0 to 10.0))
     }
+
+    // ── anti-drift guard ───────────────────────────────────────────────────────────────
+
+    @Test
+    fun `low NCC is rejected as drift`() {
+        // Box moved onto something that no longer looks like the marked target.
+        assertEquals(TrackGuard.REJECT, trackGuardDecision(ncc = 0.1, displacementPx = 5.0, boxSide = 100.0))
+        assertEquals(TrackGuard.REJECT, trackGuardDecision(ncc = -0.5, displacementPx = 5.0, boxSide = 100.0))
+    }
+
+    @Test
+    fun `high NCC with a small move adapts the template`() {
+        assertEquals(
+            TrackGuard.ACCEPT_AND_ADAPT,
+            trackGuardDecision(ncc = 0.8, displacementPx = 10.0, boxSide = 100.0)
+        )
+    }
+
+    @Test
+    fun `high NCC but a big jump is accepted without adapting`() {
+        // On-target enough to accept, but too far to trust as a template refresh (guards the
+        // template from a lucky distractor match seeding drift).
+        assertEquals(
+            TrackGuard.ACCEPT,
+            trackGuardDecision(ncc = 0.8, displacementPx = 90.0, boxSide = 100.0)
+        )
+    }
+
+    @Test
+    fun `middling NCC is accepted but not adapted`() {
+        assertEquals(
+            TrackGuard.ACCEPT,
+            trackGuardDecision(ncc = 0.4, displacementPx = 5.0, boxSide = 100.0)
+        )
+    }
 }

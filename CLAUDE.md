@@ -3124,6 +3124,32 @@ _(Claude Code appends here after each completed task)_
   KNOWN GAP: not device-verified — the loupe render, the hub-track reliability (small target = more
   blur/lost-lock risk on fast reps, why the plate stays offered), and the placement feel need a real
   look. Constants (default 0.07, loupe 110dp/3×) tunable after. versionCode 88, versionName 0.64.0.
+- [x] Sprint — VBT anti-drift guard (v0.65.0): real-footage test showed TrackerVit sliding off the
+  plate onto the lifter's leg/sock and "not tracking all the way to the top" — the plate gets
+  blown-out/backlit by a big window at lockout and its appearance changes, so the appearance tracker
+  drifts onto a similar-looking neighbour (occlusion/lighting drift). Target-choice guidance
+  (v0.64.0 hub) alone didn't fix this clip, so added a real robustness guard in
+  `BarPathFrameTracker.trackWithVit`.
+  How it works: at the mark frame it snapshots a grayscale NCC template of the marked box region;
+  each frame it runs `TrackerVit.update`, then checks the tracked box still LOOKS like that template
+  (single-position NCC via the dormant `TemplateMatcher`, reused). New pure `trackGuardDecision(ncc,
+  displacementPx, boxSide)` → REJECT (ncc < 0.30 → drifted onto the leg/window: hold the last good
+  position and re-init TrackerVit at the last good box so it snaps back instead of running away) /
+  ACCEPT_AND_ADAPT (ncc ≥ 0.55 AND a small move → refresh the template so it follows gradual
+  lighting/rotation change, but a big jump can't adapt so a lucky distractor match can't seed a bad
+  template) / ACCEPT (in between → keep position, template fixed). Consequence for the reported clip:
+  when the plate becomes untrackable at the top, the dot now HOLDS near the last good spot (where it
+  lost the plate) rather than jumping to the leg — the velocity window covers the trackable portion
+  honestly instead of being corrupted by a leg-drift. No regression risk on the working OHP clip
+  (smooth track → high NCC → always ACCEPT/ADAPT, guard never fires). Guard runs at half-res
+  grayscale; NCC is a single-position check (searchRadius 0), cheap next to the frame seeks.
+  4 new unit tests (`BarPathFrameTrackerTest` — reject/adapt/accept-no-adapt-on-jump/middling).
+  Build + full suite green, zero `" lb"`, APK badged versionCode 89.
+  KNOWN GAP: not device-verified — the NCC thresholds (0.30 accept / 0.55 adapt) are first-pass
+  guesses that need a real look (too high → dot freezes early; too low → drift not caught). If it
+  now holds too early, lower `acceptNcc`; if it still drifts, raise it. Tracking genuinely fast/
+  backlit lockouts remains hard — holding-at-last-good is the honest degradation, not a full fix.
+  versionCode 89, versionName 0.65.0.
 
 ## Release rules
 
