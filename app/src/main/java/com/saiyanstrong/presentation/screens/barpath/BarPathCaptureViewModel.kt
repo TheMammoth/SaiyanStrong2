@@ -464,7 +464,7 @@ class BarPathCaptureViewModel @Inject constructor(
             // bouncing to a dead-end error screen.
             if (samples.size < 2) {
                 _uiState.update {
-                    it.copy(isTracking = false, errorMessage = "Couldn't track that. Re-mark and frame a distinct target snugly in the box — the bright sleeve hub, a collar, or a plate.")
+                    it.copy(isTracking = false, errorMessage = "Couldn't track that. Re-mark and frame a weight plate in the box (not the thin bar) — the plate tracks best.")
                 }
             } else {
                 _uiState.update { it.copy(isTracking = false, trackedSamples = samples) }

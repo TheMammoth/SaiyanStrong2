@@ -134,9 +134,9 @@ fun BarPathTrackPlaybackContent(
             Text(
                 when {
                     isTracking -> "Tracking the plate…"
-                    isMarked -> "TRACKING — watch the dot follow it"
-                    pendingBox != null -> "Drag the box onto the hub, pinch to size it, then TRACK"
-                    else -> "Scrub to the lift, then tap the bar end / sleeve hub (the bright centre)"
+                    isMarked -> "TRACKING — the dot on the plate centre is correct (it moves with the bar)"
+                    pendingBox != null -> "Drag the box onto the plate, pinch to fit it, then TRACK"
+                    else -> "Scrub to the lift, then tap a weight plate (not the thin bar)"
                 },
                 color = PowerAmber, fontSize = 12.sp, fontWeight = FontWeight.Black, letterSpacing = 1.sp,
                 modifier = Modifier.weight(1f)
@@ -162,8 +162,8 @@ fun BarPathTrackPlaybackContent(
                         ) ?: return@detectTapGestures
                         exoPlayer.pause()
                         placedAtMs = exoPlayer.currentPosition
-                        // Hub-sized default (a bar end / collar / sleeve hub) — pinch out for a plate.
-                        val defaultSide = minOf(videoWidthPx, videoHeightPx) * 0.07f
+                        // Plate-sized default — the tracker locks the plate well; pinch to fit it.
+                        val defaultSide = minOf(videoWidthPx, videoHeightPx) * 0.16f
                         pendingBox = PendingBox(videoPx.first, videoPx.second, pendingBox?.side ?: defaultSide)
                         onPlaceFrame(exoPlayer.currentPosition)
                     }

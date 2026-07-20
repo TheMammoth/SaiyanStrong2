@@ -3165,6 +3165,16 @@ _(Claude Code appends here after each completed task)_
   "follow the plate" TRACKING header → "follow it". versionCode 90. NOTE: if the dot still freezes,
   suspect a mistap (tapping the floor/background, not the plate) — a static path over a whole rep
   means the tracked point never moved. versionCode 90, versionName 0.65.1.
+- [x] Copy — plate-centric tracking guidance (v0.65.2): user confused that boxing the thin chrome
+  bar-end "tracks it for a moment then tracks the middle of the plate." Explained it's not a bug —
+  the chrome sleeve pokes through the plate centre, so hub and plate-centre are ~the same rigid
+  point moving at the same velocity; TrackerVit just settles onto the stronger target (the whole
+  plate), which is the BETTER thing to track and gives a correct reading. Reverted the v0.64.0
+  hub-first guidance to plate-first to stop the confusion: player prompts now "tap a weight plate
+  (not the thin bar)" / "Drag the box onto the plate, pinch to fit it" / marked header "the dot on
+  the plate centre is correct (it moves with the bar)"; default box back to plate-sized (0.07 →
+  0.16×shorter side); failure copy plate-first. No logic change — the magnifier loupe + anti-drift
+  guard + fail-safe all unchanged. versionCode 91, versionName 0.65.2.
 
 ## Release rules
 
