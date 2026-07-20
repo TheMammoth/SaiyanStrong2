@@ -1,126 +1,188 @@
-# SPEC — VBT Marker Colour Advisor ("tell me which marker to use")
+# SPEC — VBT tracking rebuilt on OpenCV TrackerVit (tap the plate, no marker)
 
 ## Status: Draft — awaiting confirmation before implementation.
 
-(Builds on the shipped marker-calibration step, v0.60.0.)
+Replaces the entire hand-rolled colour/blob/NCC/template tracking stack with a mature,
+DNN-based single-object tracker from OpenCV. Decided via clarifying questions: **add
+OpenCV**, **tap the plate (no colored marker)**, **keep the record-then-analyze flow**.
+
+---
 
 ## 1. Objective
 
-Right now the user has to GUESS a marker colour, then find out it clashes with their room
-(yellow-green matched the green drawer; pale pink matched the background). Flip it: the
-calibration screen already has live camera frames, so the app can **read the scene and
-tell the user which marker colour to use** — the saturated colour most ABSENT from their
-room — and **grade the marker they hold up** against the scene. No separate photo/upload;
-it's automatic on the screen they already open.
+Make bar-path tracking actually work. Across ~15 sprints we hand-rolled pixel CV in
+Kotlin — HSV colour blobs (grabbed same-colour background), then NCC template matching
+(lost lock on motion blur). Every real-footage test failed. The apps that work
+([Metric](https://metric.coach), [Qwik VBT](https://apps.apple.com/us/app/qwik-vbt-velocity-bar-tracker/id1660094818),
+open-source [barbellcv](https://github.com/tlancon/barbellcv)) are all built on **OpenCV**
+and have the user **tap the plate** — no colored marker.
 
-**Target user:** anyone setting up a VBT recording who doesn't want to trial-and-error
-marker colours.
+**Target user:** a lifter who records or uploads a phone video of a lift, taps the weight
+plate once, and watches a dot track the plate cleanly through the rep, then optionally gets
+velocity numbers. No colored sticker, no lighting/colour calibration, no colour advisor.
 
-## 2. Decisions (locked via clarifying questions)
+**The core change:** swap our tracker for OpenCV's `TrackerVit` (a Vision-Transformer DNN
+tracker in the official `video` module). Tap → init tracker with a bounding box around the
+plate → per frame `tracker.update(mat) → Rect` → the Rect centre is the bar position →
+feed into the existing pipeline (`ConcentricDetector`, `SavitzkyGolayFilter`,
+`AnalyzeBarPathUseCase`). This is the "correct" version of the template matcher we tried
+to build by hand.
 
-1. **Automatic, live on the calibrate screen.** The moment the camera opens (before any
-   tap) a banner reads the scene and shows the best marker colour(s) for this spot, plus
-   which colours to avoid (already in the scene). Updates as the camera moves.
-2. **Recommend AND grade.** After the user taps their marker it's rated GOOD / OK / BAD vs
-   the scene (how crowded that colour is), so they get a clear "this clashes, switch"
-   verdict — not just an upfront hint. Advisory; never blocks recording.
-3. **Fixed palette of nameable colours.** Rank a small fixed palette (blue, purple,
-   magenta, red, orange, yellow, green, cyan) by how absent each is from the scene, and
-   name the winner(s) — easy to go find that colour on a real object.
+### Why TrackerVit specifically (verified this session)
+- **In the official Maven Central AAR.** `org.opencv:opencv` ships the main `video`
+  module, which contains `TrackerVit`, `TrackerNano`, `TrackerMIL`, `TrackerGOTURN`,
+  `TrackerDaSiamRPN`. **CSRT and KCF are NOT** — they live in `opencv_contrib` and would
+  need a painful NDK source build. Confirmed against the 4.x `org.opencv.video` javadoc.
+- **DNN tracker → far more blur/appearance-change robust** than classical CSRT, and newer.
+- **Tiny model:** `object_tracking_vittrack_2023sep.onnx` = **715 KB** (int8 variant 271 KB),
+  **Apache-2.0** (confirmed in the model's own README) → safe to bundle in `assets/`.
+- **Clean Gradle dep**, no OpenCV Manager (self-contained native libs since 4.9.0,
+  `OpenCVLoader.initLocal()`).
 
-## 3. How it works (design)
+### Acceptance criteria
+1. `.\gradlew assembleGithubDebug` builds clean with the OpenCV dependency; app launches.
+2. On a real recorded/uploaded lift, tapping the plate makes the tracked dot **follow the
+   plate down and up through the whole rep in a clean line** (the on-device self-check —
+   the whole point). No teleporting to background, survives normal motion blur.
+3. Velocity numbers come out plausible (mean concentric velocity non-zero and in a sane
+   0.1–1.5 m/s band for a working rep), using the existing `ConcentricDetector` window.
+4. Zero `" lb"` anywhere; all existing unit tests still green; new pure-logic tests pass.
+5. The colour-marker path (calibration, advisor, `MarkerColorProfile`, blob tracking) is
+   left **dormant, not deleted** this slice (reliability first; purge later).
 
-- The scene is summarised as a **saturated-hue histogram**: count only pixels above a
-  saturation AND value floor (so grey walls, black plates, beige floor, shadows don't
-  drown the signal), bucketed into hue bins (e.g. 24 bins × 15°).
-- **Recommend:** for each palette candidate, measure how crowded its hue neighbourhood is
-  in the histogram (fraction of counted pixels within ±tolerance of the candidate hue).
-  Rank ascending → the least-present colours are recommended; the most-present are the
-  "avoid" list. If the scene has almost no saturated colour at all, fall back to a sensible
-  default order (blue, purple first — rarely in an indoor scene).
-- **Grade a tapped marker:** take the sampled marker's hue, measure its neighbourhood
-  crowdedness the same way → GOOD (empty band) / OK / BAD (crowded band).
-- Both run on the downsampled frame the calibration analyzer already decodes — no extra
-  decode, cheap per frame. The histogram is smoothed over the last few frames so the
-  recommendation doesn't flicker.
+---
 
-## 4. Core features & acceptance criteria
+## 2. Commands
 
-### 4.1 Pure advisor (`MarkerColourAdvisor`, no Android dependency, unit-tested)
-- `buildHueHistogram(pixels, width, height, bins, minSaturation, minValue): IntArray` —
-  counts sufficiently-saturated/bright pixels into hue bins (uses `MarkerColorMatcher
-  .rgbToHsv`, the [0,360) hue convention shared across the pipeline).
-- `recommend(histogram): MarkerAdvice` — `MarkerAdvice(recommended: List<MarkerCandidate>,
-  avoid: List<MarkerCandidate>)`, ranked. `MarkerCandidate(name, hueDeg)` from a fixed
-  palette.
-- `grade(histogram, hueDeg): MarkerGrade` — `GOOD | OK | BAD`.
-- **AC:** a scene that is mostly green + orange recommends blue/purple and lists green &
-  orange under avoid; a hue in a crowded bin grades BAD, a hue in an empty bin grades GOOD;
-  a scene with no saturated colour returns the default recommendation without crashing.
+```powershell
+# Build (PowerShell — the rtk Bash hook rewrites ./gradlew and hangs)
+.\gradlew assembleGithubDebug
 
-### 4.2 Analyzer integration (`MarkerCalibrationAnalyzer`)
-- Accumulates a smoothed scene histogram across recent frames; emits `MarkerAdvice` every
-  frame in the existing `CalibrationFrameResult`.
-- On a tap (when it samples the marker colour), also computes and emits the tapped
-  marker's `MarkerGrade`.
-- **AC:** the recommendation appears immediately (before any tap); the grade appears right
-  after a tap and reflects the sampled colour.
+# Unit tests (pure logic only — OpenCV native can't run in JUnit)
+.\gradlew testGithubDebugUnitTest
 
-### 4.3 UI (in the existing calibrate view, `BarPathCaptureScreen`)
-- A banner above/over the preview: "Best marker here:" + coloured swatches + names for the
-  top recommendations, and a small "avoid: …" row of swatches for colours already in the
-  scene. Swatch colours drawn from each candidate's representative RGB (Compose Canvas
-  circles — no image assets, no hardcoded theme-violating colours in normal UI chrome;
-  these are data swatches, allowed).
-- After a tap, the lock-status line also shows the marker grade: "Marker: GOOD ✓" /
-  "OK" / "BAD — clashes, try blue" (colour: green/amber/red theme tokens).
-- Recommendation is advisory — START RECORDING still gates only on the stable lock, exactly
-  as today.
-
-## 5. Project structure (new / changed)
-
-```
-util/barpath/
-  MarkerColourAdvisor.kt          NEW  pure — scene histogram → recommended/avoid + grade
-  MarkerCalibrationAnalyzer.kt    EDIT accumulate scene histogram; emit advice + tap grade
-presentation/screens/barpath/
-  BarPathCaptureScreen.kt         EDIT recommendation banner + swatches + marker grade line
+# Verify version + no "lb"
+# aapt dump badging <apk> | Select-String versionCode
+# grep for " lb" across app/src must return zero
 ```
 
-`CalibrationFrameResult` gains `advice: MarkerAdvice?` and `markerGrade: MarkerGrade?`.
-No Room change, no new dependency, no new permission.
+Release per CLAUDE.md `## Release rules`: bump `versionCode`+`versionName` in
+`app/build.gradle.kts` **before** the final build; `gh release create` + `upload --clobber`
+the `github`-flavor debug APK.
 
-## 6. Code style / constraints
-- Compose only. Kotlin only. Metric units unaffected.
-- `MarkerColourAdvisor` is pure (no Android imports), unit-tested; the analyzer/Compose
-  layer stays the untested-on-device shell — same split as the rest of VBT.
-- Reuse `MarkerColorMatcher.rgbToHsv` — do not introduce a second hue convention.
+---
 
-## 7. Testing strategy
-- `MarkerColourAdvisorTest`: histogram counts only saturated/bright pixels; a green+orange
-  scene recommends blue/purple and avoids green/orange; grade BAD in a crowded band, GOOD
-  in an empty band; empty/desaturated scene → safe default, no crash; hue-wrap handled
-  (red near 0/360 grades against both ends).
-- Build: `.\gradlew testGithubDebugUnitTest` + `.\gradlew assembleGithubDebug` green; no
-  `" lb"` in `app/src` Kotlin/strings.
-- Device (owed): open calibrate → banner recommends a colour absent from the room → a
-  clashing marker grades BAD, a recommended-colour marker grades GOOD and locks cleanly.
+## 3. Project structure & scope
 
-## 8. Boundaries
+### New dependency (version catalog only — never hardcode in build.gradle.kts)
+```toml
+# gradle/libs.versions.toml
+opencv = "4.11.0"   # pin the latest verified 4.x on Maven Central at implementation time
+[libraries]
+opencv = { module = "org.opencv:opencv", version.ref = "opencv" }
+```
+```kotlin
+// app/build.gradle.kts
+implementation(libs.opencv)
+```
+- **APK size:** the AAR bundles native `.so` for arm64-v8a / armeabi-v7a / x86 / x86_64
+  (~30–40 MB across all ABIs). Mitigation: `ndk { abiFilters += listOf("arm64-v8a",
+  "armeabi-v7a") }` (drop x86/x86_64 — no real phone needs them) roughly halves it. Real,
+  accepted tradeoff — this is the cost of tracking that works.
+- Third-party AAR is fine under "Kotlin only, no Java" — that rule governs *our* source,
+  not a library.
 
-**Always:** keep the advisor pure + unit-tested; keep the recommendation advisory (never a
-gate); reuse the shared hue conversion.
+### New files
+```
+app/src/main/assets/vittrack/object_tracking_vittrack_2023sep.onnx   ← 715KB, Apache-2.0
+app/src/main/java/com/saiyanstrong/util/barpath/OpenCvInitializer.kt ← one-time initLocal() guard
+app/src/main/java/com/saiyanstrong/util/barpath/VitBarTracker.kt     ← wraps TrackerVit: init(box) + update(bitmap)->Rect?
+app/src/test/java/com/saiyanstrong/util/barpath/VitBarTrackerSupportTest.kt ← pure helpers only
+```
 
-**Ask first:** persisting a "preferred marker colour" across sessions (out of scope now —
-the scene can change); auto-picking/forcing a colour; any real ML.
+### Changed files
+- `BarPathFrameTracker.kt` — new `trackWithVit(videoPath, startMs, initBoxVideoPx, onSample, onProgress)`:
+  same frame-extraction loop / `startMs` / `MAX_SAMPLES` cap / `onSample` streaming as
+  `trackMarker`, but per frame: `Bitmap → Mat (Utils.bitmapToMat)` → `vitTracker.update(mat)`
+  → `Rect` → centre → `BarPathSample` in **video px**. On `update` returning failure/low
+  confidence, **hold** the last position (never teleport) — same guard philosophy as today.
+  Emits samples the existing pipeline already consumes unchanged.
+- `BarPathCaptureViewModel.kt` — `onMarkTap(videoX, videoY, atMs)` seeds an **init box**
+  (a square ~plate-sized around the tap, e.g. `min(w,h)*0.18`) and calls `trackWithVit`
+  instead of `trackMarker`. No colour sampling. `calibratedProfile` path unused here.
+- `BarPathCaptureScreen.kt` — the live player prompt becomes "scrub to the lift, then tap
+  the **plate**"; retry copy points at tapping a clearly-visible plate. The colour
+  calibration UI (`CalibrationOverlay`/`CalibrationControls`/`CalibrationAdviceBanner`)
+  is **not shown** in this flow (left in the file, dormant).
+- `gradle/libs.versions.toml`, `app/build.gradle.kts` — dep + abiFilters + version bump.
 
-**Never:** block recording on a BAD grade or a clash; add a permission; introduce a second
-hue/HSV convention.
+### Optional (flag, don't build unless it falls out cleanly): auto-scale from the plate box
+The tracked `Rect` width ≈ the plate's on-screen diameter. A standard competition plate is
+**0.45 m**. So `pixelsPerMeter ≈ rectWidthPx / 0.45` — a free scale with **no two-tap step**.
+Pure helper `plateScalePpm(rectWidthPx, plateDiameterM = 0.45)`, unit-tested. If it reads
+well on device, it replaces the two-plate-edge tap; keep the manual two-tap as fallback for
+non-standard plates. **Decision deferred to a real-device look** — ship tap-tracking first.
 
-## 9. Known gaps / deferred
-- Recommends from a fixed nameable palette, not an exact swatch (per decision — easier to
-  match to a real object).
-- Doesn't know what marker objects the user actually owns — it names a colour, not a
-  product.
-- Not device-validated this session (no emulator); the live banner + grade are themselves
-  the on-device check.
+---
+
+## 4. Code style
+
+- Kotlin only, Jetpack Compose only, Clean Architecture, StateFlow, Hilt — unchanged.
+- **Pure-core / thin-Android-shell split** (the project's established pattern): OpenCV calls
+  (`TrackerVit`, `Utils.bitmapToMat`, `initLocal`) live in the untestable shell alongside
+  CameraX/ExoPlayer. Anything pure (init-box geometry from a tap, Rect→centre, plate-scale,
+  bounds clamping) is a top-level `internal fun` and **is** unit-tested.
+- No hardcoded colors; metric units everywhere (`_kg`, m/s, meters).
+- Guard every native boundary in `runCatching`/try-catch — a tracker or decode failure
+  routes to the existing ERROR surface, never crashes (same discipline as v0.42.1/v0.51.x).
+
+---
+
+## 5. Testing strategy
+
+- **Pure unit tests (JUnit, no Robolectric):** init-box-from-tap geometry (correct size,
+  clamped to frame bounds when the tap is near an edge), `Rect.center()` → sample, plate
+  scale math, hold-on-failure sample continuity. These are the only genuinely testable
+  pieces — the tracker itself needs the OpenCV native runtime.
+- **OpenCV/`TrackerVit`/CameraX/ExoPlayer** stay in the unit-untestable shell, verified only
+  on device — consistent with every prior VBT sprint.
+- **The real acceptance test is on-device and self-verifying:** the tracked dot visibly
+  following the plate in the live player *is* the proof the tracker works. A jagged or stuck
+  dot is an obvious fail signal before any number is trusted.
+
+---
+
+## 6. Boundaries
+
+**Always**
+- Version catalog for the OpenCV version; `abiFilters` to arm64+armv7 to contain APK size.
+- Bundle the ONNX from OpenCV's model zoo (Apache-2.0) in `assets/`; attribute it in the
+  progress-log entry.
+- Guard `OpenCVLoader.initLocal()` and every native call; fail soft to the ERROR screen.
+- Keep `ConcentricDetector` (the v0.51.0 fix for the whole-clip mean≈0 bug) in the path.
+- Update CLAUDE.md progress log + bump both versions on release.
+
+**Ask first**
+- Deleting the dormant colour/marker/live-session/template files (a separate cleanup slice).
+- Adding a *live* on-preview tracking overlay (the fragile 3-stream CameraX path — deferred).
+- Switching the two-tap scale to auto-plate-scale as the default (needs a device look first).
+- Any second dependency (e.g. an ONNX runtime) — TrackerVit runs inside OpenCV's own DNN
+  module, so **no** extra runtime is needed; flag if that assumption breaks at build time.
+
+**Never**
+- Rebuild OpenCV contrib from source / ship CSRT via an NDK build (defeats the whole point
+  — the clean Maven AAR + TrackerVit is why this is viable).
+- Commit secrets/keystores. Introduce any `" lb"`. Use XML layouts or Java. Hardcode colors.
+- Bundle a non-Apache/non-permissively-licensed model.
+
+---
+
+## 7. Known risks (honest)
+
+- **APK size** grows ~15–20 MB (arm64+armv7 native libs). Real, accepted.
+- **TrackerVit robustness** on a fast, blurred plate is far better than our NCC but not
+  magic; a very blurry / occluded plate can still lose lock (mitigated by hold-on-failure).
+  Unknown until real footage — but this is the method the working apps use.
+- **Native init on old devices** — `initLocal()` must succeed; guarded.
+- **Not device-verified this session** (no emulator) — same standing caveat as all VBT work.
+  The on-device dot-follows-plate check is the acceptance gate.

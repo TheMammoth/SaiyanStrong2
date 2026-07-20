@@ -3005,6 +3005,57 @@ _(Claude Code appends here after each completed task)_
   KNOWN GAP: unverified on a real device this session — the live banner + grade are themselves the
   on-device check. For the user's actual room this recommends blue/purple and flags green/pink/
   orange, matching the manual call made from their screenshots. versionCode 85, versionName 0.61.0.
+- [x] Sprint — VBT tracking rebuilt on OpenCV TrackerVit, tap the plate (v0.62.0), per SPEC.md
+  /spec round ("research video tracking, find the best feature, implement it — the one we have isn't
+  working"). After ~15 sprints of hand-rolled pixel CV (HSV colour blobs → NCC template matching →
+  back to colour + calibration + advisor) that never worked on real footage, web research
+  (Metric, Qwik VBT, open-source barbellcv / VBT-Barbell-Tracker) confirmed the working phone-VBT
+  apps are all built on **OpenCV** and have the user **tap the plate** — no colored marker. Three
+  clarifying questions, all approved: add OpenCV, tap the plate (no marker), keep record-then-analyze.
+  (1) **Dependency, verified against the docs before committing to it:** OpenCV's classical CSRT/KCF
+  trackers are NOT in the official Maven Central AAR — they live in `opencv_contrib` (a painful NDK
+  source build). But the official `org.opencv:opencv` main `video` module DOES ship modern **DNN**
+  trackers (`TrackerVit`, `TrackerNano`, `TrackerMIL`, `TrackerGOTURN`, `TrackerDaSiamRPN`) —
+  confirmed from the 4.x `org.opencv.video` javadoc. Chose **`TrackerVit`** (Vision-Transformer DNN
+  single-object tracker): newer and more blur/appearance-robust than CSRT, in the clean Maven AAR
+  (no source build), tiny model (`object_tracking_vittrack_2023sep.onnx` = 715 KB, **Apache-2.0**,
+  from OpenCV's model zoo / HuggingFace mirror — bundled in `assets/vittrack/`). Added
+  `org.opencv:opencv:4.11.0` via the version catalog; `ndk.abiFilters` = arm64-v8a + armeabi-v7a
+  only (drops x86/x86_64) to contain the native-lib weight (~22 MB arm64 + ~16 MB armv7 packaged;
+  release ABI-split delivers ~22 MB/device). Third-party AAR is fine under "Kotlin only, no Java" —
+  that rule governs our source, not a library.
+  (2) **The tracker plumbing:** `OpenCvInitializer` (object) — one-time guarded `OpenCVLoader
+  .initLocal()` (self-contained native libs since 4.9.0, no OpenCV Manager) + copies the ONNX out
+  of assets into filesDir once (TrackerVit_Params.set_net needs a path). `VitBarTracker` — a thin,
+  stateful wrapper around `TrackerVit`: `create(modelPath)`, `init(frame, box)`, `update(frame) →
+  TrackedBox?` (RGBA→BGR via `Utils.bitmapToMat`/`Imgproc.cvtColor`; returns null when
+  `trackingScore < 0.3` so the caller HOLDS the last position instead of teleporting — the DNN's own
+  confidence replacing the hand-rolled nearest-neighbour guard). Every native call guarded; OpenCV
+  failing to init degrades to "couldn't track", never crashes.
+  (3) **`BarPathFrameTracker.trackWithVit`** (new) — injects `@ApplicationContext Context`, reuses
+  the exact frame-extraction infrastructure (`readTiming` + `driveRetrieverFrames` over the
+  `[startMs, duration]` grid, capped at `MAX_SAMPLES=150`), but per frame: frame 1 inits the tracker
+  with the tap's init box and emits its centre; each later frame runs `update` → box centre →
+  `BarPathSample` in video px; a lost frame re-emits the last position. Streams via `onSample` so the
+  live-player dot follows as tracking arrives — everything downstream (`ConcentricDetector`,
+  `SavitzkyGolayFilter`, `AnalyzeBarPathUseCase`, the replay overlay, rep card) is **unchanged**.
+  `BarPathCaptureViewModel.onMarkTap` seeds a `VitBarTrackerSupport.initBoxFromTap` box and calls
+  `trackWithVit` — no colour sample, no calibration; `trackMarker`/`trackTemplate`/`trackMarkerPair`
+  + the whole colour/marker/calibration/advisor stack left **dormant, not deleted** (reliability
+  first; purge later, per spec §6). Player prompt now "tap a weight plate on the bar".
+  (4) **Pure helpers + tests:** `VitBarTrackerSupport` (Android/OpenCV-free so it's unit-testable —
+  `BarInitBox`, `initBoxFromTap` centred+clamped-inside-frame, `boxCenter`, and the optional
+  `plateScalePpm` = boxWidth/0.45 m auto-scale, wired for a later device look but not yet replacing
+  the two-tap scale). 8 unit tests (`VitBarTrackerSupportTest`) — all green; full existing suite +
+  `assembleGithubDebug` green, zero `" lb"`, APK badged versionCode 86 before the release build.
+  BONUS this unlocks: the live player watching the dot follow the plate is finally the
+  tracking-verification tool the feature has needed since Sprint 26 — mark once, watch it track.
+  KNOWN GAP: `TrackerVit`/`Utils`/CameraX are the untestable shell — only the pure geometry is
+  unit-tested. Not run against real footage this session (no device) — but this is the method the
+  working apps use, and the on-device dot-follows-plate check is the acceptance gate. First-pass
+  constants (`initBox` = 0.18×shorter-side, `MIN_SCORE` = 0.3) tunable after a real look. Deferred:
+  deleting the dormant colour/marker files; auto-plate-scale as default; a live on-preview overlay.
+  versionCode 86, versionName 0.62.0.
 
 ## Release rules
 

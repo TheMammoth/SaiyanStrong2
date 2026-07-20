@@ -103,7 +103,7 @@ fun BarPathTrackPlaybackContent(
     Column(Modifier.fillMaxSize().background(MatteBlack)) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(
-                if (isMarked) "TRACKING — watch the dot follow the bar" else "Scrub to the lift, then tap the bright marker on the bar",
+                if (isMarked) "TRACKING — watch the dot follow the plate" else "Scrub to the lift, then tap a weight plate on the bar",
                 color = PowerAmber, fontSize = 12.sp, fontWeight = FontWeight.Black, letterSpacing = 1.sp,
                 modifier = Modifier.weight(1f)
             )

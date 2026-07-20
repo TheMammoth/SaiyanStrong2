@@ -22,6 +22,7 @@ import com.saiyanstrong.util.barpath.BarPathFrameTracker
 import com.saiyanstrong.util.barpath.BarPathVideoImporter
 import com.saiyanstrong.util.barpath.LiveFrameResult
 import com.saiyanstrong.util.barpath.MarkerColorProfile
+import com.saiyanstrong.util.barpath.VitBarTrackerSupport
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -416,11 +417,11 @@ class BarPathCaptureViewModel @Inject constructor(
     }
 
     /**
-     * PLAYER — the user tapped the bright marker on the bar at playback time [atMs]. Sample the
-     * marker's colour from that exact frame/point and start streaming COLOUR tracking
-     * ([BarPathFrameTracker.trackMarker]) from [atMs] to the end, seeded with the tap so it locks
-     * onto the marker the user tapped (not the largest same-colour blob). The dot follows as samples
-     * arrive. Cancels any prior track. [videoX]/[videoY] are in full-resolution video-pixel space.
+     * PLAYER — the user tapped the weight plate on the bar at playback time [atMs]. Seed an init box
+     * around the tap and start streaming OpenCV TrackerVit tracking
+     * ([BarPathFrameTracker.trackWithVit]) from [atMs] to the end — no colour, no calibration. The
+     * dot follows as samples arrive. Cancels any prior track. [videoX]/[videoY] are in
+     * full-resolution video-pixel space.
      */
     fun onMarkTap(videoX: Float, videoY: Float, atMs: Long) {
         val state = _uiState.value
@@ -430,29 +431,19 @@ class BarPathCaptureViewModel @Inject constructor(
         _uiState.update { it.copy(markMs = atMs, markerSamplePoint = TapPoint(videoX, videoY), errorMessage = null) }
 
         trackJob = viewModelScope.launch(Dispatchers.Default) {
-            // Calibrated flow: the color was already trained pre-record under the user's real
-            // lighting — the tap is only the start position/time seed, no color sampling off a
-            // possibly-blurred playback frame. Gallery import (no calibration) samples on tap.
-            val profile = calibratedProfile ?: run {
-                val frame = runCatching { barPathFrameTracker.extractFrameAt(videoPath, atMs) }.getOrNull()
-                sampleMarkerColor(frame, TapPoint(videoX, videoY))
-            }
-            if (profile == null) {
-                _uiState.update { it.copy(errorMessage = "Couldn't read the marker there — tap the bright marker on the bar.") }
+            val box = VitBarTrackerSupport.initBoxFromTap(
+                videoX.toDouble(), videoY.toDouble(), state.videoWidthPx, state.videoHeightPx
+            )
+            if (box == null) {
+                _uiState.update { it.copy(errorMessage = "Couldn't read the video frame — try re-marking.") }
                 return@launch
             }
 
             val samples = runCatching {
-                barPathFrameTracker.trackMarker(
+                barPathFrameTracker.trackWithVit(
                     videoPath = videoPath,
-                    colorProfile = profile,
-                    gyroTimeline = state.gyroTimeline,
-                    focalMm = state.focalMm,
-                    sensorWidthMm = state.sensorWidthMm,
-                    videoStartUptimeNs = state.videoStartUptimeNs,
+                    initBox = box,
                     startMs = atMs,
-                    initialVideoX = videoX.toDouble(),
-                    initialVideoY = videoY.toDouble(),
                     onSample = { s -> _liveSamples.update { it + s } }
                 )
             }.getOrElse { emptyList() }
@@ -461,7 +452,7 @@ class BarPathCaptureViewModel @Inject constructor(
             // the player so they can re-mark rather than bouncing to a dead-end error screen.
             if (samples.size < 2) {
                 _uiState.update {
-                    it.copy(errorMessage = "Couldn't track the marker. Use a BIGGER marker (a fist-sized patch or a tape band on the sleeve) in a colour that appears nowhere else in the gym — bright pink, magenta, or orange work best. Avoid green/yellow.")
+                    it.copy(errorMessage = "Couldn't track the plate. Scrub to where the bar is clearly visible, then tap the centre of a weight plate.")
                 }
             } else {
                 _uiState.update { it.copy(trackedSamples = samples) }

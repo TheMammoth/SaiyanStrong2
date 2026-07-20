@@ -39,8 +39,14 @@ android {
         applicationId = "com.saiyanstrong"
         minSdk = 26
         targetSdk = 35
-        versionCode = 85
-        versionName = "0.61.0"
+        versionCode = 86
+        versionName = "0.62.0"
+
+        // OpenCV ships native .so per ABI; drop x86/x86_64 (no real phone needs them) to keep the
+        // added APK weight to arm64 + armv7 only — halves the size cost of the tracking library.
+        ndk {
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a")
+        }
 
         buildConfigField("String", "SUPABASE_URL", "\"${localProps["supabase.url"] ?: ""}\"")
         buildConfigField("String", "SUPABASE_ANON_KEY", "\"${localProps["supabase.anonKey"] ?: ""}\"")
@@ -188,6 +194,10 @@ dependencies {
 
     implementation(libs.media3.exoplayer)
     implementation(libs.media3.ui)
+
+    // OpenCV (official Maven Central AAR) — the main `video` module ships TrackerVit, the
+    // DNN single-object tracker that replaced the hand-rolled colour/blob/NCC tracking.
+    implementation(libs.opencv)
 
     testImplementation(libs.junit)
 }

@@ -1,11 +1,13 @@
 package com.saiyanstrong.util.barpath
 
+import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Color
 import android.media.MediaMetadataRetriever
 import com.saiyanstrong.domain.model.BarPathSample
 import com.saiyanstrong.domain.util.GyroTimeline
 import com.saiyanstrong.domain.util.ShakeCompensator
+import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import kotlin.math.hypot
 
@@ -117,8 +119,66 @@ internal fun chooseTrackedBlob(blobs: List<Blob>, previousCentroid: Pair<Double,
  * nearest-neighbor tracking across frames ([chooseTrackedBlob]).
  */
 class BarPathFrameTracker @Inject constructor(
+    @ApplicationContext private val context: Context,
     private val barPathVideoDecoder: BarPathVideoDecoder
 ) {
+
+    /**
+     * Tracks the tapped object (the weight plate) through the video with OpenCV's [TrackerVit] DNN
+     * tracker — the replacement for the hand-rolled colour/blob/template tracking. Extracts frames
+     * the same way [trackMarker] does ([driveRetrieverFrames] over the [startMs, duration] grid,
+     * capped at [MAX_SAMPLES]), but per frame runs the tracker instead of a pixel scan:
+     *  - frame 1: init the tracker with [initBox] (in full-res video px, from the tap); emit its centre.
+     *  - each later frame: [VitBarTracker.update] → box centre → [BarPathSample] in video px.
+     *  - a low-confidence frame HOLDS the last position (re-emits it) rather than teleporting.
+     * Streams each sample via [onSample] so the live-player dot follows as tracking progresses.
+     * Returns an empty list (caller shows a retry message) if OpenCV can't init or the model is
+     * missing — never throws for those.
+     */
+    fun trackWithVit(
+        videoPath: String,
+        initBox: BarInitBox,
+        startMs: Long = 0L,
+        onProgress: ((Float) -> Unit)? = null,
+        onSample: ((BarPathSample) -> Unit)? = null
+    ): List<BarPathSample> {
+        if (!OpenCvInitializer.ensureInitialized()) return emptyList()
+        val modelPath = OpenCvInitializer.vitModelPath(context) ?: return emptyList()
+        val tracker = VitBarTracker.create(modelPath) ?: return emptyList()
+
+        val (rawIntervalMs, durationMs) = readTiming(videoPath, null)
+        if (durationMs <= 0L) return emptyList()
+        val trackedSpanMs = (durationMs - startMs).coerceAtLeast(1L)
+        val intervalMs = maxOf(rawIntervalMs, trackedSpanMs / MAX_SAMPLES).coerceAtLeast(MIN_SAMPLE_INTERVAL_MS)
+        val fromMs = startMs.coerceIn(0L, durationMs)
+
+        val samples = mutableListOf<BarPathSample>()
+        var initialized = false
+        driveRetrieverFrames(videoPath, intervalMs, fromMs, durationMs) { frame, timestampMs ->
+            if (trackedSpanMs > 0L) {
+                onProgress?.invoke(((timestampMs - fromMs).toFloat() / trackedSpanMs).coerceIn(0f, 1f))
+            }
+            val box: TrackedBox? = if (!initialized) {
+                runCatching { tracker.init(frame, initBox) }.onFailure { return@driveRetrieverFrames }
+                initialized = true
+                TrackedBox(initBox.x, initBox.y, initBox.width, initBox.height)
+            } else {
+                tracker.update(frame)
+            }
+            val sample = if (box != null) {
+                val (cx, cy) = VitBarTrackerSupport.boxCenter(box.x, box.y, box.width, box.height)
+                BarPathSample(timestampMs, cx, cy, box.width.toDouble())
+            } else {
+                // Lost this frame — hold the last position rather than teleport (never seed 0,0).
+                samples.lastOrNull()?.copy(timestampMs = timestampMs)
+            }
+            if (sample != null) {
+                samples += sample
+                onSample?.invoke(sample)
+            }
+        }
+        return samples
+    }
 
     /**
      * The video's DISPLAY dimensions (width, height) — rotation-applied, so they match both the
