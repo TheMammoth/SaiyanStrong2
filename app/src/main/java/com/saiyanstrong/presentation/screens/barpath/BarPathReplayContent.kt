@@ -170,29 +170,33 @@ private fun PathOverlay(
     val stickingIndex = remember(frames) { frames.indices.minByOrNull { frames[it].velocityMps } ?: 0 }
     val startIndex = remember(frames) { frames.indexOfFirst { it.velocityMps > 0.1 }.coerceAtLeast(0) }
     val endIndex = remember(frames) { frames.indexOfLast { it.velocityMps > 0.1 }.let { if (it < 0) frames.lastIndex else it } }
+    // Smoothed positions for the DRAWN path (raw tracked positions are jittery). Index-aligned to
+    // `frames`; display only — velocity (peak/sticking/colour) still comes from the SG-smoothed
+    // analysis numbers, unchanged.
+    val pts = remember(frames) { smoothedFramePoints(frames) }
 
     Box(
         modifier
             // LAYER 1 (ghost) + LAYER 3 (annotations): static, cached.
             .drawWithCache {
                 val rect = computeFittedVideoRect(size.width, size.height, videoWidthPx, videoHeightPx)
-                fun px(f: TrackedFrame) = Offset(
-                    rect.left + (f.xPx.toFloat() / videoWidthPx) * rect.width,
-                    rect.top + (f.yPx.toFloat() / videoHeightPx) * rect.height
+                fun px(i: Int) = Offset(
+                    rect.left + (pts[i].first.toFloat() / videoWidthPx) * rect.width,
+                    rect.top + (pts[i].second.toFloat() / videoHeightPx) * rect.height
                 )
                 val ghost = Path().apply {
-                    frames.forEachIndexed { i, f ->
-                        val p = px(f)
+                    pts.indices.forEach { i ->
+                        val p = px(i)
                         if (i == 0) moveTo(p.x, p.y) else lineTo(p.x, p.y)
                     }
                 }
                 onDrawBehind {
                     drawPath(ghost, Color.White.copy(alpha = 0.6f), style = Stroke(width = 2.dp.toPx()))
                     // Peak (green) + sticking point (red) markers with labels.
-                    val peak = px(frames[peakIndex]); val sticking = px(frames[stickingIndex])
+                    val peak = px(peakIndex); val sticking = px(stickingIndex)
                     drawCircle(NeonGreen, radius = 12.dp.toPx() / 2, center = peak)
                     drawCircle(DangerRed, radius = 12.dp.toPx() / 2, center = sticking)
-                    val startP = px(frames[startIndex]); val endP = px(frames[endIndex])
+                    val startP = px(startIndex); val endP = px(endIndex)
                     drawTriangle(startP, 8.dp.toPx(), up = true, color = Color.White)
                     drawTriangle(endP, 8.dp.toPx(), up = false, color = Color.White)
                     drawContext.canvas.nativeCanvas.apply {
@@ -206,25 +210,42 @@ private fun PathOverlay(
     // LAYER 2 (velocity-coloured progress) + LAYER 4 (cursor): dynamic, redraw every frame.
     Canvas(modifier) {
         val rect = computeFittedVideoRect(size.width, size.height, videoWidthPx, videoHeightPx)
-        fun px(f: TrackedFrame) = Offset(
-            rect.left + (f.xPx.toFloat() / videoWidthPx) * rect.width,
-            rect.top + (f.yPx.toFloat() / videoHeightPx) * rect.height
+        fun px(i: Int) = Offset(
+            rect.left + (pts[i].first.toFloat() / videoWidthPx) * rect.width,
+            rect.top + (pts[i].second.toFloat() / videoHeightPx) * rect.height
         )
         for (i in 1..currentIndex) {
             drawLine(
                 color = Color(velocityColorArgb(frames[i].velocityMps.toFloat())),
-                start = px(frames[i - 1]), end = px(frames[i]),
+                start = px(i - 1), end = px(i),
                 strokeWidth = 8.dp.toPx(), cap = StrokeCap.Round
             )
         }
-        frames.getOrNull(currentIndex)?.let { f ->
-            val c = px(f)
+        if (currentIndex in pts.indices) {
+            val c = px(currentIndex)
             drawCircle(Color.White, radius = 10.dp.toPx() / 2, center = c)
             drawCircle(
-                Color(velocityColorArgb(f.velocityMps.toFloat())),
+                Color(velocityColorArgb(frames[currentIndex].velocityMps.toFloat())),
                 radius = 10.dp.toPx() / 2, center = c, style = Stroke(width = 3.dp.toPx())
             )
         }
+    }
+}
+
+/**
+ * Moving-average smoothing of tracked positions for a clean DRAWN replay path — raw per-frame
+ * tracker positions are jittery. Index-aligned to [frames]; display only (the analysis smooths the
+ * raw samples separately for the velocity numbers). A short series is returned unchanged. Pure.
+ */
+internal fun smoothedFramePoints(frames: List<TrackedFrame>, window: Int = 9): List<Pair<Double, Double>> {
+    if (frames.size < 3 || window <= 1) return frames.map { it.xPx to it.yPx }
+    val half = window / 2
+    return frames.indices.map { i ->
+        var sx = 0.0; var sy = 0.0; var n = 0
+        for (j in (i - half)..(i + half)) {
+            if (j in frames.indices) { sx += frames[j].xPx; sy += frames[j].yPx; n++ }
+        }
+        (sx / n) to (sy / n)
     }
 }
 

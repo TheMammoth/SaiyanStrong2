@@ -72,6 +72,10 @@ data class BarPathCaptureUiState(
     /** True while importing/reading the video before the calibration frame is ready — the
      * recording/picker UI otherwise gives no feedback during this gap. */
     val isPreparingVideo: Boolean = false,
+    /** True while the full tracking pass runs after the user confirms the start box — the player
+     * pauses and shows a determinate progress bar, then plays the complete path (no replay-to-
+     * catch-up). */
+    val isTracking: Boolean = false,
     /** 0f..1f progress of the marker-tracking pass (frame extraction is slow — without this the
      * PROCESSING screen looks frozen). Only meaningful during the track step. */
     val trackingProgress: Float = 0f,
@@ -417,25 +421,30 @@ class BarPathCaptureViewModel @Inject constructor(
     }
 
     /**
-     * PLAYER — the user tapped the weight plate on the bar at playback time [atMs]. Seed an init box
-     * around the tap and start streaming OpenCV TrackerVit tracking
-     * ([BarPathFrameTracker.trackWithVit]) from [atMs] to the end — no colour, no calibration. The
-     * dot follows as samples arrive. Cancels any prior track. [videoX]/[videoY] are in
-     * full-resolution video-pixel space.
+     * PLAYER — the user placed the start box on the plate ([centerX]/[centerY]/[sidePx] in
+     * full-resolution video-pixel space) and pressed TRACK at playback time [atMs]. Runs the WHOLE
+     * OpenCV TrackerVit pass once ([BarPathFrameTracker.trackWithVit]) from [atMs] to the end,
+     * reporting determinate progress; the player pauses on a progress bar, then plays the complete
+     * path. No colour, no calibration. Cancels any prior track.
      */
-    fun onMarkTap(videoX: Float, videoY: Float, atMs: Long) {
+    fun onConfirmTrack(centerX: Float, centerY: Float, sidePx: Float, atMs: Long) {
         val state = _uiState.value
         val videoPath = state.videoPath ?: return
         trackJob?.cancel()
         _liveSamples.value = emptyList()
-        _uiState.update { it.copy(markMs = atMs, markerSamplePoint = TapPoint(videoX, videoY), errorMessage = null) }
+        _uiState.update {
+            it.copy(
+                markMs = atMs, markerSamplePoint = TapPoint(centerX, centerY),
+                isTracking = true, trackingProgress = 0f, trackedSamples = emptyList(), errorMessage = null
+            )
+        }
 
         trackJob = viewModelScope.launch(Dispatchers.Default) {
-            val box = VitBarTrackerSupport.initBoxFromTap(
-                videoX.toDouble(), videoY.toDouble(), state.videoWidthPx, state.videoHeightPx
+            val box = VitBarTrackerSupport.initBox(
+                centerX.toDouble(), centerY.toDouble(), sidePx.toInt(), state.videoWidthPx, state.videoHeightPx
             )
             if (box == null) {
-                _uiState.update { it.copy(errorMessage = "Couldn't read the video frame — try re-marking.") }
+                _uiState.update { it.copy(isTracking = false, errorMessage = "Couldn't read the video frame — try re-marking.") }
                 return@launch
             }
 
@@ -444,28 +453,32 @@ class BarPathCaptureViewModel @Inject constructor(
                     videoPath = videoPath,
                     initBox = box,
                     startMs = atMs,
+                    onProgress = { p -> _uiState.update { it.copy(trackingProgress = p) } },
                     onSample = { s -> _liveSamples.update { it + s } }
                 )
             }.getOrElse { emptyList() }
 
-            // Final list (also what the analysis reuses). If nothing tracked, tell the user; stay on
-            // the player so they can re-mark rather than bouncing to a dead-end error screen.
+            // If nothing tracked, tell the user; stay on the player so they can re-mark rather than
+            // bouncing to a dead-end error screen.
             if (samples.size < 2) {
                 _uiState.update {
-                    it.copy(errorMessage = "Couldn't track the plate. Scrub to where the bar is clearly visible, then tap the centre of a weight plate.")
+                    it.copy(isTracking = false, errorMessage = "Couldn't track the plate. Re-mark and frame the plate snugly inside the box.")
                 }
             } else {
-                _uiState.update { it.copy(trackedSamples = samples) }
+                _uiState.update { it.copy(isTracking = false, trackedSamples = samples) }
             }
         }
     }
 
-    /** RE-MARK — drop the current mark/track so the next tap re-samples from scratch. */
+    /** RE-MARK — drop the current mark/track so the user can re-place the start box from scratch. */
     fun onReMark() {
         trackJob?.cancel()
         _liveSamples.value = emptyList()
         _uiState.update {
-            it.copy(markMs = null, colorProfile = null, markerSamplePoint = null, trackedSamples = emptyList(), errorMessage = null)
+            it.copy(
+                markMs = null, colorProfile = null, markerSamplePoint = null, trackedSamples = emptyList(),
+                isTracking = false, trackingProgress = 0f, errorMessage = null
+            )
         }
     }
 

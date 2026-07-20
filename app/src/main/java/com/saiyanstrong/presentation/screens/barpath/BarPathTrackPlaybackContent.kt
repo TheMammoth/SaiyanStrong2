@@ -5,6 +5,7 @@ import androidx.annotation.OptIn
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -12,6 +13,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -23,9 +25,12 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.foundation.layout.size
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -69,8 +74,10 @@ fun BarPathTrackPlaybackContent(
     videoWidthPx: Int,
     videoHeightPx: Int,
     isMarked: Boolean,
+    isTracking: Boolean,
+    trackingProgress: Float,
     errorMessage: String?,
-    onMarkTap: (videoX: Float, videoY: Float, atMs: Long) -> Unit,
+    onConfirmTrack: (centerX: Float, centerY: Float, sidePx: Float, atMs: Long) -> Unit,
     onReMark: () -> Unit,
     onGetVelocityNumbers: () -> Unit
 ) {
@@ -98,17 +105,39 @@ fun BarPathTrackPlaybackContent(
         }
     }
 
-    var boxSize by remember { mutableStateOf(androidx.compose.ui.geometry.Size.Zero) }
+    var boxSize by remember { mutableStateOf(Size.Zero) }
+
+    // The adjustable start box, in VIDEO-pixel space (survives container resize; maps straight to the
+    // tracker). Null until the user taps to drop it. `placedAtMs` is the playback time it was placed
+    // at — tracking starts there. Cleared on RE-MARK (isMarked/isTracking both false).
+    var pendingBox by remember { mutableStateOf<PendingBox?>(null) }
+    var placedAtMs by remember { mutableLongStateOf(0L) }
+    val placing = !isMarked && !isTracking
+
+    // On tracking completion, play the finished path from the mark point.
+    LaunchedEffect(isMarked, samples.size) {
+        if (isMarked && samples.size >= 2) {
+            exoPlayer.seekTo(samples.first().timestampMs)
+            exoPlayer.play()
+        }
+    }
 
     Column(Modifier.fillMaxSize().background(MatteBlack)) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(
-                if (isMarked) "TRACKING — watch the dot follow the plate" else "Scrub to the lift, then tap a weight plate on the bar",
+                when {
+                    isTracking -> "Tracking the plate…"
+                    isMarked -> "TRACKING — watch the dot follow the plate"
+                    pendingBox != null -> "Drag the box onto the plate, pinch to size it, then TRACK"
+                    else -> "Scrub to the lift, then tap a weight plate on the bar"
+                },
                 color = PowerAmber, fontSize = 12.sp, fontWeight = FontWeight.Black, letterSpacing = 1.sp,
                 modifier = Modifier.weight(1f)
             )
             if (isMarked) {
-                TextButton(onClick = onReMark) { Text("RE-MARK", color = NeonGreen, fontWeight = FontWeight.Black, fontSize = 12.sp) }
+                TextButton(onClick = { pendingBox = null; onReMark() }) {
+                    Text("RE-MARK", color = NeonGreen, fontWeight = FontWeight.Black, fontSize = 12.sp)
+                }
             }
         }
 
@@ -116,21 +145,40 @@ fun BarPathTrackPlaybackContent(
             Modifier
                 .fillMaxWidth()
                 .weight(1f)
-                .onSizeChanged { boxSize = androidx.compose.ui.geometry.Size(it.width.toFloat(), it.height.toFloat()) }
-                .pointerInput(videoWidthPx, videoHeightPx) {
+                .onSizeChanged { boxSize = Size(it.width.toFloat(), it.height.toFloat()) }
+                // Tap: drop / reposition the start box (only while placing).
+                .pointerInput(videoWidthPx, videoHeightPx, placing) {
+                    if (!placing) return@pointerInput
                     detectTapGestures { offset ->
                         val videoPx = screenToVideoPx(
                             offset.x, offset.y, boxSize.width, boxSize.height, videoWidthPx, videoHeightPx
                         ) ?: return@detectTapGestures
                         exoPlayer.pause()
-                        onMarkTap(videoPx.first, videoPx.second, exoPlayer.currentPosition)
+                        placedAtMs = exoPlayer.currentPosition
+                        val defaultSide = minOf(videoWidthPx, videoHeightPx) * 0.18f
+                        pendingBox = PendingBox(videoPx.first, videoPx.second, pendingBox?.side ?: defaultSide)
+                    }
+                }
+                // Drag to move, pinch to resize the box (only while placing and a box exists).
+                .pointerInput(videoWidthPx, videoHeightPx, placing) {
+                    if (!placing) return@pointerInput
+                    detectTransformGestures { _, pan, zoom, _ ->
+                        val box = pendingBox ?: return@detectTransformGestures
+                        val rect = computeFittedVideoRect(boxSize.width, boxSize.height, videoWidthPx, videoHeightPx)
+                        if (rect.width <= 0f || rect.height <= 0f) return@detectTransformGestures
+                        val dxVideo = pan.x * (videoWidthPx / rect.width)
+                        val dyVideo = pan.y * (videoHeightPx / rect.height)
+                        pendingBox = box.copy(
+                            cx = box.cx + dxVideo,
+                            cy = box.cy + dyVideo,
+                            side = (box.side * zoom).coerceIn(24f, minOf(videoWidthPx, videoHeightPx).toFloat())
+                        )
                     }
                 }
         ) {
             AndroidView(
                 // RESIZE_MODE_FIT = aspect-preserving letterbox, matching computeFittedVideoRect /
-                // screenToVideoPx, so the tap maps to the right video pixel and the dot lands where
-                // tapped. (Any other resize mode would offset the overlay from the video.)
+                // screenToVideoPx, so a tap maps to the right video pixel and overlays line up.
                 factory = {
                     PlayerView(it).apply {
                         player = exoPlayer
@@ -141,13 +189,37 @@ fun BarPathTrackPlaybackContent(
                 modifier = Modifier.fillMaxSize()
             )
             if (videoWidthPx > 0 && videoHeightPx > 0) {
-                TrackTrailOverlay(
-                    samples = samples,
-                    playbackMs = playbackMs,
-                    videoWidthPx = videoWidthPx,
-                    videoHeightPx = videoHeightPx,
-                    modifier = Modifier.fillMaxSize()
-                )
+                if (isMarked) {
+                    TrackTrailOverlay(
+                        samples = samples,
+                        playbackMs = playbackMs,
+                        videoWidthPx = videoWidthPx,
+                        videoHeightPx = videoHeightPx,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                } else if (placing) {
+                    pendingBox?.let { box ->
+                        StartBoxOverlay(box, videoWidthPx, videoHeightPx, Modifier.fillMaxSize())
+                    }
+                }
+            }
+            if (isTracking) {
+                Column(
+                    Modifier.align(Alignment.Center)
+                        .background(Color.Black.copy(alpha = 0.55f), androidx.compose.foundation.shape.RoundedCornerShape(10.dp))
+                        .padding(20.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    CircularProgressIndicator(
+                        progress = { trackingProgress.coerceIn(0f, 1f) },
+                        color = NeonGreen, modifier = Modifier.size(56.dp)
+                    )
+                    Text(
+                        "Tracking… ${(trackingProgress * 100).toInt()}%",
+                        color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(top = 12.dp)
+                    )
+                }
             }
             errorMessage?.let {
                 Text(
@@ -181,11 +253,54 @@ fun BarPathTrackPlaybackContent(
             )
         }
 
-        if (isMarked && samples.size >= 2) {
-            SaiyanButton(onClick = onGetVelocityNumbers, modifier = Modifier.fillMaxWidth().padding(16.dp)) {
-                Text("GET VELOCITY NUMBERS  >>>", fontWeight = FontWeight.Black, fontSize = 13.sp)
+        when {
+            placing && pendingBox != null -> {
+                SaiyanButton(
+                    onClick = { pendingBox?.let { onConfirmTrack(it.cx, it.cy, it.side, placedAtMs) } },
+                    modifier = Modifier.fillMaxWidth().padding(16.dp)
+                ) {
+                    Text("TRACK THIS PLATE  >>>", fontWeight = FontWeight.Black, fontSize = 13.sp)
+                }
+            }
+            isMarked && samples.size >= 2 -> {
+                SaiyanButton(onClick = onGetVelocityNumbers, modifier = Modifier.fillMaxWidth().padding(16.dp)) {
+                    Text("GET VELOCITY NUMBERS  >>>", fontWeight = FontWeight.Black, fontSize = 13.sp)
+                }
             }
         }
+    }
+}
+
+/** The adjustable start box, centre + side in VIDEO-pixel space. */
+private data class PendingBox(val cx: Float, val cy: Float, val side: Float)
+
+/** Draws the movable/resizable start box over the paused frame: neon rounded-rect outline + centre
+ * crosshair. Mapped from video-px through the same fitted-rect letterbox math as everything else. */
+@Composable
+private fun StartBoxOverlay(
+    box: PendingBox,
+    videoWidthPx: Int,
+    videoHeightPx: Int,
+    modifier: Modifier = Modifier
+) {
+    Canvas(modifier) {
+        val rect = computeFittedVideoRect(size.width, size.height, videoWidthPx, videoHeightPx)
+        val scaleX = rect.width / videoWidthPx
+        val scaleY = rect.height / videoHeightPx
+        val cx = rect.left + box.cx * scaleX
+        val cy = rect.top + box.cy * scaleY
+        val halfW = box.side * scaleX / 2f
+        val halfH = box.side * scaleY / 2f
+        drawRoundRect(
+            color = NeonGreen,
+            topLeft = Offset(cx - halfW, cy - halfH),
+            size = Size(halfW * 2f, halfH * 2f),
+            cornerRadius = CornerRadius(8.dp.toPx(), 8.dp.toPx()),
+            style = Stroke(width = 3.dp.toPx())
+        )
+        val cross = 8.dp.toPx()
+        drawLine(NeonGreen, Offset(cx - cross, cy), Offset(cx + cross, cy), strokeWidth = 2.dp.toPx())
+        drawLine(NeonGreen, Offset(cx, cy - cross), Offset(cx, cy + cross), strokeWidth = 2.dp.toPx())
     }
 }
 
@@ -240,7 +355,7 @@ internal fun currentSampleIndex(samples: List<BarPathSample>, playbackMs: Long):
  * are inherently jittery). Index-aligned to [samples]; display only — the analysis smooths the raw
  * samples separately (Savitzky-Golay). A short series is returned unchanged. Pure/unit-tested.
  */
-internal fun smoothedPathPoints(samples: List<BarPathSample>, window: Int = 5): List<Pair<Double, Double>> {
+internal fun smoothedPathPoints(samples: List<BarPathSample>, window: Int = 9): List<Pair<Double, Double>> {
     if (samples.size < 3 || window <= 1) return samples.map { it.xPx to it.yPx }
     val half = window / 2
     return samples.indices.map { i ->

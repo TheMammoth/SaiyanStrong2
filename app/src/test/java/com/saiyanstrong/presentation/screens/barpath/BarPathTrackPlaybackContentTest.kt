@@ -1,6 +1,7 @@
 package com.saiyanstrong.presentation.screens.barpath
 
 import com.saiyanstrong.domain.model.BarPathSample
+import com.saiyanstrong.domain.model.TrackedFrame
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -93,5 +94,24 @@ class BarPathTrackPlaybackContentTest {
         assertTrue("spike should be smoothed down, was ${smoothed[2].second}", smoothed[2].second < 40.0)
         // Endpoints stay put-ish (fewer neighbors), still index-aligned.
         assertEquals(s.size, smoothed.size)
+    }
+
+    // ── smoothedFramePoints (replay path) ──────────────────────────────────────────────
+
+    private fun frames(vararg xy: Pair<Double, Double>): List<TrackedFrame> =
+        xy.mapIndexed { i, (x, y) -> TrackedFrame(i * 100L, x, y, 0.0) }
+
+    @Test
+    fun `frame smoothing returns a short series unchanged`() {
+        val f = frames(0.0 to 0.0, 10.0 to 10.0)
+        assertEquals(listOf(0.0 to 0.0, 10.0 to 10.0), smoothedFramePoints(f))
+    }
+
+    @Test
+    fun `frame smoothing pulls a jittery point toward its neighbors and stays index-aligned`() {
+        val f = frames(0.0 to 0.0, 1.0 to 0.0, 2.0 to 100.0, 3.0 to 0.0, 4.0 to 0.0)
+        val smoothed = smoothedFramePoints(f, window = 5)
+        assertTrue("spike should be smoothed down, was ${smoothed[2].second}", smoothed[2].second < 40.0)
+        assertEquals(f.size, smoothed.size)
     }
 }

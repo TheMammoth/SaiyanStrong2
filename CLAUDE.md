@@ -3056,6 +3056,43 @@ _(Claude Code appends here after each completed task)_
   constants (`initBox` = 0.18×shorter-side, `MIN_SCORE` = 0.3) tunable after a real look. Deferred:
   deleting the dormant colour/marker files; auto-plate-scale as default; a live on-preview overlay.
   versionCode 86, versionName 0.62.0.
+- [x] Sprint — VBT polish: movable/resizable start box, track-then-watch, smoother trail (v0.63.0),
+  per SPEC.md /spec round. First real-footage test of v0.62.0 WORKED (the dot follows the plate,
+  peak 0.66 m/s / ROM 0.57 m on an OHP looked right) — user asked for three fixes, all approved:
+  (1) **Movable + resizable start box.** A tap used to immediately start tracking from that exact
+  point, so an inaccurate tap seeded TrackerVit off the plate. Now the player's PLAYER step is
+  place-then-confirm: a tap on the paused frame drops an adjustable box (`PendingBox`, centre+side
+  in VIDEO-pixel space); `detectTapGestures` repositions it, `detectTransformGestures` pans (drag →
+  move) and zooms (pinch → resize, clamped), a `StartBoxOverlay` Canvas draws the neon rounded-rect
+  + crosshair through the same `computeFittedVideoRect` letterbox mapping the tap already used, and a
+  TRACK THIS PLATE button confirms. A tight, well-placed box is also the biggest accuracy lever for
+  TrackerVit (it tracks the region it's init'd on). New pure `VitBarTrackerSupport.initBox(centerX,
+  centerY, sidePx, frameW, frameH)` (explicit user side, clamped inside the frame, min-side floor) —
+  4 new unit tests.
+  (2) **Track fully first, then watch.** Tracking used to stream in the background while the video
+  looped, so the path only filled in after 2–3 replays (the user's "after playing 2 more times it
+  tracks back"). New `BarPathCaptureViewModel.onConfirmTrack(centerX, centerY, sidePx, atMs)` runs
+  the whole `trackWithVit` pass once with `onProgress` → a new `BarPathCaptureUiState.isTracking` +
+  the existing `trackingProgress`; the player pauses on a determinate `CircularProgressIndicator`
+  ("Tracking… NN%") and, on completion, seeks to the mark time and plays the COMPLETE path — accurate
+  on the first watch. `onMarkTap` (immediate-stream) removed from the flow; `onReMark` clears the box
+  + tracking state.
+  (3) **Smoother displayed trail.** The live overlay's `smoothedPathPoints` window went 5 → 9. The
+  velocity-coloured REPLAY overlay (`BarPathReplayContent`) was drawing RAW `TrackedFrame.xPx/yPx`
+  with no smoothing at all (the jagged white path in the screenshot) — added a pure
+  `smoothedFramePoints(frames, window = 9)` (position-only moving average, index-aligned) and drew
+  the ghost, the velocity-coloured progress line, and the cursor from it. Peak/sticking/start/end
+  indices stay velocity-based; the velocity NUMBERS keep their real Savitzky-Golay smoothing in
+  analysis — this is display-only. 2 new unit tests.
+  No new deps / permissions / Room change / analysis-math change — all Compose + the existing OpenCV
+  path. `initBoxFromTap` (v0.62.0) is now unused by the flow but kept (still unit-tested) since the
+  box default side reuses the same 0.18×shorter-side value. Build + full suite green, zero `" lb"`,
+  APK badged versionCode 87.
+  KNOWN GAP: not device-verified this session — the box UI, the pan/pinch coexistence with tap, the
+  progress → finished-path handoff, and the smoothing all need a real look. The place-then-TRACK box
+  + progress bar + finished path ARE the on-device self-check. First-pass constants (default box
+  0.18×shorter-side, pinch clamp 24px..shorterSide, smoothing window 9) tunable after a real look.
+  versionCode 87, versionName 0.63.0.
 
 ## Release rules
 

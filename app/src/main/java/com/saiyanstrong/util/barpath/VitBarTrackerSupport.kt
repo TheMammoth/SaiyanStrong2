@@ -47,6 +47,30 @@ object VitBarTrackerSupport {
         return BarInitBox(x, y, side, side)
     }
 
+    /** Smallest allowed init-box side (px), so a pinched-tiny box still gives the tracker something. */
+    const val MIN_BOX_SIDE = 24
+
+    /**
+     * A square init box with an explicit user-chosen [sidePx] centred on ([centerX], [centerY]) —
+     * for the movable/resizable start box (the user drags + pinches it onto the plate). Side is
+     * floored at [MIN_BOX_SIDE] and capped at the shorter frame side; the box is shifted (not
+     * shrunk) to stay fully inside [frameW]×[frameH]. Null for a degenerate frame.
+     */
+    fun initBox(
+        centerX: Double,
+        centerY: Double,
+        sidePx: Int,
+        frameW: Int,
+        frameH: Int
+    ): BarInitBox? {
+        if (frameW <= 0 || frameH <= 0) return null
+        val side = sidePx.coerceIn(MIN_BOX_SIDE, minOf(frameW, frameH))
+        val half = side / 2.0
+        val x = (centerX - half).toInt().coerceIn(0, frameW - side)
+        val y = (centerY - half).toInt().coerceIn(0, frameH - side)
+        return BarInitBox(x, y, side, side)
+    }
+
     /** Centre of a tracked box, in the same pixel space as the box. */
     fun boxCenter(x: Int, y: Int, width: Int, height: Int): Pair<Double, Double> =
         (x + width / 2.0) to (y + height / 2.0)

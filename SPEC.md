@@ -1,188 +1,128 @@
-# SPEC — VBT tracking rebuilt on OpenCV TrackerVit (tap the plate, no marker)
+# SPEC — VBT tracking polish: movable start box, track-then-watch, smoother trail
 
 ## Status: Draft — awaiting confirmation before implementation.
 
-Replaces the entire hand-rolled colour/blob/NCC/template tracking stack with a mature,
-DNN-based single-object tracker from OpenCV. Decided via clarifying questions: **add
-OpenCV**, **tap the plate (no colored marker)**, **keep the record-then-analyze flow**.
+Builds on v0.62.0 (OpenCV TrackerVit, tap the plate). First real-footage test: it works —
+the dot follows the plate, plausible numbers (peak 0.66 m/s, ROM 0.57 m on an OHP). Three
+issues to fix, all confirmed via clarifying questions.
 
 ---
 
 ## 1. Objective
 
-Make bar-path tracking actually work. Across ~15 sprints we hand-rolled pixel CV in
-Kotlin — HSV colour blobs (grabbed same-colour background), then NCC template matching
-(lost lock on motion blur). Every real-footage test failed. The apps that work
-([Metric](https://metric.coach), [Qwik VBT](https://apps.apple.com/us/app/qwik-vbt-velocity-bar-tracker/id1660094818),
-open-source [barbellcv](https://github.com/tlancon/barbellcv)) are all built on **OpenCV**
-and have the user **tap the plate** — no colored marker.
+Take the working TrackerVit flow from "works" to "accurate and forgiving":
 
-**Target user:** a lifter who records or uploads a phone video of a lift, taps the weight
-plate once, and watches a dot track the plate cleanly through the rep, then optionally gets
-velocity numbers. No colored sticker, no lighting/colour calibration, no colour advisor.
-
-**The core change:** swap our tracker for OpenCV's `TrackerVit` (a Vision-Transformer DNN
-tracker in the official `video` module). Tap → init tracker with a bounding box around the
-plate → per frame `tracker.update(mat) → Rect` → the Rect centre is the bar position →
-feed into the existing pipeline (`ConcentricDetector`, `SavitzkyGolayFilter`,
-`AnalyzeBarPathUseCase`). This is the "correct" version of the template matcher we tried
-to build by hand.
-
-### Why TrackerVit specifically (verified this session)
-- **In the official Maven Central AAR.** `org.opencv:opencv` ships the main `video`
-  module, which contains `TrackerVit`, `TrackerNano`, `TrackerMIL`, `TrackerGOTURN`,
-  `TrackerDaSiamRPN`. **CSRT and KCF are NOT** — they live in `opencv_contrib` and would
-  need a painful NDK source build. Confirmed against the 4.x `org.opencv.video` javadoc.
-- **DNN tracker → far more blur/appearance-change robust** than classical CSRT, and newer.
-- **Tiny model:** `object_tracking_vittrack_2023sep.onnx` = **715 KB** (int8 variant 271 KB),
-  **Apache-2.0** (confirmed in the model's own README) → safe to bundle in `assets/`.
-- **Clean Gradle dep**, no OpenCV Manager (self-contained native libs since 4.9.0,
-  `OpenCVLoader.initLocal()`).
+1. **Movable + resizable start box.** Today a tap immediately starts tracking from that exact
+   point — an inaccurate tap seeds the tracker off the plate. Instead: a tap drops an
+   **adjustable box** on the paused frame; the user **drags it onto the plate and pinches to
+   size it to the plate**, then presses TRACK. A tight, well-placed box is also the single
+   biggest accuracy lever for TrackerVit (it tracks the region it's initialized on).
+2. **Track fully first, then watch.** Today tracking streams in the background while the video
+   loops, so the path only fills in after replaying 2–3×. Instead: pressing TRACK runs the
+   whole tracking pass once behind a **determinate progress bar**, then plays the **complete**
+   path — accurate on the first watch, no replay-to-catch-up.
+3. **Smoother displayed trail.** The drawn path is jagged (tracker jitter). Smooth the DISPLAYED
+   trail more — both the live player overlay and the velocity-coloured replay overlay (the
+   replay currently draws raw positions with no smoothing at all). The velocity NUMBERS keep
+   their existing Savitzky-Golay smoothing in analysis — this is display-only.
 
 ### Acceptance criteria
-1. `.\gradlew assembleGithubDebug` builds clean with the OpenCV dependency; app launches.
-2. On a real recorded/uploaded lift, tapping the plate makes the tracked dot **follow the
-   plate down and up through the whole rep in a clean line** (the on-device self-check —
-   the whole point). No teleporting to background, survives normal motion blur.
-3. Velocity numbers come out plausible (mean concentric velocity non-zero and in a sane
-   0.1–1.5 m/s band for a working rep), using the existing `ConcentricDetector` window.
-4. Zero `" lb"` anywhere; all existing unit tests still green; new pure-logic tests pass.
-5. The colour-marker path (calibration, advisor, `MarkerColorProfile`, blob tracking) is
-   left **dormant, not deleted** this slice (reliability first; purge later).
+1. Tapping the plate drops a box that can be dragged and pinch-resized on the paused frame; a
+   TRACK button confirms and runs tracking from that box.
+2. After TRACK, a progress bar runs to 100%, then the video plays with the full path already
+   drawn — no second loop needed to see the complete trail.
+3. Both the live trail and the replay path read as clean lines, not jagged.
+4. `assembleGithubDebug` green; new pure helpers unit-tested; all existing tests green; zero `" lb"`.
 
 ---
 
 ## 2. Commands
-
 ```powershell
-# Build (PowerShell — the rtk Bash hook rewrites ./gradlew and hangs)
-.\gradlew assembleGithubDebug
-
-# Unit tests (pure logic only — OpenCV native can't run in JUnit)
 .\gradlew testGithubDebugUnitTest
-
-# Verify version + no "lb"
-# aapt dump badging <apk> | Select-String versionCode
-# grep for " lb" across app/src must return zero
+.\gradlew assembleGithubDebug
 ```
-
-Release per CLAUDE.md `## Release rules`: bump `versionCode`+`versionName` in
-`app/build.gradle.kts` **before** the final build; `gh release create` + `upload --clobber`
-the `github`-flavor debug APK.
+Release per CLAUDE.md `## Release rules` (bump versionCode+versionName BEFORE the final build).
 
 ---
 
-## 3. Project structure & scope
+## 3. Changes
 
-### New dependency (version catalog only — never hardcode in build.gradle.kts)
-```toml
-# gradle/libs.versions.toml
-opencv = "4.11.0"   # pin the latest verified 4.x on Maven Central at implementation time
-[libraries]
-opencv = { module = "org.opencv:opencv", version.ref = "opencv" }
-```
-```kotlin
-// app/build.gradle.kts
-implementation(libs.opencv)
-```
-- **APK size:** the AAR bundles native `.so` for arm64-v8a / armeabi-v7a / x86 / x86_64
-  (~30–40 MB across all ABIs). Mitigation: `ndk { abiFilters += listOf("arm64-v8a",
-  "armeabi-v7a") }` (drop x86/x86_64 — no real phone needs them) roughly halves it. Real,
-  accepted tradeoff — this is the cost of tracking that works.
-- Third-party AAR is fine under "Kotlin only, no Java" — that rule governs *our* source,
-  not a library.
+### A. Adjustable init box — `BarPathTrackPlaybackContent.kt`
+- New local state `pendingBox: PendingBox?` where `PendingBox` = box centre + side in
+  **video-pixel** space (so it survives container resize and maps straight to the tracker).
+- When not yet tracking:
+  - A **tap** (`detectTapGestures`) pauses the player and drops/repositions `pendingBox`
+    centred on the tap, default side = `min(w,h) × 0.18` (today's fixed fraction, now a start
+    value the user adjusts).
+  - Once a box exists, `detectTransformGestures` on the same area **pans** (drag → move centre)
+    and **zooms** (pinch → scale side, clamped to a sane min/max), both in video-px via
+    `computeFittedVideoRect`.
+  - Overlay: a neon rounded-rect outline + centre crosshair + corner ticks over the paused
+    frame, drawn from `pendingBox` through the existing fitted-rect mapping.
+  - A **TRACK THIS PLATE** `SaiyanButton` (shown while `pendingBox != null` and not tracking)
+    calls the new `onConfirmTrack(centerXVideo, centerYVideo, sideVideo, atMs)`.
+- `onMarkTap` is replaced by this place-then-confirm flow. RE-MARK clears `pendingBox` and the
+  tracked path back to the placing state.
+- Coordinate mapping reuses `computeFittedVideoRect` / `screenToVideoPx` unchanged (the proven
+  letterbox math — same mapping that already lands the dot where tapped).
 
-### New files
-```
-app/src/main/assets/vittrack/object_tracking_vittrack_2023sep.onnx   ← 715KB, Apache-2.0
-app/src/main/java/com/saiyanstrong/util/barpath/OpenCvInitializer.kt ← one-time initLocal() guard
-app/src/main/java/com/saiyanstrong/util/barpath/VitBarTracker.kt     ← wraps TrackerVit: init(box) + update(bitmap)->Rect?
-app/src/test/java/com/saiyanstrong/util/barpath/VitBarTrackerSupportTest.kt ← pure helpers only
-```
+### B. Track-then-watch — `BarPathCaptureViewModel.kt` + player
+- New `onConfirmTrack(centerX, centerY, sidePx, atMs)`:
+  - Build a `BarInitBox` from the user's centre+side via a new pure
+    `VitBarTrackerSupport.initBox(centerX, centerY, sidePx, frameW, frameH)` (clamps the box
+    fully inside the frame; min side floor).
+  - Set `isTracking = true`, `trackingProgress = 0f`, `markMs = atMs`.
+  - Launch `trackWithVit(..., startMs = atMs, onProgress = { progress → update trackingProgress })`
+    to completion (no reliance on live streaming for display now). On done: set `trackedSamples`,
+    `isTracking = false`; the player seeks to `markMs` and plays the complete path.
+- `BarPathCaptureUiState` gains `isTracking: Boolean = false` (`trackingProgress` already exists).
+- Player: while `isTracking`, pause playback and show a **determinate** progress overlay
+  ("Tracking the plate… NN%") over the frame; hide the tap/transform handlers. When it clears,
+  auto-play from `markMs`.
+- The old immediate-streaming `onMarkTap` path is removed from this flow (kept in the ViewModel
+  only if still referenced by the gallery/other path — otherwise dropped). `onSample` streaming
+  is no longer needed for display; `trackWithVit`'s `onProgress` drives the bar.
 
-### Changed files
-- `BarPathFrameTracker.kt` — new `trackWithVit(videoPath, startMs, initBoxVideoPx, onSample, onProgress)`:
-  same frame-extraction loop / `startMs` / `MAX_SAMPLES` cap / `onSample` streaming as
-  `trackMarker`, but per frame: `Bitmap → Mat (Utils.bitmapToMat)` → `vitTracker.update(mat)`
-  → `Rect` → centre → `BarPathSample` in **video px**. On `update` returning failure/low
-  confidence, **hold** the last position (never teleport) — same guard philosophy as today.
-  Emits samples the existing pipeline already consumes unchanged.
-- `BarPathCaptureViewModel.kt` — `onMarkTap(videoX, videoY, atMs)` seeds an **init box**
-  (a square ~plate-sized around the tap, e.g. `min(w,h)*0.18`) and calls `trackWithVit`
-  instead of `trackMarker`. No colour sampling. `calibratedProfile` path unused here.
-- `BarPathCaptureScreen.kt` — the live player prompt becomes "scrub to the lift, then tap
-  the **plate**"; retry copy points at tapping a clearly-visible plate. The colour
-  calibration UI (`CalibrationOverlay`/`CalibrationControls`/`CalibrationAdviceBanner`)
-  is **not shown** in this flow (left in the file, dormant).
-- `gradle/libs.versions.toml`, `app/build.gradle.kts` — dep + abiFilters + version bump.
+### C. Smoother trail — display only
+- Live player (`TrackTrailOverlay`): bump `smoothedPathPoints` window `5 → 9`.
+- Replay (`BarPathReplayContent`): it currently draws **raw** `TrackedFrame.xPx/yPx` for the
+  ghost, the velocity-coloured progress line, and the cursor. Add a pure
+  `smoothedFramePoints(frames, window = 9): List<Offset-source pairs>` (position-only moving
+  average, index-aligned) and draw all three layers from it. Peak/sticking/start/end indices
+  stay velocity-based (unchanged) — only the drawn positions are smoothed.
 
-### Optional (flag, don't build unless it falls out cleanly): auto-scale from the plate box
-The tracked `Rect` width ≈ the plate's on-screen diameter. A standard competition plate is
-**0.45 m**. So `pixelsPerMeter ≈ rectWidthPx / 0.45` — a free scale with **no two-tap step**.
-Pure helper `plateScalePpm(rectWidthPx, plateDiameterM = 0.45)`, unit-tested. If it reads
-well on device, it replaces the two-plate-edge tap; keep the manual two-tap as fallback for
-non-standard plates. **Decision deferred to a real-device look** — ship tap-tracking first.
+### New/changed pure helpers (unit-tested)
+- `VitBarTrackerSupport.initBox(centerX, centerY, sidePx, frameW, frameH): BarInitBox?` — explicit
+  user-chosen side; clamp inside frame; min-side floor; null for a degenerate frame.
+- `smoothedFramePoints(...)` (in `BarPathReplayContent.kt`, mirrors `smoothedPathPoints`).
+- `smoothedPathPoints` window default `5 → 9` (existing tests still hold; add a window-N case).
 
 ---
 
 ## 4. Code style
-
-- Kotlin only, Jetpack Compose only, Clean Architecture, StateFlow, Hilt — unchanged.
-- **Pure-core / thin-Android-shell split** (the project's established pattern): OpenCV calls
-  (`TrackerVit`, `Utils.bitmapToMat`, `initLocal`) live in the untestable shell alongside
-  CameraX/ExoPlayer. Anything pure (init-box geometry from a tap, Rect→centre, plate-scale,
-  bounds clamping) is a top-level `internal fun` and **is** unit-tested.
-- No hardcoded colors; metric units everywhere (`_kg`, m/s, meters).
-- Guard every native boundary in `runCatching`/try-catch — a tracker or decode failure
-  routes to the existing ERROR surface, never crashes (same discipline as v0.42.1/v0.51.x).
-
----
+- Kotlin/Compose only; pure helpers Android-free and unit-tested; TrackerVit/CameraX/ExoPlayer in
+  the untestable shell. No hardcoded colors (theme tokens). Metric only.
 
 ## 5. Testing strategy
-
-- **Pure unit tests (JUnit, no Robolectric):** init-box-from-tap geometry (correct size,
-  clamped to frame bounds when the tap is near an edge), `Rect.center()` → sample, plate
-  scale math, hold-on-failure sample continuity. These are the only genuinely testable
-  pieces — the tracker itself needs the OpenCV native runtime.
-- **OpenCV/`TrackerVit`/CameraX/ExoPlayer** stay in the unit-untestable shell, verified only
-  on device — consistent with every prior VBT sprint.
-- **The real acceptance test is on-device and self-verifying:** the tracked dot visibly
-  following the plate in the live player *is* the proof the tracker works. A jagged or stuck
-  dot is an obvious fail signal before any number is trusted.
-
----
+- Pure unit tests: `initBox` (placement, clamp-inside-frame at edges, min side, degenerate null),
+  `smoothedFramePoints` (short series unchanged, interior averaged), `smoothedPathPoints` window.
+- The box UI / progress / TrackerVit are the untestable shell — verified on device. The live box +
+  progress + finished path ARE the on-device self-check.
 
 ## 6. Boundaries
+**Always** — keep record-then-analyze; reuse `computeFittedVideoRect`/`screenToVideoPx`; keep the
+analysis SG smoothing untouched (display smoothing is separate); bump versions + progress log.
+**Ask first** — auto-plate-scale from the box width (deferred lever); deleting the dormant
+colour/marker files; any live-camera-preview change.
+**Never** — touch the velocity math; introduce `" lb"`; XML/Java; hardcode colors; add a dependency
+(all of this is Compose + the existing OpenCV path).
 
-**Always**
-- Version catalog for the OpenCV version; `abiFilters` to arm64+armv7 to contain APK size.
-- Bundle the ONNX from OpenCV's model zoo (Apache-2.0) in `assets/`; attribute it in the
-  progress-log entry.
-- Guard `OpenCVLoader.initLocal()` and every native call; fail soft to the ERROR screen.
-- Keep `ConcentricDetector` (the v0.51.0 fix for the whole-clip mean≈0 bug) in the path.
-- Update CLAUDE.md progress log + bump both versions on release.
-
-**Ask first**
-- Deleting the dormant colour/marker/live-session/template files (a separate cleanup slice).
-- Adding a *live* on-preview tracking overlay (the fragile 3-stream CameraX path — deferred).
-- Switching the two-tap scale to auto-plate-scale as the default (needs a device look first).
-- Any second dependency (e.g. an ONNX runtime) — TrackerVit runs inside OpenCV's own DNN
-  module, so **no** extra runtime is needed; flag if that assumption breaks at build time.
-
-**Never**
-- Rebuild OpenCV contrib from source / ship CSRT via an NDK build (defeats the whole point
-  — the clean Maven AAR + TrackerVit is why this is viable).
-- Commit secrets/keystores. Introduce any `" lb"`. Use XML layouts or Java. Hardcode colors.
-- Bundle a non-Apache/non-permissively-licensed model.
-
----
-
-## 7. Known risks (honest)
-
-- **APK size** grows ~15–20 MB (arm64+armv7 native libs). Real, accepted.
-- **TrackerVit robustness** on a fast, blurred plate is far better than our NCC but not
-  magic; a very blurry / occluded plate can still lose lock (mitigated by hold-on-failure).
-  Unknown until real footage — but this is the method the working apps use.
-- **Native init on old devices** — `initLocal()` must succeed; guarded.
-- **Not device-verified this session** (no emulator) — same standing caveat as all VBT work.
-  The on-device dot-follows-plate check is the acceptance gate.
+## 7. Known risks
+- `detectTapGestures` + `detectTransformGestures` coexistence (place vs adjust) needs care — a
+  tap must place, a drag must move, a pinch must resize, without fighting each other.
+- Box → tracker init-box mapping is the same fitted-rect math already proven to land the dot on
+  the tap; the resize just changes the side.
+- Full-pass tracking time is bounded by `MAX_SAMPLES = 150` but is still a real wait on a long
+  clip — the progress bar makes it honest; a frame-downscale speed-up is a deferred lever if it's
+  still too slow.
+- Not device-verified this session — the on-device flow is the acceptance gate.

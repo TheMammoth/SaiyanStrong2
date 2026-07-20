@@ -45,6 +45,36 @@ class VitBarTrackerSupportTest {
     }
 
     @Test
+    fun `initBox uses the explicit side and centres on the point`() {
+        val box = VitBarTrackerSupport.initBox(500.0, 900.0, 200, 1080, 1920)!!
+        assertEquals(200, box.width)
+        assertEquals(200, box.height)
+        assertEquals(400, box.x) // 500 - 100
+        assertEquals(800, box.y) // 900 - 100
+    }
+
+    @Test
+    fun `initBox floors a too-small side and caps at the shorter frame side`() {
+        val tiny = VitBarTrackerSupport.initBox(500.0, 500.0, 4, 1080, 1920)!!
+        assertEquals(VitBarTrackerSupport.MIN_BOX_SIDE, tiny.width)
+        val huge = VitBarTrackerSupport.initBox(500.0, 900.0, 5000, 1080, 1920)!!
+        assertEquals(1080, huge.width) // capped at shorter side (width)
+    }
+
+    @Test
+    fun `initBox near an edge is shifted fully inside, not shrunk`() {
+        val box = VitBarTrackerSupport.initBox(5.0, 5.0, 200, 1080, 1920)!!
+        assertEquals(200, box.width) // unchanged size
+        assertEquals(0, box.x)
+        assertEquals(0, box.y)
+    }
+
+    @Test
+    fun `initBox returns null for a degenerate frame`() {
+        assertNull(VitBarTrackerSupport.initBox(10.0, 10.0, 100, 0, 100))
+    }
+
+    @Test
     fun `box centre is the geometric centre`() {
         val (cx, cy) = VitBarTrackerSupport.boxCenter(100, 200, 40, 60)
         assertEquals(120.0, cx, 1e-9)
