@@ -109,42 +109,52 @@ internal fun chooseTrackedBlob(blobs: List<Blob>, previousCentroid: Pair<Double,
     }
 }
 
-/** Anti-drift guard outcome for one tracked frame (see [trackGuardDecision]). */
-internal enum class TrackGuard { REJECT, ACCEPT, ACCEPT_AND_ADAPT }
-
 /**
- * Decides whether to trust TrackerVit's box this frame, given how much the tracked patch still
- * looks like the marked target ([ncc], normalized cross-correlation in [-1,1]) and how far the box
- * moved from the last accepted position ([displacementPx]).
- *
- * FAIL-SAFE bias: the default is to TRUST the tracker. A frame is REJECTED only when it's a clear
- * TELEPORT onto a dissimilar region — low [ncc] AND a big jump ([displacementPx] > [boxSide] ×
- * [rejectJumpFraction]). Requiring the jump is deliberate: smooth per-frame tracking never makes a
- * big jump, so even if NCC reads low (mis-scale, motion blur) the tracker is still trusted rather
- * than frozen. Only a sudden leap to a leg/background triggers a hold. (An earlier version rejected
- * on low NCC alone and could freeze the dot at the start position — this fixes that.)
- *
- * - low [ncc] AND big jump → REJECT (hold last good; caller also caps consecutive rejects so it can
- *   never hold forever).
- * - [ncc] ≥ [adaptNcc] AND a small move → ACCEPT_AND_ADAPT: refresh the template so it follows
- *   gradual lighting/rotation change (a big jump can't adapt, so a lucky distractor can't seed a
- *   bad template).
- * - otherwise → ACCEPT the tracker's position, template fixed.
- *
- * Pure/unit-tested.
+ * Average RGB of the sufficiently-saturated, bright pixels in the [rx,ry,rw,rh] sub-rect of an ARGB
+ * grid — the anti-drift guard's COLOUR ANCHOR. Returns null when too few pixels are colourful (a
+ * grey/white/chrome region has no distinct colour to anchor to, so the guard stays disabled and the
+ * tracker is simply trusted). Anchoring to a real colour (e.g. a plate's blue ring) is what lets the
+ * guard tell "still on the plate" from "climbed onto skin/shorts", which grayscale similarity did
+ * not do reliably on real footage. Pure/unit-tested.
  */
-internal fun trackGuardDecision(
-    ncc: Double,
-    displacementPx: Double,
-    boxSide: Double,
-    acceptNcc: Double = 0.15,
-    adaptNcc: Double = 0.55,
-    maxAdaptDispFraction: Double = 0.6,
-    rejectJumpFraction: Double = 1.2
-): TrackGuard = when {
-    ncc < acceptNcc && displacementPx > boxSide * rejectJumpFraction -> TrackGuard.REJECT
-    ncc >= adaptNcc && displacementPx <= boxSide * maxAdaptDispFraction -> TrackGuard.ACCEPT_AND_ADAPT
-    else -> TrackGuard.ACCEPT
+internal fun regionDominantColor(
+    argb: IntArray, w: Int, h: Int, rx: Int, ry: Int, rw: Int, rh: Int,
+    minSaturation: Double = 0.30, minValue: Double = 0.25, minFraction: Double = 0.08
+): IntArray? {
+    var sr = 0L; var sg = 0L; var sb = 0L; var n = 0; var total = 0
+    for (y in ry until ry + rh) {
+        if (y < 0 || y >= h) continue
+        for (x in rx until rx + rw) {
+            if (x < 0 || x >= w) continue
+            val p = argb[y * w + x]
+            val r = (p shr 16) and 0xFF; val g = (p shr 8) and 0xFF; val b = p and 0xFF
+            total++
+            val (_, s, v) = MarkerColorMatcher.rgbToHsv(r, g, b)
+            if (s >= minSaturation && v >= minValue) { sr += r; sg += g; sb += b; n++ }
+        }
+    }
+    if (total == 0 || n < 10 || n < total * minFraction) return null
+    return intArrayOf((sr / n).toInt(), (sg / n).toInt(), (sb / n).toInt())
+}
+
+/** Fraction of the [rx,ry,rw,rh] sub-rect of an ARGB grid that matches [profile] — how "plate
+ * coloured" the tracked box still is. Pure/unit-tested. */
+internal fun regionColorFraction(
+    argb: IntArray, w: Int, h: Int, rx: Int, ry: Int, rw: Int, rh: Int,
+    profile: MarkerColorProfile
+): Double {
+    var match = 0; var total = 0
+    for (y in ry until ry + rh) {
+        if (y < 0 || y >= h) continue
+        for (x in rx until rx + rw) {
+            if (x < 0 || x >= w) continue
+            val p = argb[y * w + x]
+            val r = (p shr 16) and 0xFF; val g = (p shr 8) and 0xFF; val b = p and 0xFF
+            total++
+            if (profile.matches(r, g, b)) match++
+        }
+    }
+    return if (total == 0) 0.0 else match.toDouble() / total
 }
 
 /**
@@ -192,13 +202,15 @@ class BarPathFrameTracker @Inject constructor(
 
         val samples = mutableListOf<BarPathSample>()
         var initialized = false
-        // Anti-drift guard: keep an (adaptive) grayscale template of what the user marked, and each
-        // frame check that TrackerVit's box still LOOKS like it (NCC). When the box drifts onto
-        // something different — the lifter's leg, or the blown-out window behind the plate at lockout
-        // — reject it, hold the last good position, and re-init the tracker there so it can't run
-        // away. This is what stops the dot sliding onto the leg when the plate gets hard to see.
-        var template: IntArray? = null
-        var tpSide = 0
+        // Anti-drift guard, COLOUR-anchored. At the mark frame we sample the dominant saturated
+        // colour inside the box (e.g. a plate's blue ring); each frame we check TrackerVit's box
+        // still contains enough of that colour. When the box gradually climbs off the plate onto the
+        // lifter's skin/shorts (a different colour) — the deadlift-lockout failure — we HOLD the last
+        // good position and re-init the tracker there so it re-acquires when the plate returns. A
+        // grey/white/chrome mark has no distinct colour to anchor to, so the guard stays disabled and
+        // the tracker is simply trusted — it never regresses a target it can't anchor. A hard cap on
+        // consecutive holds means it can never freeze the whole clip.
+        var colorAnchor: MarkerColorProfile? = null
         var lastGoodX = 0.0
         var lastGoodY = 0.0
         var lastGoodBox = initBox
@@ -209,16 +221,18 @@ class BarPathFrameTracker @Inject constructor(
             }
             val gw = (frame.width * GUARD_DOWNSCALE).toInt().coerceAtLeast(1)
             val gh = (frame.height * GUARD_DOWNSCALE).toInt().coerceAtLeast(1)
-            val gray = toGray(frame, gw, gh)
+            val argb = scaledArgb(frame, gw, gh)
 
             if (!initialized) {
                 runCatching { tracker.init(frame, initBox) }.onFailure { return@driveRetrieverFrames }
                 initialized = true
                 val (cx0, cy0) = VitBarTrackerSupport.boxCenter(initBox.x, initBox.y, initBox.width, initBox.height)
                 lastGoodX = cx0; lastGoodY = cy0; lastGoodBox = initBox
-                tpSide = (minOf(initBox.width, initBox.height) * GUARD_DOWNSCALE).toInt()
-                    .coerceIn(GUARD_MIN_PATCH, GUARD_MAX_PATCH)
-                template = extractPatch(gray, gw, gh, (cx0 * GUARD_DOWNSCALE).toInt(), (cy0 * GUARD_DOWNSCALE).toInt(), tpSide)
+                regionDominantColor(
+                    argb, gw, gh,
+                    (initBox.x * GUARD_DOWNSCALE).toInt(), (initBox.y * GUARD_DOWNSCALE).toInt(),
+                    (initBox.width * GUARD_DOWNSCALE).toInt(), (initBox.height * GUARD_DOWNSCALE).toInt()
+                )?.let { colorAnchor = MarkerColorProfile.sample(it[0], it[1], it[2]) }
                 val sample = BarPathSample(timestampMs, cx0, cy0, initBox.width.toDouble())
                 samples += sample; onSample?.invoke(sample)
                 return@driveRetrieverFrames
@@ -228,43 +242,27 @@ class BarPathFrameTracker @Inject constructor(
             var outX = lastGoodX
             var outY = lastGoodY
             var outDiam = lastGoodBox.width.toDouble()
-            val tpl = template
             if (box != null) {
                 val (cx, cy) = VitBarTrackerSupport.boxCenter(box.x, box.y, box.width, box.height)
                 val trackedBox = BarInitBox(box.x, box.y, box.width, box.height)
-                if (tpl == null) {
+                val disp = hypot(cx - lastGoodX, cy - lastGoodY)
+                val teleport = disp > box.width * MAX_JUMP_FRACTION
+                val anchor = colorAnchor
+                val colorLost = anchor != null && regionColorFraction(
+                    argb, gw, gh,
+                    (box.x * GUARD_DOWNSCALE).toInt(), (box.y * GUARD_DOWNSCALE).toInt(),
+                    (box.width * GUARD_DOWNSCALE).toInt(), (box.height * GUARD_DOWNSCALE).toInt(),
+                    anchor
+                ) < MIN_PLATE_FRACTION
+                // Hold on a clear drift (teleport, or the box left the plate's colour) — but never
+                // for more than MAX_CONSECUTIVE_REJECTS frames, so a bad anchor can't freeze the clip.
+                if ((teleport || colorLost) && consecutiveRejects < MAX_CONSECUTIVE_REJECTS) {
+                    runCatching { tracker.init(frame, lastGoodBox) }
+                    consecutiveRejects++
+                } else {
                     outX = cx; outY = cy; outDiam = box.width.toDouble()
                     lastGoodX = cx; lastGoodY = cy; lastGoodBox = trackedBox
-                } else {
-                    val cxG = (cx * GUARD_DOWNSCALE).toInt()
-                    val cyG = (cy * GUARD_DOWNSCALE).toInt()
-                    val ncc = TemplateMatcher.bestMatch(gray, gw, gh, tpl, tpSide, tpSide, cxG, cyG, 0, 0)?.score ?: -1.0
-                    val disp = hypot(cx - lastGoodX, cy - lastGoodY)
-                    val decision = trackGuardDecision(ncc, disp, box.width.toDouble())
-                    // Never hold forever: after a few consecutive rejects, trust the tracker (real
-                    // fast motion, or NCC just failing) so a bad guard can't freeze the whole clip.
-                    val effective = if (decision == TrackGuard.REJECT && consecutiveRejects >= MAX_CONSECUTIVE_REJECTS)
-                        TrackGuard.ACCEPT else decision
-                    when (effective) {
-                        TrackGuard.REJECT -> {
-                            // A clear teleport onto something dissimilar — snap the tracker back to
-                            // the last good box and hold this frame.
-                            runCatching { tracker.init(frame, lastGoodBox) }
-                            consecutiveRejects++
-                        }
-                        TrackGuard.ACCEPT -> {
-                            outX = cx; outY = cy; outDiam = box.width.toDouble()
-                            lastGoodX = cx; lastGoodY = cy; lastGoodBox = trackedBox
-                            consecutiveRejects = 0
-                        }
-                        TrackGuard.ACCEPT_AND_ADAPT -> {
-                            outX = cx; outY = cy; outDiam = box.width.toDouble()
-                            lastGoodX = cx; lastGoodY = cy; lastGoodBox = trackedBox
-                            // Refresh the template so it follows gradual lighting/rotation change.
-                            extractPatch(gray, gw, gh, cxG, cyG, tpSide)?.let { template = it }
-                            consecutiveRejects = 0
-                        }
-                    }
+                    consecutiveRejects = 0
                 }
             } else {
                 // TrackerVit lost confidence — hold last good and re-seed there.
@@ -274,6 +272,15 @@ class BarPathFrameTracker @Inject constructor(
             samples += sample; onSample?.invoke(sample)
         }
         return samples
+    }
+
+    /** Whole frame downscaled to [w]×[h] as an ARGB pixel grid (one bulk getPixels). */
+    private fun scaledArgb(frame: Bitmap, w: Int, h: Int): IntArray {
+        val scaled = Bitmap.createScaledBitmap(frame, w, h, true)
+        val px = IntArray(w * h)
+        scaled.getPixels(px, 0, w, 0, 0, w, h)
+        scaled.recycle()
+        return px
     }
 
     /**
@@ -725,15 +732,16 @@ class BarPathFrameTracker @Inject constructor(
     private companion object {
         const val MIN_MARKER_PIXELS = 10
 
-        // Anti-drift guard (trackWithVit): grayscale working resolution + the NCC template patch
-        // size range (in that downscaled space). A patch too small has no structure to lock onto;
-        // too big is slow and over-includes background.
+        // Anti-drift guard (trackWithVit): working resolution for the colour check + the thresholds.
         const val GUARD_DOWNSCALE = 0.5
-        const val GUARD_MIN_PATCH = 16
-        const val GUARD_MAX_PATCH = 48
-        // Max consecutive rejects before the guard gives up and trusts the tracker — so a bad NCC
-        // read can never freeze the dot for the whole clip.
-        const val MAX_CONSECUTIVE_REJECTS = 3
+        // Below this fraction of plate-coloured pixels, the box is considered to have left the plate.
+        const val MIN_PLATE_FRACTION = 0.12
+        // A per-frame move beyond this fraction of the box side is an implausible teleport (a barbell
+        // moves a small fraction of a plate width per frame at real speeds).
+        const val MAX_JUMP_FRACTION = 1.5
+        // Max consecutive holds before the guard gives up and trusts the tracker — so a bad anchor
+        // can never freeze the dot for the whole clip.
+        const val MAX_CONSECUTIVE_REJECTS = 12
 
         // A matching pixel always contributes at least a little weight, even if matchScore()
         // rounds to 0 at the tolerance boundary — keeps its contribution to the centroid

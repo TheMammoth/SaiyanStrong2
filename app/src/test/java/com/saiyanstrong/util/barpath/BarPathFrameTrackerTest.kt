@@ -99,44 +99,32 @@ class BarPathFrameTrackerTest {
         assertNull(chooseTrackedBlob(emptyList(), previousCentroid = 10.0 to 10.0))
     }
 
-    // ── anti-drift guard ───────────────────────────────────────────────────────────────
+    // ── colour-anchored anti-drift guard ───────────────────────────────────────────────
+
+    private fun rgb(r: Int, g: Int, b: Int) = (0xFF shl 24) or (r shl 16) or (g shl 8) or b
+    private fun filled(w: Int, h: Int, color: Int) = IntArray(w * h) { color }
 
     @Test
-    fun `a low-NCC teleport (low similarity AND a big jump) is rejected`() {
-        assertEquals(TrackGuard.REJECT, trackGuardDecision(ncc = 0.05, displacementPx = 150.0, boxSide = 100.0))
-        assertEquals(TrackGuard.REJECT, trackGuardDecision(ncc = -0.5, displacementPx = 200.0, boxSide = 100.0))
+    fun `dominant colour of a saturated blue region is bluish`() {
+        val w = 10; val h = 10
+        val dom = regionDominantColor(filled(w, h, rgb(30, 60, 200)), w, h, 0, 0, w, h)!!
+        assertTrue("blue channel should dominate, got ${dom.toList()}", dom[2] > dom[0] && dom[2] > dom[1])
     }
 
     @Test
-    fun `low NCC with a small move is NOT rejected — smooth tracking never freezes`() {
-        // The key fail-safe: even if NCC reads low, a small per-frame move is trusted, so the dot
-        // can't freeze on ordinary smooth tracking.
-        assertEquals(TrackGuard.ACCEPT, trackGuardDecision(ncc = 0.05, displacementPx = 10.0, boxSide = 100.0))
+    fun `a grey region has no colour anchor`() {
+        val w = 10; val h = 10
+        assertNull(regionDominantColor(filled(w, h, rgb(128, 128, 128)), w, h, 0, 0, w, h))
+        // A near-white region (chrome hub / window) likewise gives no anchor.
+        assertNull(regionDominantColor(filled(w, h, rgb(235, 235, 240)), w, h, 0, 0, w, h))
     }
 
     @Test
-    fun `high NCC with a small move adapts the template`() {
-        assertEquals(
-            TrackGuard.ACCEPT_AND_ADAPT,
-            trackGuardDecision(ncc = 0.8, displacementPx = 10.0, boxSide = 100.0)
-        )
-    }
-
-    @Test
-    fun `high NCC but a big jump is accepted without adapting`() {
-        // On-target enough to accept, but too far to trust as a template refresh (guards the
-        // template from a lucky distractor match seeding drift).
-        assertEquals(
-            TrackGuard.ACCEPT,
-            trackGuardDecision(ncc = 0.8, displacementPx = 90.0, boxSide = 100.0)
-        )
-    }
-
-    @Test
-    fun `middling NCC is accepted but not adapted`() {
-        assertEquals(
-            TrackGuard.ACCEPT,
-            trackGuardDecision(ncc = 0.4, displacementPx = 5.0, boxSide = 100.0)
-        )
+    fun `colour fraction is high on the anchor colour and low off it`() {
+        val w = 10; val h = 10
+        val profile = MarkerColorProfile.sample(30, 60, 200) // blue plate
+        assertTrue(regionColorFraction(filled(w, h, rgb(30, 60, 200)), w, h, 0, 0, w, h, profile) > 0.8)
+        // Skin tone (drift onto the lifter) should barely match blue.
+        assertTrue(regionColorFraction(filled(w, h, rgb(210, 160, 120)), w, h, 0, 0, w, h, profile) < 0.2)
     }
 }

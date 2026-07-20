@@ -3175,6 +3175,34 @@ _(Claude Code appends here after each completed task)_
   the plate centre is correct (it moves with the bar)"; default box back to plate-sized (0.07 →
   0.16×shorter side); failure copy plate-first. No logic change — the magnifier loupe + anti-drift
   guard + fail-safe all unchanged. versionCode 91, versionName 0.65.2.
+- [x] Sprint — colour-anchored anti-drift guard (v0.66.0): real deadlift footage showed the tracker
+  following the pull but gradually CLIMBING off the plate onto the lifter's body (skin/shorts) by
+  lockout — the plate and the rising torso both move up, so TrackerVit's box creeps onto the body. A
+  slow drift (a pixel or two per frame), so the v0.65.1 teleport guard doesn't catch it, and the
+  v0.65.0 grayscale-NCC guard that could catch gradual drift proved unreliable on-device (froze).
+  User chose "keep tuning markerless" (film setup fixed). Replaced the grayscale-NCC guard with a
+  COLOUR-anchored one: at the mark frame, `regionDominantColor` samples the dominant SATURATED colour
+  in the box (e.g. a plate's blue ring); each frame `regionColorFraction` checks TrackerVit's box
+  still contains enough of that colour. When the box climbs onto skin/shorts (a different colour) the
+  colour fraction collapses → HOLD the last good position + re-init the tracker there (so it
+  re-acquires when the plate returns). This is reliable for the observed failure because a plate's
+  blue is genuinely far from skin/black-shorts/grey-floor in colour, unlike grayscale similarity.
+  Fail-safes: a grey/white/chrome mark yields no saturated anchor → guard DISABLED, tracker simply
+  trusted (no regression on a target it can't anchor); a hard cap (`MAX_CONSECUTIVE_REJECTS = 12`)
+  means it can never freeze the clip; the teleport reject (`MAX_JUMP_FRACTION = 1.5` box widths)
+  stays for sudden jumps. `MIN_PLATE_FRACTION = 0.12`. Reuses `MarkerColorProfile.sample/.matches` +
+  `MarkerColorMatcher.rgbToHsv` (the dormant colour code, repurposed — no physical marker, it anchors
+  to the plate's OWN colour). Removed the grayscale `trackGuardDecision`/`TrackGuard` + NCC template
+  machinery from `trackWithVit` (the NCC `TemplateMatcher`/`toGray`/`extractPatch` stay for the
+  dormant `trackTemplate`). 3 new pure unit tests (dominant-colour, grey→no-anchor, on/off-colour
+  fraction). Build + suite green, zero `" lb"`, APK badged versionCode 92.
+  KNOWN GAP: needs a real look — the anchor only engages when the box includes a SATURATED part of
+  the plate (the coloured rim), so the box must cover the plate's colour, not just the grey/chrome
+  middle. Thresholds (0.12 fraction, 12-frame cap, 0.30 saturation) are first-pass. If it now holds/
+  freezes → the anchor is mis-firing (raise saturation floor or lower the cap); if it still climbs
+  onto the body → lower MIN_PLATE_FRACTION or the anchor didn't catch the plate colour. Honest
+  ceiling unchanged: markerless plate tracking in a tight, cluttered, backlit side-on shot is hard;
+  this targets the specific colour-drift failure, not every failure mode. versionCode 92, versionName 0.66.0.
 
 ## Release rules
 
