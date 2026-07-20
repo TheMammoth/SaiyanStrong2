@@ -3150,6 +3150,21 @@ _(Claude Code appends here after each completed task)_
   now holds too early, lower `acceptNcc`; if it still drifts, raise it. Tracking genuinely fast/
   backlit lockouts remains hard — holding-at-last-good is the honest degradation, not a full fix.
   versionCode 89, versionName 0.65.0.
+- [x] Hotfix — anti-drift guard was FREEZING the dot (v0.65.1): v0.65.0's guard regressed to "not
+  tracking at all" — the dot froze in place with no trail. Root cause: it rejected a frame on low
+  NCC ALONE, and since the on-device NCC can't be verified here (may read low even on-target due to
+  scale/blur), it rejected ~every frame and held at the (near-floor for a deadlift start) mark
+  position. Fail-safe redesign: `trackGuardDecision` now REJECTS only a clear TELEPORT — low NCC AND
+  a big jump (`displacementPx > boxSide × 1.2`). Smooth per-frame tracking never makes a big jump, so
+  even a mis-scaled/always-low NCC degrades to "trust the tracker" instead of freezing; only a sudden
+  leap to a leg/background is held. Plus a hard cap (`MAX_CONSECUTIVE_REJECTS = 3`): after 3
+  consecutive rejects the guard gives up and trusts the tracker, so it can NEVER hold a whole clip
+  (covers a genuinely fast move that looks like a jump). acceptNcc 0.30 → 0.15. Net: restores
+  v0.64.0's tracking + adds only teleport-to-distractor protection, can't freeze. Tests updated
+  (teleport rejected; low-NCC-small-move NOT rejected — the anti-freeze case). Also fixed the stale
+  "follow the plate" TRACKING header → "follow it". versionCode 90. NOTE: if the dot still freezes,
+  suspect a mistap (tapping the floor/background, not the plate) — a static path over a whole rep
+  means the tracked point never moved. versionCode 90, versionName 0.65.1.
 
 ## Release rules
 

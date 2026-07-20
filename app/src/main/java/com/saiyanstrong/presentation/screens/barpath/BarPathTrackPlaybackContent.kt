@@ -134,7 +134,7 @@ fun BarPathTrackPlaybackContent(
             Text(
                 when {
                     isTracking -> "Tracking the plate…"
-                    isMarked -> "TRACKING — watch the dot follow the plate"
+                    isMarked -> "TRACKING — watch the dot follow it"
                     pendingBox != null -> "Drag the box onto the hub, pinch to size it, then TRACK"
                     else -> "Scrub to the lift, then tap the bar end / sleeve hub (the bright centre)"
                 },

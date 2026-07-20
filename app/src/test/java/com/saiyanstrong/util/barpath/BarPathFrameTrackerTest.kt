@@ -102,10 +102,16 @@ class BarPathFrameTrackerTest {
     // ── anti-drift guard ───────────────────────────────────────────────────────────────
 
     @Test
-    fun `low NCC is rejected as drift`() {
-        // Box moved onto something that no longer looks like the marked target.
-        assertEquals(TrackGuard.REJECT, trackGuardDecision(ncc = 0.1, displacementPx = 5.0, boxSide = 100.0))
-        assertEquals(TrackGuard.REJECT, trackGuardDecision(ncc = -0.5, displacementPx = 5.0, boxSide = 100.0))
+    fun `a low-NCC teleport (low similarity AND a big jump) is rejected`() {
+        assertEquals(TrackGuard.REJECT, trackGuardDecision(ncc = 0.05, displacementPx = 150.0, boxSide = 100.0))
+        assertEquals(TrackGuard.REJECT, trackGuardDecision(ncc = -0.5, displacementPx = 200.0, boxSide = 100.0))
+    }
+
+    @Test
+    fun `low NCC with a small move is NOT rejected — smooth tracking never freezes`() {
+        // The key fail-safe: even if NCC reads low, a small per-frame move is trusted, so the dot
+        // can't freeze on ordinary smooth tracking.
+        assertEquals(TrackGuard.ACCEPT, trackGuardDecision(ncc = 0.05, displacementPx = 10.0, boxSide = 100.0))
     }
 
     @Test

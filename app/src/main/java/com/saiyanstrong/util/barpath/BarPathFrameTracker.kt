@@ -117,13 +117,19 @@ internal enum class TrackGuard { REJECT, ACCEPT, ACCEPT_AND_ADAPT }
  * looks like the marked target ([ncc], normalized cross-correlation in [-1,1]) and how far the box
  * moved from the last accepted position ([displacementPx]).
  *
- * - [ncc] below [acceptNcc] → REJECT: the box has drifted onto something different (a leg, the
- *   backlit window) — the caller holds the last good position and snaps the tracker back.
- * - [ncc] at/above [adaptNcc] AND a small move → ACCEPT_AND_ADAPT: a confident on-target frame;
- *   refresh the template so it follows gradual lighting/rotation change without the template itself
- *   walking off-target (a big jump is NOT allowed to adapt, so a lucky distractor match can't seed
- *   a bad template).
- * - otherwise → ACCEPT the position but keep the template fixed.
+ * FAIL-SAFE bias: the default is to TRUST the tracker. A frame is REJECTED only when it's a clear
+ * TELEPORT onto a dissimilar region — low [ncc] AND a big jump ([displacementPx] > [boxSide] ×
+ * [rejectJumpFraction]). Requiring the jump is deliberate: smooth per-frame tracking never makes a
+ * big jump, so even if NCC reads low (mis-scale, motion blur) the tracker is still trusted rather
+ * than frozen. Only a sudden leap to a leg/background triggers a hold. (An earlier version rejected
+ * on low NCC alone and could freeze the dot at the start position — this fixes that.)
+ *
+ * - low [ncc] AND big jump → REJECT (hold last good; caller also caps consecutive rejects so it can
+ *   never hold forever).
+ * - [ncc] ≥ [adaptNcc] AND a small move → ACCEPT_AND_ADAPT: refresh the template so it follows
+ *   gradual lighting/rotation change (a big jump can't adapt, so a lucky distractor can't seed a
+ *   bad template).
+ * - otherwise → ACCEPT the tracker's position, template fixed.
  *
  * Pure/unit-tested.
  */
@@ -131,11 +137,12 @@ internal fun trackGuardDecision(
     ncc: Double,
     displacementPx: Double,
     boxSide: Double,
-    acceptNcc: Double = 0.30,
+    acceptNcc: Double = 0.15,
     adaptNcc: Double = 0.55,
-    maxAdaptDispFraction: Double = 0.6
+    maxAdaptDispFraction: Double = 0.6,
+    rejectJumpFraction: Double = 1.2
 ): TrackGuard = when {
-    ncc < acceptNcc -> TrackGuard.REJECT
+    ncc < acceptNcc && displacementPx > boxSide * rejectJumpFraction -> TrackGuard.REJECT
     ncc >= adaptNcc && displacementPx <= boxSide * maxAdaptDispFraction -> TrackGuard.ACCEPT_AND_ADAPT
     else -> TrackGuard.ACCEPT
 }
@@ -195,6 +202,7 @@ class BarPathFrameTracker @Inject constructor(
         var lastGoodX = 0.0
         var lastGoodY = 0.0
         var lastGoodBox = initBox
+        var consecutiveRejects = 0
         driveRetrieverFrames(videoPath, intervalMs, fromMs, durationMs) { frame, timestampMs ->
             if (trackedSpanMs > 0L) {
                 onProgress?.invoke(((timestampMs - fromMs).toFloat() / trackedSpanMs).coerceIn(0f, 1f))
@@ -232,19 +240,29 @@ class BarPathFrameTracker @Inject constructor(
                     val cyG = (cy * GUARD_DOWNSCALE).toInt()
                     val ncc = TemplateMatcher.bestMatch(gray, gw, gh, tpl, tpSide, tpSide, cxG, cyG, 0, 0)?.score ?: -1.0
                     val disp = hypot(cx - lastGoodX, cy - lastGoodY)
-                    when (trackGuardDecision(ncc, disp, box.width.toDouble())) {
-                        TrackGuard.REJECT ->
-                            // Drifted off-target — snap the tracker back to the last good box; hold.
+                    val decision = trackGuardDecision(ncc, disp, box.width.toDouble())
+                    // Never hold forever: after a few consecutive rejects, trust the tracker (real
+                    // fast motion, or NCC just failing) so a bad guard can't freeze the whole clip.
+                    val effective = if (decision == TrackGuard.REJECT && consecutiveRejects >= MAX_CONSECUTIVE_REJECTS)
+                        TrackGuard.ACCEPT else decision
+                    when (effective) {
+                        TrackGuard.REJECT -> {
+                            // A clear teleport onto something dissimilar — snap the tracker back to
+                            // the last good box and hold this frame.
                             runCatching { tracker.init(frame, lastGoodBox) }
+                            consecutiveRejects++
+                        }
                         TrackGuard.ACCEPT -> {
                             outX = cx; outY = cy; outDiam = box.width.toDouble()
                             lastGoodX = cx; lastGoodY = cy; lastGoodBox = trackedBox
+                            consecutiveRejects = 0
                         }
                         TrackGuard.ACCEPT_AND_ADAPT -> {
                             outX = cx; outY = cy; outDiam = box.width.toDouble()
                             lastGoodX = cx; lastGoodY = cy; lastGoodBox = trackedBox
                             // Refresh the template so it follows gradual lighting/rotation change.
                             extractPatch(gray, gw, gh, cxG, cyG, tpSide)?.let { template = it }
+                            consecutiveRejects = 0
                         }
                     }
                 }
@@ -713,6 +731,9 @@ class BarPathFrameTracker @Inject constructor(
         const val GUARD_DOWNSCALE = 0.5
         const val GUARD_MIN_PATCH = 16
         const val GUARD_MAX_PATCH = 48
+        // Max consecutive rejects before the guard gives up and trusts the tracker — so a bad NCC
+        // read can never freeze the dot for the whole clip.
+        const val MAX_CONSECUTIVE_REJECTS = 3
 
         // A matching pixel always contributes at least a little weight, even if matchScore()
         // rounds to 0 at the tolerance boundary — keeps its contribution to the centroid
