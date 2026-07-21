@@ -116,8 +116,47 @@ class BarPathCaptureViewModel @Inject constructor(
     private val barPathRepository: BarPathRepository,
     private val userRepository: UserRepository,
     private val exerciseRepository: ExerciseRepository,
-    private val sessionShareImageSaver: SessionShareImageSaver
+    private val sessionShareImageSaver: SessionShareImageSaver,
+    private val trackingRunner: BarPathTrackingRunner
 ) : ViewModel() {
+
+    init {
+        // Mirror/restore the app-scoped tracking pass, so leaving the screen and coming back (or
+        // backgrounding) doesn't interrupt a long multi-rep analysis — a fresh ViewModel restores
+        // the player from whatever the runner is currently doing.
+        viewModelScope.launch { trackingRunner.state.collect { applyTrackState(it) } }
+    }
+
+    private fun applyTrackState(st: TrackState) {
+        when (st) {
+            is TrackState.Idle -> Unit
+            is TrackState.Working -> {
+                _liveSamples.value = st.samples
+                _uiState.update { it.restoredFrom(st.request).copy(isTracking = true, trackingProgress = st.progress) }
+            }
+            is TrackState.Complete -> {
+                _liveSamples.value = st.samples
+                _uiState.update {
+                    it.restoredFrom(st.request).copy(isTracking = false, trackingProgress = 1f, trackedSamples = st.samples)
+                }
+            }
+            is TrackState.Failed -> {
+                _uiState.update { it.restoredFrom(st.request).copy(isTracking = false, errorMessage = st.message) }
+            }
+        }
+    }
+
+    /** Fill in the player state from a tracking request when this ViewModel is fresh (navigated back
+     * into mid/after analysis); keeps the ViewModel's own values when it already has them. */
+    private fun BarPathCaptureUiState.restoredFrom(req: TrackRequest): BarPathCaptureUiState = copy(
+        step = if (step == CaptureStep.RECORDING) CaptureStep.PLAYER else step,
+        videoPath = videoPath ?: req.videoPath,
+        videoWidthPx = if (videoWidthPx > 0) videoWidthPx else req.videoWidthPx,
+        videoHeightPx = if (videoHeightPx > 0) videoHeightPx else req.videoHeightPx,
+        markA = markA ?: req.markA,
+        markB = markB ?: req.markB,
+        markMs = markMs ?: req.markA.atMs
+    )
 
     private val exerciseId: Int = checkNotNull(savedStateHandle["exerciseId"])
     private val setLogId: Long = savedStateHandle.get<Long>("setLogId") ?: -1L
@@ -134,9 +173,6 @@ class BarPathCaptureViewModel @Inject constructor(
      * on the video's loop). Reset on each (re)mark. */
     private val _liveSamples = MutableStateFlow<List<BarPathSample>>(emptyList())
     val liveSamples: StateFlow<List<BarPathSample>> = _liveSamples.asStateFlow()
-
-    /** The in-flight background tracking job, cancelled when the user re-marks. */
-    private var trackJob: Job? = null
 
     /** The marker color profile "trained" during the pre-record calibration step (SPEC.md). Kept
      * separate from the ephemeral per-video [BarPathCaptureUiState.colorProfile] so it survives the
@@ -415,6 +451,7 @@ class BarPathCaptureViewModel @Inject constructor(
     /** Go straight to the live player — read only the video dimensions (a fast metadata read, needed
      * to map taps and draw the overlay); no blocking frame extraction, so playback starts at once. */
     private fun loadVideo(path: String, failureMessage: String) {
+        trackingRunner.clear() // a new video discards any previous (possibly restored) tracking pass
         _uiState.update { it.copy(isPreparingVideo = true) }
         viewModelScope.launch(Dispatchers.Default) {
             val (vw, vh) = runCatching { barPathFrameTracker.videoDimensions(path) }.getOrDefault(0 to 0)
@@ -476,34 +513,15 @@ class BarPathCaptureViewModel @Inject constructor(
         val videoPath = state.videoPath ?: return
         val a = state.markA ?: return
         val b = state.markB ?: return
-        trackJob?.cancel()
         _liveSamples.value = emptyList()
         _uiState.update { it.copy(isTracking = true, trackingProgress = 0f, trackedSamples = emptyList(), errorMessage = null) }
-
-        trackJob = viewModelScope.launch(Dispatchers.Default) {
-            val samples = runCatching {
-                barPathFrameTracker.trackPlateWholeClip(
-                    videoPath = videoPath,
-                    tapAX = a.tap.xPx.toDouble(), tapAY = a.tap.yPx.toDouble(), atAMs = a.atMs,
-                    tapBX = b.tap.xPx.toDouble(), tapBY = b.tap.yPx.toDouble(), atBMs = b.atMs,
-                    onProgress = { p -> _uiState.update { it.copy(trackingProgress = p) } },
-                    onSample = { s -> _liveSamples.update { it + s } }
-                )
-            }.getOrElse { emptyList() }
-
-            if (samples.size < 2) {
-                _uiState.update {
-                    it.copy(isTracking = false, errorMessage = "Couldn't track the plate. Re-tap a clearly coloured plate (the rim), not the grey middle.")
-                }
-            } else {
-                _uiState.update { it.copy(isTracking = false, trackedSamples = samples) }
-            }
-        }
+        // App-scoped: keeps running even if the user leaves the screen; the collector mirrors it.
+        trackingRunner.start(TrackRequest(videoPath, state.videoWidthPx, state.videoHeightPx, a, b))
     }
 
     /** RE-MARK — drop both marks/track so the user can re-mark the plate from scratch. */
     fun onReMark() {
-        trackJob?.cancel()
+        trackingRunner.clear()
         _liveSamples.value = emptyList()
         _uiState.update {
             it.copy(
@@ -562,6 +580,9 @@ class BarPathCaptureViewModel @Inject constructor(
         val state = _uiState.value
         val videoPath = state.videoPath ?: return
         val atMs = state.markMs ?: 0L
+        // The tracked samples are held in _liveSamples now; release the runner so a later fresh
+        // session isn't auto-restored into this finished track.
+        trackingRunner.clear()
         _uiState.update { it.copy(isPreparingVideo = true) }
         viewModelScope.launch(Dispatchers.Default) {
             val frame = runCatching { barPathFrameTracker.extractFrameAt(videoPath, atMs) }.getOrNull()
@@ -700,6 +721,7 @@ class BarPathCaptureViewModel @Inject constructor(
 
     fun onRetry() {
         calibratedProfile = null
+        trackingRunner.clear()
         _uiState.value = BarPathCaptureUiState()
     }
 }

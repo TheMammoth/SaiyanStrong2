@@ -3306,6 +3306,24 @@ _(Claude Code appends here after each completed task)_
   first-pass). Chosen scope = auto, no manual rep edit → a mis-count needs a re-track ("delete a
   wrong rep" is the flagged follow-up). Per-rep velocity uses one plate scale for the whole set
   (fine if the camera doesn't move). versionCode 95, versionName 0.69.0.
+- [x] VBT — analysis survives leaving the screen (v0.69.1): user reported the multi-rep analysis is
+  slow (expected — whole clip + backward pass) AND gets INTERRUPTED if they leave the capture screen
+  (navigating away clears the ViewModel → cancels `viewModelScope`, killing the tracking coroutine).
+  Fix: new `@Singleton BarPathTrackingRunner` runs `trackPlateWholeClip` on an APPLICATION-scoped
+  coroutine (`CoroutineScope(SupervisorJob()+Dispatchers.Default)`), not the ViewModel's scope, so
+  leaving/backgrounding no longer cancels it. It exposes a `TrackState` (Idle/Working/Complete/Failed
+  with the `TrackRequest` — videoPath, dims, both marks — for restore). `BarPathCaptureViewModel`
+  `onConfirmTrack` delegates to `runner.start(...)`; an init-time collector mirrors the runner into
+  uiState and, when the ViewModel is fresh (navigated back in), RESTORES the player from the request
+  (`restoredFrom`) so an in-progress OR just-finished analysis is picked back up. Runner is cleared on
+  the actions that mean new/done: `loadVideo` (new recording/import), `onGetVelocityNumbers`
+  (proceeding past the track), `onReMark`, `onRetry` — so a fresh session isn't hijacked by a stale
+  result. Removed the old `viewModelScope` `trackJob`. Build + full suite green, APK badged versionCode
+  96. KNOWN GAP: does NOT survive the OS killing the whole app process (that would need a foreground
+  service); the analysis time itself is unchanged (still whole-clip + backward pass) — this makes the
+  wait interruptible-safe, not shorter. Minor edge: abandoning a finished track (without GET VELOCITY)
+  then re-opening the feature fresh shows the old result until RE-MARK / a new recording. versionCode
+  96, versionName 0.69.1.
 
 ## Release rules
 
