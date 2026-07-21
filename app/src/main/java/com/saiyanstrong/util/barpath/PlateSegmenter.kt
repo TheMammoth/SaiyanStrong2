@@ -18,7 +18,10 @@ data class PlateSelection(
     val maxY: Int,
     val diameterPx: Double,
     val pixelCount: Int,
-    val colorProfile: MarkerColorProfile
+    val colorProfile: MarkerColorProfile,
+    /** The region's raw (hue,sat,val) samples — so two selections' samples can be combined into one
+     * colour model that spans both lighting conditions (two-mark tracking). */
+    val samples: List<Triple<Double, Double, Double>>
 )
 
 /**
@@ -97,7 +100,8 @@ object PlateSegmenter {
             minX = minX, minY = minY, maxX = maxX, maxY = maxY,
             diameterPx = max(maxX - minX + 1, maxY - minY + 1).toDouble(),
             pixelCount = count,
-            colorProfile = profile
+            colorProfile = profile,
+            samples = samples
         )
     }
 

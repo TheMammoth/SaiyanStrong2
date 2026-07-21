@@ -149,4 +149,36 @@ class BarPathFrameTrackerTest {
     fun `choosePlateBlob returns null for no blobs`() {
         assertNull(choosePlateBlob(emptyList(), 10.0 to 10.0, 20.0))
     }
+
+    // ── two-mark merge + gap fill ───────────────────────────────────────────────────────
+
+    @Test
+    fun `mergeDetections prefers forward, falls back to backward, null when both miss`() {
+        val fwd = listOf(1.0 to 1.0, null, null)
+        val bwd = listOf(9.0 to 9.0, 2.0 to 2.0, null)
+        val m = mergeDetections(fwd, bwd)
+        assertEquals(1.0 to 1.0, m[0]) // forward wins where present
+        assertEquals(2.0 to 2.0, m[1]) // backward fills the forward miss
+        assertNull(m[2])               // both missed
+    }
+
+    @Test
+    fun `fillGaps interpolates an interior gap linearly`() {
+        val f = fillGaps(listOf(0.0 to 0.0, null, null, 3.0 to 30.0))
+        assertEquals(4, f.size)
+        assertEquals(1.0, f[1].first, 1e-9); assertEquals(10.0, f[1].second, 1e-9)
+        assertEquals(2.0, f[2].first, 1e-9); assertEquals(20.0, f[2].second, 1e-9)
+    }
+
+    @Test
+    fun `fillGaps clamps leading and trailing nulls to the nearest detection`() {
+        val f = fillGaps(listOf(null, 5.0 to 5.0, null))
+        assertEquals(5.0 to 5.0, f[0])
+        assertEquals(5.0 to 5.0, f[2])
+    }
+
+    @Test
+    fun `fillGaps on an all-null list returns empty`() {
+        assertTrue(fillGaps(listOf(null, null, null)).isEmpty())
+    }
 }

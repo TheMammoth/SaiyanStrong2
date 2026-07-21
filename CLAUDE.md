@@ -3241,6 +3241,38 @@ _(Claude Code appends here after each completed task)_
   the coloured rim). Thresholds (flood tol 22°/0.34/0.34, minPixels 60, size band 0.4–2.5×) are
   first-pass. If the outline grabs too much/little → adjust the flood tolerance; if it jumps to a
   same-colour object → tighten the size band or nearest gate. versionCode 93, versionName 0.67.0.
+- [x] Sprint — two-mark plate tracking (bottom + top) with bidirectional fill (v0.68.0), per SPEC.md
+  /spec round. v0.67.0's re-detection fixed the body-climb (dot rides the plate now) but still
+  MISSED a few frames near lockout (plate backlit/blurred → colour match drops), while the bottom
+  (where the user marks) tracked perfectly. User's idea: mark the plate at the top too and figure
+  out the whole path. Also confirmed to the user that the app already pre-analyses the whole clip
+  (the TRACK progress bar), so misses are detection misses, not live lag. Chosen (clarifying qs):
+  ALWAYS mark two (bottom + top), COMBINED colour model + BIDIRECTIONAL fill.
+  (1) New `BarPathFrameTracker.trackPlateTwoMark(tapA, atA, tapB, atB, ...)`: segments the plate at
+  BOTH marks (`segmentAtTime`), builds ONE combined `MarkerColorProfile` from both regions' HSV
+  samples (`MarkerColorRangeBuilder.build(selA.samples + selB.samples)`) so it matches the plate in
+  BOTH lighting conditions (the top is backlit — the single-mark model was the cause of the top
+  misses); then re-detects the plate FORWARD from the earlier mark and BACKWARD from the later mark
+  over the between-marks range (`detectPlateAlong`, refactored to drive an ordered timestamp list and
+  return per-frame centre-or-null), and merges (`mergeDetections`: prefer forward, else backward) +
+  fills remaining gaps (`fillGaps`: linear interpolation, ends clamped). The top mark's backward pass
+  is confident exactly where the bottom's forward pass is weakest → the top misses are covered. Falls
+  back to single-mark `trackPlateByRedetection` if one segmentation fails. `PlateSelection` gained a
+  `samples` field to enable the combined model.
+  (2) UX: the placing step now takes TWO taps — "tap the plate at the BOTTOM" → "now scrub to the TOP
+  and tap the plate" (guided prompts); both selection circles drawn; a third tap redoes the top;
+  RE-MARK (now also shown mid-placing once the bottom is marked) clears both; TRACK shows only once
+  both are set → `onConfirmTrack` runs `trackPlateTwoMark` with the track-then-watch progress bar
+  (progress spans both passes). ViewModel: `PlateMark` + `markA`/`markB` replace the single
+  `plateSelection`; `markMs` = bottom mark's time (for the scale-step still). Player takes
+  `plateSelectionA`/`plateSelectionB`.
+  (3) 5 new pure unit tests (`mergeDetections` prefer/fallback/both-null; `fillGaps` interpolate/
+  clamp-ends/all-null-empty). Build + full suite green, zero `" lb"`, APK badged versionCode 94.
+  KNOWN GAP: needs a real look — the backward pass DOUBLES frame extraction over the between-marks
+  range (bounded by `MAX_SAMPLES`, under the same progress bar; a real time cost). Still
+  colour-dependent; two lighting samples widen the model, slightly raising same-colour-distractor
+  risk (mitigated by `choosePlateBlob`'s size+nearest gates + two anchors). Interpolated gaps are
+  straight lines (fine for a few frames, would smear a long occlusion). versionCode 94, versionName 0.68.0.
 
 ## Release rules
 

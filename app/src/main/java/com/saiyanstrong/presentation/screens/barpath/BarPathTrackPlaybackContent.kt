@@ -80,7 +80,8 @@ fun BarPathTrackPlaybackContent(
     isTracking: Boolean,
     trackingProgress: Float,
     placementFrame: android.graphics.Bitmap?,
-    plateSelection: PlateSelectionUi?,
+    plateSelectionA: PlateSelectionUi?,
+    plateSelectionB: PlateSelectionUi?,
     errorMessage: String?,
     onSegmentTap: (videoX: Float, videoY: Float, atMs: Long) -> Unit,
     onConfirmTrack: () -> Unit,
@@ -132,13 +133,14 @@ fun BarPathTrackPlaybackContent(
                 when {
                     isTracking -> "Tracking the plate…"
                     isMarked -> "TRACKING — the dot on the plate is correct (it moves with the bar)"
-                    plateSelection != null -> "Plate selected — tap again to redo, or TRACK"
-                    else -> "Scrub to the lift, then tap a weight plate (the coloured rim)"
+                    plateSelectionA == null -> "Scrub to the BOTTOM, then tap the plate (the coloured rim)"
+                    plateSelectionB == null -> "Now scrub to the TOP and tap the plate"
+                    else -> "Both marked — tap the top again to redo, or TRACK"
                 },
                 color = PowerAmber, fontSize = 12.sp, fontWeight = FontWeight.Black, letterSpacing = 1.sp,
                 modifier = Modifier.weight(1f)
             )
-            if (isMarked) {
+            if (isMarked || (placing && plateSelectionA != null)) {
                 TextButton(onClick = { lastTap = null; onReMark() }) {
                     Text("RE-MARK", color = NeonGreen, fontWeight = FontWeight.Black, fontSize = 12.sp)
                 }
@@ -185,7 +187,10 @@ fun BarPathTrackPlaybackContent(
                         modifier = Modifier.fillMaxSize()
                     )
                 } else if (placing) {
-                    plateSelection?.let { sel ->
+                    plateSelectionA?.let { sel ->
+                        PlateSelectionOverlay(sel, videoWidthPx, videoHeightPx, Modifier.fillMaxSize())
+                    }
+                    plateSelectionB?.let { sel ->
                         PlateSelectionOverlay(sel, videoWidthPx, videoHeightPx, Modifier.fillMaxSize())
                     }
                 }
@@ -252,12 +257,12 @@ fun BarPathTrackPlaybackContent(
         }
 
         when {
-            placing && plateSelection != null -> {
+            placing && plateSelectionA != null && plateSelectionB != null -> {
                 SaiyanButton(
                     onClick = onConfirmTrack,
                     modifier = Modifier.fillMaxWidth().padding(16.dp)
                 ) {
-                    Text("TRACK THIS PLATE  >>>", fontWeight = FontWeight.Black, fontSize = 13.sp)
+                    Text("TRACK THE PLATE  >>>", fontWeight = FontWeight.Black, fontSize = 13.sp)
                 }
             }
             isMarked && samples.size >= 2 -> {

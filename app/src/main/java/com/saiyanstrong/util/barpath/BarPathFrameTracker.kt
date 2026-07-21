@@ -143,6 +143,50 @@ internal fun choosePlateBlob(
 }
 
 /**
+ * Merge a forward and a backward per-frame detection pass (index-aligned by timestamp): prefer the
+ * forward detection, fall back to the backward one, null only where both missed. This is why two
+ * marks (bottom + top) cover the top misses — the top mark's backward pass is confident exactly
+ * where the bottom mark's forward pass is weakest. Pure/unit-tested.
+ */
+internal fun mergeDetections(
+    fwd: List<Pair<Double, Double>?>,
+    bwd: List<Pair<Double, Double>?>
+): List<Pair<Double, Double>?> {
+    val n = maxOf(fwd.size, bwd.size)
+    return (0 until n).map { i -> fwd.getOrNull(i) ?: bwd.getOrNull(i) }
+}
+
+/**
+ * Fill nulls (frames missed by both passes) by linear interpolation between the nearest detected
+ * neighbours; leading/trailing nulls clamp to the nearest detection. All-null → empty. Pure/tested.
+ */
+internal fun fillGaps(points: List<Pair<Double, Double>?>): List<Pair<Double, Double>> {
+    val firstKnown = points.indexOfFirst { it != null }
+    if (firstKnown < 0) return emptyList()
+    val lastKnown = points.indexOfLast { it != null }
+    val n = points.size
+    val out = arrayOfNulls<Pair<Double, Double>>(n)
+    for (i in points.indices) out[i] = points[i]
+    for (i in 0 until firstKnown) out[i] = points[firstKnown]
+    for (i in lastKnown + 1 until n) out[i] = points[lastKnown]
+    var i = firstKnown
+    while (i <= lastKnown) {
+        if (out[i] != null) { i++; continue }
+        val start = i - 1 // known (i > firstKnown here)
+        var j = i
+        while (out[j] == null) j++ // out[j] known — guaranteed at or before lastKnown
+        val p0 = out[start]!!; val p1 = out[j]!!
+        val gapLen = (j - start).toDouble()
+        for (k in i until j) {
+            val f = (k - start) / gapLen
+            out[k] = (p0.first + (p1.first - p0.first) * f) to (p0.second + (p1.second - p0.second) * f)
+        }
+        i = j
+    }
+    return out.map { it!! }
+}
+
+/**
  * Average RGB of the sufficiently-saturated, bright pixels in the [rx,ry,rw,rh] sub-rect of an ARGB
  * grid — the anti-drift guard's COLOUR ANCHOR. Returns null when too few pixels are colourful (a
  * grey/white/chrome region has no distinct colour to anchor to, so the guard stays disabled and the
@@ -414,10 +458,130 @@ class BarPathFrameTracker @Inject constructor(
     }
 
     /**
-     * The video's DISPLAY dimensions (width, height) — rotation-applied, so they match both the
-     * coordinate space of the tracked centroids (getFrameAtTime returns rotation-applied frames)
-     * and what a player renders. Needed to map centroids onto the replay video. (0,0) if unknown.
+     * TWO-MARK plate tracking (bottom + top). Segments the plate at BOTH marks, builds one combined
+     * colour model spanning both lighting conditions, then re-detects the plate forward from the
+     * earlier mark and backward from the later mark over the between-marks range and merges them
+     * ([mergeDetections] + [fillGaps]) — so a miss near the top (where the plate is backlit) is
+     * covered by the top mark's backward pass. Falls back to single-mark [trackPlateByRedetection]
+     * if one segmentation fails; empty if both fail. Tap coords in full-res video px.
      */
+    fun trackPlateTwoMark(
+        videoPath: String,
+        tapAX: Double, tapAY: Double, atAMs: Long,
+        tapBX: Double, tapBY: Double, atBMs: Long,
+        onProgress: ((Float) -> Unit)? = null,
+        onSample: ((BarPathSample) -> Unit)? = null
+    ): List<BarPathSample> {
+        val selA = segmentAtTime(videoPath, atAMs, tapAX, tapAY)
+        val selB = segmentAtTime(videoPath, atBMs, tapBX, tapBY)
+        if (selA == null && selB == null) return emptyList()
+        // One mark failed — fall back to single-mark tracking from the good one.
+        if (selA == null || selB == null) {
+            val (tx, ty, ms) = if (selA != null) Triple(tapAX, tapAY, atAMs) else Triple(tapBX, tapBY, atBMs)
+            return trackPlateByRedetection(videoPath, tx, ty, ms, onProgress, onSample)
+        }
+
+        val (rawIntervalMs, durationMs) = readTiming(videoPath, null)
+        if (durationMs <= 0L) return emptyList()
+        val loMs = minOf(atAMs, atBMs).coerceIn(0L, durationMs)
+        val hiMs = maxOf(atAMs, atBMs).coerceIn(0L, durationMs)
+        val spanMs = (hiMs - loMs).coerceAtLeast(1L)
+        val intervalMs = maxOf(rawIntervalMs, spanMs / MAX_SAMPLES).coerceAtLeast(MIN_SAMPLE_INTERVAL_MS)
+
+        val timestamps = ArrayList<Long>()
+        var t = loMs
+        while (t <= hiMs) { timestamps.add(t); t += intervalMs }
+        if (timestamps.isEmpty()) timestamps.add(loMs)
+
+        val combinedProfile = MarkerColorRangeBuilder.build(selA.samples + selB.samples) ?: selA.colorProfile
+        val expectedDiameter = (selA.diameterPx + selB.diameterPx) / 2.0 // downscaled space
+        val early = if (atAMs <= atBMs) selA else selB
+        val late = if (atAMs <= atBMs) selB else selA
+        val earlySeed = early.centroidX to early.centroidY
+        val lateSeed = late.centroidX to late.centroidY
+
+        val total = timestamps.size * 2
+        var doneCount = 0
+        val tick: () -> Unit = { doneCount++; onProgress?.invoke((doneCount.toFloat() / total).coerceIn(0f, 1f)) }
+
+        val fwdMap = detectPlateAlong(videoPath, combinedProfile, expectedDiameter, earlySeed, timestamps, tick)
+        val bwdMap = detectPlateAlong(videoPath, combinedProfile, expectedDiameter, lateSeed, timestamps.reversed(), tick)
+
+        val merged = mergeDetections(timestamps.map { fwdMap[it] }, timestamps.map { bwdMap[it] })
+        val filled = fillGaps(merged)
+        if (filled.isEmpty()) return emptyList()
+
+        val samples = timestamps.indices.map { i ->
+            val (x, y) = filled[i]
+            BarPathSample(timestamps[i], x / GUARD_DOWNSCALE, y / GUARD_DOWNSCALE, expectedDiameter / GUARD_DOWNSCALE)
+        }
+        samples.forEach { onSample?.invoke(it) }
+        return samples
+    }
+
+    /** Segments the plate on the frame nearest [atMs] at the tap ([tapX],[tapY], full-res video px);
+     * returns the selection in DOWNSCALED (blob) space, or null. */
+    private fun segmentAtTime(videoPath: String, atMs: Long, tapX: Double, tapY: Double): PlateSelection? {
+        val frame = extractFrameAt(videoPath, atMs) ?: return null
+        val gw = (frame.width * GUARD_DOWNSCALE).toInt().coerceAtLeast(1)
+        val gh = (frame.height * GUARD_DOWNSCALE).toInt().coerceAtLeast(1)
+        val argb = scaledArgb(frame, gw, gh)
+        frame.recycle()
+        return PlateSegmenter.segment(argb, gw, gh, (tapX * GUARD_DOWNSCALE).toInt(), (tapY * GUARD_DOWNSCALE).toInt())
+    }
+
+    /**
+     * One directional re-detection pass: over [timestamps] in the given order (ascending = forward,
+     * descending = backward), find the plate blob per frame (seeded at [seedCentre], downscaled
+     * space) and return each timestamp's detected centre (downscaled) or null on a miss. No internal
+     * hold — misses are explicit so the two passes can be merged.
+     */
+    private fun detectPlateAlong(
+        videoPath: String,
+        profile: MarkerColorProfile,
+        expectedDiameter: Double,
+        seedCentre: Pair<Double, Double>,
+        timestamps: List<Long>,
+        onFrame: (() -> Unit)? = null
+    ): Map<Long, Pair<Double, Double>?> {
+        val result = HashMap<Long, Pair<Double, Double>?>()
+        val retriever = MediaMetadataRetriever()
+        try {
+            retriever.setDataSource(videoPath)
+            var prev: Pair<Double, Double>? = seedCentre
+            for (ts in timestamps) {
+                val frame = retriever.getFrameAtTime(ts * 1000, MediaMetadataRetriever.OPTION_CLOSEST)
+                if (frame == null) { result[ts] = null; onFrame?.invoke(); continue }
+                val gw = (frame.width * GUARD_DOWNSCALE).toInt().coerceAtLeast(1)
+                val gh = (frame.height * GUARD_DOWNSCALE).toInt().coerceAtLeast(1)
+                val argb = scaledArgb(frame, gw, gh)
+                frame.recycle()
+                val mask = BooleanArray(argb.size)
+                val weights = DoubleArray(argb.size)
+                for (i in argb.indices) {
+                    val px = argb[i]
+                    val r = (px shr 16) and 0xFF; val g = (px shr 8) and 0xFF; val b = px and 0xFF
+                    if (profile.matches(r, g, b)) { mask[i] = true; weights[i] = profile.matchScore(r, g, b).coerceAtLeast(MIN_WEIGHT) }
+                }
+                val blobs = findBlobs(mask, weights, gw, gh).filter { it.size >= MIN_MARKER_PIXELS }
+                val chosen = choosePlateBlob(blobs, prev, expectedDiameter)
+                if (chosen != null) {
+                    prev = chosen.centroidX to chosen.centroidY
+                    result[ts] = prev
+                } else {
+                    result[ts] = null
+                }
+                onFrame?.invoke()
+            }
+        } finally {
+            retriever.release()
+        }
+        return result
+    }
+
+    /** The video's DISPLAY dimensions (width, height) — rotation-applied, so they match both the
+     * coordinate space of the tracked centroids (getFrameAtTime returns rotation-applied frames)
+     * and what a player renders. Needed to map centroids onto the replay video. (0,0) if unknown. */
     fun videoDimensions(videoPath: String): Pair<Int, Int> {
         val retriever = MediaMetadataRetriever()
         return try {
