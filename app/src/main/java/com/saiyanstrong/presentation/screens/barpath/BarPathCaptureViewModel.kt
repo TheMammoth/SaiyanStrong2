@@ -127,13 +127,6 @@ class BarPathCaptureViewModel @Inject constructor(
     private val trackingRunner: BarPathTrackingRunner
 ) : ViewModel() {
 
-    init {
-        // Mirror/restore the app-scoped tracking pass, so leaving the screen and coming back (or
-        // backgrounding) doesn't interrupt a long multi-rep analysis — a fresh ViewModel restores
-        // the player from whatever the runner is currently doing.
-        viewModelScope.launch { trackingRunner.state.collect { applyTrackState(it) } }
-    }
-
     private fun applyTrackState(st: SetTrackState) {
         // The player's trail shows the rep being tracked (partial) or the last completed rep.
         _liveSamples.value = if (st.trackingRep) st.partialSamples
@@ -730,5 +723,13 @@ class BarPathCaptureViewModel @Inject constructor(
         calibratedProfile = null
         trackingRunner.clear()
         _uiState.value = BarPathCaptureUiState()
+    }
+
+    // Declared LAST so every StateFlow it touches (_liveSamples/_uiState) is initialised before the
+    // collector's first (synchronous) emission — otherwise applyTrackState NPEs on a null field.
+    init {
+        // Mirror/restore the app-scoped tracking pass, so leaving the screen and coming back (or
+        // backgrounding) doesn't interrupt a set — a fresh ViewModel restores from the runner.
+        viewModelScope.launch { trackingRunner.state.collect { applyTrackState(it) } }
     }
 }

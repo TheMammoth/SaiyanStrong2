@@ -3376,6 +3376,20 @@ _(Claude Code appends here after each completed task)_
   KNOWN GAP: auto-track on the 2nd tap means a mis-tapped top tracks a wrong window (mitigated by REDO
   REP + UNDO). Not device-verified — the tap-tap-track-repeat loop + per-rep results are the gate.
   versionCode 98, versionName 0.71.0.
+- [x] Crash fix — v0.71.0 crashed on opening the bar-path screen (v0.71.1 = crash-reporter
+  diagnostic, v0.71.2 = the fix). Global `CrashReporter` (uncaught-exception handler → save trace →
+  MainActivity shows it on next launch, since no USB logcat) captured it:
+  `NullPointerException … MutableStateFlow.setValue on a null object reference` at
+  `BarPathCaptureViewModel.applyTrackState` (`_liveSamples.value = …`), from the `init { }` collector
+  running during `<init>`. Root cause: the `init { viewModelScope.launch { trackingRunner.state
+  .collect { applyTrackState } } }` block was declared at the TOP of the class, but `_liveSamples`/
+  `_uiState` are declared lower — Kotlin initialises properties/init-blocks top-to-bottom, and
+  `StateFlow.collect` emits its current value SYNCHRONOUSLY on first collect, so `applyTrackState` ran
+  while `_liveSamples` was still null. Only v0.71.0 tripped it: v0.69.1/0.70.0's `applyTrackState` did
+  nothing on the first (Idle/empty) emission, but v0.71.0's UNCONDITIONALLY writes `_liveSamples.value`
+  every emission. Fix: moved the collector `init { }` to the END of the class (all StateFlow fields
+  initialised first). `CrashReporter` kept (genuinely useful given the standing no-logcat constraint).
+  versionCode 100, versionName 0.71.2.
 
 ## Release rules
 

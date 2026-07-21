@@ -39,8 +39,8 @@ android {
         applicationId = "com.saiyanstrong"
         minSdk = 26
         targetSdk = 35
-        versionCode = 99
-        versionName = "0.71.1"
+        versionCode = 100
+        versionName = "0.71.2"
 
         // OpenCV ships native .so per ABI; drop x86/x86_64 (no real phone needs them) to keep the
         // added APK weight to arm64 + armv7 only — halves the size cost of the tracking library.
