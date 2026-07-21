@@ -13,6 +13,7 @@ import com.saiyanstrong.domain.repository.ExerciseRepository
 import com.saiyanstrong.domain.repository.UserRepository
 import com.saiyanstrong.domain.usecase.AnalyzeBarPathUseCase
 import com.saiyanstrong.domain.util.ConcentricDetector
+import com.saiyanstrong.domain.util.RepSegmenter
 import com.saiyanstrong.domain.util.GyroTimeline
 import com.saiyanstrong.domain.util.LiftPhase
 import com.saiyanstrong.domain.util.LockOnTracker
@@ -54,6 +55,9 @@ data class PlateSelectionUi(val centerXVideo: Float, val centerYVideo: Float, va
  * selection outline it produced. */
 data class PlateMark(val tap: TapPoint, val atMs: Long, val selection: PlateSelectionUi)
 
+/** One rep of a set: its 1-based number + the analysis and per-frame path over that rep's concentric. */
+data class RepResult(val index: Int, val analysis: BarPathAnalysis, val trackedFrames: List<TrackedFrame>)
+
 data class BarPathCaptureUiState(
     val step: CaptureStep = CaptureStep.RECORDING,
     val videoPath: String? = null,
@@ -73,6 +77,8 @@ data class BarPathCaptureUiState(
     val weightKgInput: String = "",
     val errorMessage: String? = null,
     val analysis: BarPathAnalysis? = null,
+    /** Per-rep results for a multi-rep set (empty for a single-rep clip, where [analysis] is used). */
+    val repResults: List<RepResult> = emptyList(),
     val trackedSamples: List<BarPathSample> = emptyList(),
     // Per-frame path + video dimensions for the (ephemeral, in-session) replay overlay.
     val trackedFrames: List<TrackedFrame> = emptyList(),
@@ -476,7 +482,7 @@ class BarPathCaptureViewModel @Inject constructor(
 
         trackJob = viewModelScope.launch(Dispatchers.Default) {
             val samples = runCatching {
-                barPathFrameTracker.trackPlateTwoMark(
+                barPathFrameTracker.trackPlateWholeClip(
                     videoPath = videoPath,
                     tapAX = a.tap.xPx.toDouble(), tapAY = a.tap.yPx.toDouble(), atAMs = a.atMs,
                     tapBX = b.tap.xPx.toDouble(), tapBY = b.tap.yPx.toDouble(), atBMs = b.atMs,
@@ -605,30 +611,40 @@ class BarPathCaptureViewModel @Inject constructor(
 
         _uiState.update { it.copy(step = CaptureStep.PROCESSING, errorMessage = null) }
         viewModelScope.launch(Dispatchers.Default) {
-            val (concentricStartMs, concentricEndMs) = ConcentricDetector.detect(samples)
-                ?: (samples.first().timestampMs to samples.last().timestampMs)
-
-            val result = runCatching {
-                val analysis = analyzeBarPathUseCase.execute(
-                    samples = samples,
-                    pixelsPerMeter = pixelsPerMeter,
-                    massKg = massKg ?: 0.0,
-                    concentricStartMs = concentricStartMs,
-                    concentricEndMs = concentricEndMs
+            // Split the whole-set path into per-rep concentric windows; a single-rep clip yields one.
+            val windows = RepSegmenter.segment(samples).ifEmpty {
+                listOf(
+                    ConcentricDetector.detect(samples)
+                        ?: (samples.first().timestampMs to samples.last().timestampMs)
                 )
-                val frames = analyzeBarPathUseCase.trackFrames(samples, pixelsPerMeter, concentricStartMs, concentricEndMs)
-                analysis to frames
+            }
+
+            val reps = runCatching {
+                windows.mapIndexedNotNull { i, (startMs, endMs) ->
+                    val analysis = analyzeBarPathUseCase.execute(
+                        samples = samples, pixelsPerMeter = pixelsPerMeter, massKg = massKg ?: 0.0,
+                        concentricStartMs = startMs, concentricEndMs = endMs
+                    )
+                    val frames = analyzeBarPathUseCase.trackFrames(samples, pixelsPerMeter, startMs, endMs)
+                    RepResult(i + 1, analysis, frames)
+                }
             }.getOrNull()
 
-            if (result == null) {
+            if (reps.isNullOrEmpty()) {
                 _uiState.update {
                     it.copy(step = CaptureStep.ERROR, errorMessage = "Couldn't analyze the recording — try again.")
                 }
                 return@launch
             }
 
-            val (analysis, frames) = result
-            _uiState.update { it.copy(step = CaptureStep.RESULTS, analysis = analysis, trackedSamples = samples, trackedFrames = frames) }
+            // The best rep (highest mean velocity) drives the velocity replay + share card.
+            val best = reps.maxBy { it.analysis.meanConcentricVelocityMs }
+            _uiState.update {
+                it.copy(
+                    step = CaptureStep.RESULTS, repResults = reps,
+                    analysis = best.analysis, trackedFrames = best.trackedFrames, trackedSamples = samples
+                )
+            }
         }
     }
 
@@ -665,12 +681,18 @@ class BarPathCaptureViewModel @Inject constructor(
     }
 
     fun onSave() {
-        val analysis = _uiState.value.analysis ?: return
+        val state = _uiState.value
+        val reps = state.repResults
+        val analyses = if (reps.isNotEmpty()) reps.map { it.analysis } else listOfNotNull(state.analysis)
+        if (analyses.isEmpty()) return
         viewModelScope.launch {
             if (isStandalone) {
-                barPathRepository.saveFreestandingBarPathMetrics(exerciseId, analysis)
+                // Standalone: save every rep so the exercise's velocity chart shows the whole set.
+                analyses.forEach { barPathRepository.saveFreestandingBarPathMetrics(exerciseId, it) }
             } else {
-                barPathRepository.saveBarPathMetrics(setLogId, exerciseId, analysis)
+                // Set-linked: one metric per set log — save the best (highest mean velocity) rep.
+                val best = reps.maxByOrNull { it.analysis.meanConcentricVelocityMs }?.analysis ?: analyses.first()
+                barPathRepository.saveBarPathMetrics(setLogId, exerciseId, best)
             }
             _uiState.update { it.copy(isSaved = true) }
         }

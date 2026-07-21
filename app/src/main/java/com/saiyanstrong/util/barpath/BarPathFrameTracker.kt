@@ -519,6 +519,61 @@ class BarPathFrameTracker @Inject constructor(
         return samples
     }
 
+    /**
+     * WHOLE-CLIP multi-rep tracking. Uses the two first-rep marks only to build the combined colour
+     * model + anchor, then re-detects the plate over the ENTIRE video (forward from the bottom mark
+     * to the end, backward from it to the start; merged + gap-filled) so every rep is tracked. Rep
+     * segmentation happens later ([com.saiyanstrong.domain.util.RepSegmenter]) once a scale is known.
+     */
+    fun trackPlateWholeClip(
+        videoPath: String,
+        tapAX: Double, tapAY: Double, atAMs: Long,
+        tapBX: Double, tapBY: Double, atBMs: Long,
+        onProgress: ((Float) -> Unit)? = null,
+        onSample: ((BarPathSample) -> Unit)? = null
+    ): List<BarPathSample> {
+        val selA = segmentAtTime(videoPath, atAMs, tapAX, tapAY)
+        val selB = segmentAtTime(videoPath, atBMs, tapBX, tapBY)
+        if (selA == null && selB == null) return emptyList()
+
+        val (rawIntervalMs, durationMs) = readTiming(videoPath, null)
+        if (durationMs <= 0L) return emptyList()
+
+        val combinedSamples = (selA?.samples ?: emptyList()) + (selB?.samples ?: emptyList())
+        val combinedProfile = MarkerColorRangeBuilder.build(combinedSamples) ?: (selA ?: selB)!!.colorProfile
+        val expectedDiameter = listOfNotNull(selA?.diameterPx, selB?.diameterPx).average()
+        // Anchor on the bottom mark (A if present) — a known-good plate position to expand out from.
+        val anchor = selA ?: selB!!
+        val anchorMs = (if (selA != null) atAMs else atBMs).coerceIn(0L, durationMs)
+        val anchorSeed = anchor.centroidX to anchor.centroidY
+
+        val intervalMs = maxOf(rawIntervalMs, durationMs / MAX_SAMPLES_MULTIREP).coerceAtLeast(MIN_SAMPLE_INTERVAL_MS)
+        val timestamps = ArrayList<Long>()
+        var t = 0L
+        while (t <= durationMs) { timestamps.add(t); t += intervalMs }
+        if (timestamps.isEmpty()) timestamps.add(0L)
+
+        val fwdTs = timestamps.filter { it >= anchorMs }
+        val bwdTs = timestamps.filter { it <= anchorMs }.reversed()
+        val total = (fwdTs.size + bwdTs.size).coerceAtLeast(1)
+        var doneCount = 0
+        val tick: () -> Unit = { doneCount++; onProgress?.invoke((doneCount.toFloat() / total).coerceIn(0f, 1f)) }
+
+        val fwdMap = detectPlateAlong(videoPath, combinedProfile, expectedDiameter, anchorSeed, fwdTs, tick)
+        val bwdMap = detectPlateAlong(videoPath, combinedProfile, expectedDiameter, anchorSeed, bwdTs, tick)
+
+        val merged = mergeDetections(timestamps.map { fwdMap[it] }, timestamps.map { bwdMap[it] })
+        val filled = fillGaps(merged)
+        if (filled.isEmpty()) return emptyList()
+
+        val samples = timestamps.indices.map { i ->
+            val (x, y) = filled[i]
+            BarPathSample(timestamps[i], x / GUARD_DOWNSCALE, y / GUARD_DOWNSCALE, expectedDiameter / GUARD_DOWNSCALE)
+        }
+        samples.forEach { onSample?.invoke(it) }
+        return samples
+    }
+
     /** Segments the plate on the frame nearest [atMs] at the tap ([tapX],[tapY], full-res video px);
      * returns the selection in DOWNSCALED (blob) space, or null. */
     private fun segmentAtTime(videoPath: String, atMs: Long, tapX: Double, tapY: Double): PlateSelection? {
@@ -1060,6 +1115,10 @@ class BarPathFrameTracker @Inject constructor(
         // Only refresh the template from a STRONG match, so it follows gradual appearance/lighting
         // change through the rep without drifting onto whatever a weak match happened to land on.
         const val TEMPLATE_UPDATE_THRESHOLD = 0.6
+
+        // Multi-rep whole-clip tracking spans a longer video (several reps), so it gets a higher
+        // sample cap than the single-rep paths to keep enough temporal resolution per rep.
+        const val MAX_SAMPLES_MULTIREP = 300L
 
         // Upper bound on sampled frames per clip — each is a slow getFrameAtTime seek+decode, so
         // this caps worst-case tracking time (and the "stuck on Tracking…" perception) regardless

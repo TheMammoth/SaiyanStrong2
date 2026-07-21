@@ -45,6 +45,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
@@ -153,6 +155,7 @@ fun BarPathCaptureScreen(
                 CaptureStep.PROCESSING -> ProcessingStep(progress = uiState.trackingProgress)
                 CaptureStep.RESULTS -> ResultsStep(
                     analysis = uiState.analysis,
+                    repResults = uiState.repResults,
                     calibrationFrame = uiState.calibrationFrame,
                     trackedSamples = uiState.trackedSamples,
                     canReplay = uiState.trackedFrames.size >= 2 && uiState.videoPath != null &&
@@ -661,6 +664,7 @@ private fun ProcessingStep(progress: Float = 0f) {
 @Composable
 private fun ResultsStep(
     analysis: BarPathAnalysis?,
+    repResults: List<RepResult> = emptyList(),
     calibrationFrame: Bitmap? = null,
     trackedSamples: List<BarPathSample> = emptyList(),
     canReplay: Boolean = false,
@@ -670,6 +674,7 @@ private fun ResultsStep(
     onSave: () -> Unit
 ) {
     if (analysis == null) return
+    val isSet = repResults.size >= 2
     Column(Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState())) {
         if (calibrationFrame != null && trackedSamples.size >= 2) {
             Text(
@@ -682,6 +687,14 @@ private fun ResultsStep(
                 modifier = Modifier.fillMaxWidth().heightIn(max = 280.dp)
             )
             Spacer(Modifier.height(16.dp))
+        }
+        if (isSet) {
+            SetResultsSection(repResults)
+            Spacer(Modifier.height(16.dp))
+            Text(
+                "BEST REP", color = PowerAmber, fontSize = 11.sp,
+                fontWeight = FontWeight.Black, letterSpacing = 1.sp, modifier = Modifier.padding(bottom = 4.dp)
+            )
         }
         ResultRow("Peak velocity", "%.2f m/s".format(analysis.peakVelocityMs))
         ResultRow("Mean concentric velocity", "%.2f m/s".format(analysis.meanConcentricVelocityMs))
@@ -707,6 +720,58 @@ private fun ResultsStep(
         SaiyanButton(onClick = onSave, modifier = Modifier.fillMaxWidth()) {
             Text("SAVE TO SET  >>>", fontWeight = FontWeight.Black)
         }
+    }
+}
+
+/** Per-rep list + a velocity-drop chart for a multi-rep set — the set's velocity curve is the core
+ * VBT signal (velocity falling across reps = fatigue). */
+@Composable
+private fun SetResultsSection(reps: List<RepResult>) {
+    Text(
+        "SET — ${reps.size} REPS", color = NeonGreen, fontSize = 13.sp,
+        fontWeight = FontWeight.Black, letterSpacing = 1.sp
+    )
+    Spacer(Modifier.height(8.dp))
+    VelocityDropChart(
+        reps.map { it.analysis.meanConcentricVelocityMs.toFloat() },
+        modifier = Modifier.fillMaxWidth().height(120.dp)
+    )
+    Spacer(Modifier.height(8.dp))
+    reps.forEach { rep ->
+        Row(
+            Modifier.fillMaxWidth().padding(vertical = 3.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("Rep ${rep.index}", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+            Text("%.2f m/s".format(rep.analysis.meanConcentricVelocityMs), color = NeonGreen, fontSize = 13.sp, fontWeight = FontWeight.Black, modifier = Modifier.weight(1f))
+            Text("pk %.2f".format(rep.analysis.peakVelocityMs), color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp, modifier = Modifier.weight(0.9f))
+            Text("%.0f cm".format(rep.analysis.rangeOfMotionCm), color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp, modifier = Modifier.weight(0.8f))
+        }
+    }
+}
+
+/** Mean concentric velocity per rep — bars + a connecting line so the drop across the set is obvious. */
+@Composable
+private fun VelocityDropChart(meanVels: List<Float>, modifier: Modifier = Modifier) {
+    if (meanVels.isEmpty()) return
+    val maxV = meanVels.max().coerceAtLeast(0.01f)
+    Canvas(modifier) {
+        val n = meanVels.size
+        val gap = 6.dp.toPx()
+        val barW = ((size.width - gap * (n + 1)) / n).coerceAtLeast(1f)
+        val usableH = size.height * 0.9f
+        fun barX(i: Int) = gap + i * (barW + gap)
+        meanVels.forEachIndexed { i, v ->
+            val h = (v / maxV) * usableH
+            drawRect(color = NeonGreen.copy(alpha = 0.55f), topLeft = Offset(barX(i), size.height - h), size = Size(barW, h))
+        }
+        val path = Path()
+        meanVels.forEachIndexed { i, v ->
+            val cx = barX(i) + barW / 2f
+            val cy = size.height - (v / maxV) * usableH
+            if (i == 0) path.moveTo(cx, cy) else path.lineTo(cx, cy)
+        }
+        drawPath(path, PowerAmber, style = Stroke(width = 2.dp.toPx()))
     }
 }
 

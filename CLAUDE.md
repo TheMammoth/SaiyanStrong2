@@ -3273,6 +3273,39 @@ _(Claude Code appends here after each completed task)_
   colour-dependent; two lighting samples widen the model, slightly raising same-colour-distractor
   risk (mitigated by `choosePlateBlob`'s size+nearest gates + two anchors). Interpolated gaps are
   straight lines (fine for a few frames, would smear a long occlusion). versionCode 94, versionName 0.68.0.
+- [x] Sprint — multi-rep support (track a whole set, per-rep velocities) (v0.69.0), per SPEC.md /spec
+  round. Tracking was solved (v0.68.0, clean path + sensible numbers) but limited to ONE rep per
+  recording (the two marks bracketed one rep). User wanted a whole set. Chosen (clarifying qs): mark
+  the FIRST rep (bottom+top) to lock the colour, then auto-track the WHOLE video + auto-split into
+  reps; results = per-rep list + velocity-drop chart; reps gated by a minimum-ROM threshold (auto).
+  (1) `BarPathFrameTracker.trackPlateWholeClip(...)`: same combined-colour-model + bidirectional idea
+  as `trackPlateTwoMark`, but the range is the ENTIRE clip `[0, end]` — forward from the bottom mark
+  to the end, backward from it to the start, seeded at the bottom mark, merged (`mergeDetections`) +
+  gap-filled (`fillGaps`). Higher sample cap (`MAX_SAMPLES_MULTIREP = 300`) so several reps keep
+  temporal resolution. `onConfirmTrack` now calls this; `trackPlateTwoMark` dormant.
+  (2) New pure `domain/util/RepSegmenter.kt`: splits the vertical (yPx) path into per-rep concentric
+  windows via a hysteresis "zigzag" turning-point detector (deadband = fraction of the clip's height
+  range, so noise doesn't create turns) + a ROM gate (a rep must cover ≥ `minRomFraction` = 0.5 of
+  the biggest rep's range → small bounces/re-grips don't count). Falls back to `ConcentricDetector`'s
+  single window for a one-rep/flat/short clip. 6 unit tests (3 clean reps→3 windows, sub-threshold
+  bounce ignored, single rep→1, rising-only→1, flat→≤1, too-few→fallback). The initial-`trend==0`
+  zigzag bug (lost the first peak) was caught by the tests and fixed with explicit running max/min.
+  (3) Per-rep analysis: `onConfirmScale` runs `RepSegmenter.segment(samples)` → `AnalyzeBarPathUseCase`
+  per window → `List<RepResult>` (index + analysis + frames); `analysis`/`trackedFrames` set to the
+  BEST rep (highest mean velocity) so the existing velocity-replay + share card still work. New
+  `BarPathCaptureUiState.repResults`.
+  (4) Results UI: `SetResultsSection` (per-rep list: Rep N · mean · peak · ROM) + `VelocityDropChart`
+  (Canvas bars + connecting line of mean velocity per rep — the set's velocity curve) shown when
+  ≥2 reps, above a "BEST REP" detail block; a single-rep clip looks exactly as before. `onSave`
+  saves every rep as a freestanding metric (standalone) / the best rep to the set (set-linked) —
+  no Room schema change.
+  Build + full suite green, zero `" lb"`, APK badged versionCode 95.
+  KNOWN GAP: needs a real look — whole-clip tracking is a longer extraction (more frames + backward
+  pass, bounded by MAX_SAMPLES_MULTIREP, under the progress bar). Rep segmentation is heuristic (a
+  paused/odd-tempo rep could merge/split; ROM gate + hysteresis handle common cases, thresholds
+  first-pass). Chosen scope = auto, no manual rep edit → a mis-count needs a re-track ("delete a
+  wrong rep" is the flagged follow-up). Per-rep velocity uses one plate scale for the whole set
+  (fine if the camera doesn't move). versionCode 95, versionName 0.69.0.
 
 ## Release rules
 
