@@ -101,6 +101,27 @@ class BarPathTrackPlaybackContentTest {
     private fun frames(vararg xy: Pair<Double, Double>): List<TrackedFrame> =
         xy.mapIndexed { i, (x, y) -> TrackedFrame(i * 100L, x, y, 0.0) }
 
+    // ── repWindowsFromMarks (per-rep marking) ──────────────────────────────────────────
+
+    private fun mark(ms: Long) = PlateMark(TapPoint(0f, 0f), ms, PlateSelectionUi(0f, 0f, 10f))
+
+    @Test
+    fun `repWindowsFromMarks pairs marks into ordered rep windows`() {
+        val windows = repWindowsFromMarks(listOf(mark(100), mark(500), mark(1200), mark(1600)))
+        assertEquals(listOf(100L to 500L, 1200L to 1600L), windows)
+    }
+
+    @Test
+    fun `repWindowsFromMarks normalises tap order within a pair`() {
+        // Top tapped before bottom → still (min, max).
+        assertEquals(listOf(100L to 500L), repWindowsFromMarks(listOf(mark(500), mark(100))))
+    }
+
+    @Test
+    fun `repWindowsFromMarks ignores an incomplete trailing mark`() {
+        assertEquals(listOf(100L to 500L), repWindowsFromMarks(listOf(mark(100), mark(500), mark(900))))
+    }
+
     @Test
     fun `frame smoothing returns a short series unchanged`() {
         val f = frames(0.0 to 0.0, 10.0 to 10.0)

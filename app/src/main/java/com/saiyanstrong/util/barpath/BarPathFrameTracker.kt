@@ -574,6 +574,40 @@ class BarPathFrameTracker @Inject constructor(
         return samples
     }
 
+    /** One rep's two marks (bottom + top), full-res video px + playback ms. */
+    data class RepMarks(
+        val bottomTapX: Double, val bottomTapY: Double, val bottomMs: Long,
+        val topTapX: Double, val topTapY: Double, val topMs: Long
+    )
+
+    /**
+     * PER-REP multi-rep tracking: tracks EACH rep with the reliable bounded two-mark path
+     * ([trackPlateTwoMark] over that rep's `[bottom, top]`, both ends anchored) and concatenates the
+     * per-rep samples in time order. Each rep is short + both-ends-anchored, so this doesn't drift
+     * onto same-colour distractors or stall at the top the way whole-clip auto tracking did. Progress
+     * spans all reps.
+     */
+    fun trackPlateReps(
+        videoPath: String,
+        reps: List<RepMarks>,
+        onProgress: ((Float) -> Unit)? = null,
+        onSample: ((BarPathSample) -> Unit)? = null
+    ): List<BarPathSample> {
+        if (reps.isEmpty()) return emptyList()
+        val all = mutableListOf<BarPathSample>()
+        reps.forEachIndexed { i, rep ->
+            val repSamples = trackPlateTwoMark(
+                videoPath = videoPath,
+                tapAX = rep.bottomTapX, tapAY = rep.bottomTapY, atAMs = rep.bottomMs,
+                tapBX = rep.topTapX, tapBY = rep.topTapY, atBMs = rep.topMs,
+                onProgress = { p -> onProgress?.invoke(((i + p) / reps.size).coerceIn(0f, 1f)) },
+                onSample = { s -> onSample?.invoke(s) }
+            )
+            all += repSamples
+        }
+        return all
+    }
+
     /** Segments the plate on the frame nearest [atMs] at the tap ([tapX],[tapY], full-res video px);
      * returns the selection in DOWNSCALED (blob) space, or null. */
     private fun segmentAtTime(videoPath: String, atMs: Long, tapX: Double, tapY: Double): PlateSelection? {

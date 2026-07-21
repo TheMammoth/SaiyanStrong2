@@ -80,10 +80,10 @@ fun BarPathTrackPlaybackContent(
     isTracking: Boolean,
     trackingProgress: Float,
     placementFrame: android.graphics.Bitmap?,
-    plateSelectionA: PlateSelectionUi?,
-    plateSelectionB: PlateSelectionUi?,
+    selections: List<PlateSelectionUi>,
     errorMessage: String?,
     onSegmentTap: (videoX: Float, videoY: Float, atMs: Long) -> Unit,
+    onUndoMark: () -> Unit,
     onConfirmTrack: () -> Unit,
     onReMark: () -> Unit,
     onGetVelocityNumbers: () -> Unit
@@ -133,14 +133,19 @@ fun BarPathTrackPlaybackContent(
                 when {
                     isTracking -> "Tracking the plate…"
                     isMarked -> "TRACKING — the dot on the plate is correct (it moves with the bar)"
-                    plateSelectionA == null -> "Scrub to the BOTTOM, then tap the plate (the coloured rim)"
-                    plateSelectionB == null -> "Now scrub to the TOP and tap the plate"
-                    else -> "Both marked — tap the top again to redo, or TRACK"
+                    selections.size % 2 == 0 -> "Tap rep ${selections.size / 2 + 1} BOTTOM (the coloured rim)" +
+                        if (selections.size >= 2) " — or TRACK" else ""
+                    else -> "Now tap rep ${selections.size / 2 + 1} TOP"
                 },
                 color = PowerAmber, fontSize = 12.sp, fontWeight = FontWeight.Black, letterSpacing = 1.sp,
                 modifier = Modifier.weight(1f)
             )
-            if (isMarked || (placing && plateSelectionA != null)) {
+            if (placing && selections.isNotEmpty()) {
+                TextButton(onClick = onUndoMark) {
+                    Text("UNDO", color = PowerAmber, fontWeight = FontWeight.Black, fontSize = 12.sp)
+                }
+            }
+            if (isMarked || (placing && selections.isNotEmpty())) {
                 TextButton(onClick = { lastTap = null; onReMark() }) {
                     Text("RE-MARK", color = NeonGreen, fontWeight = FontWeight.Black, fontSize = 12.sp)
                 }
@@ -187,11 +192,13 @@ fun BarPathTrackPlaybackContent(
                         modifier = Modifier.fillMaxSize()
                     )
                 } else if (placing) {
-                    plateSelectionA?.let { sel ->
-                        PlateSelectionOverlay(sel, videoWidthPx, videoHeightPx, Modifier.fillMaxSize())
-                    }
-                    plateSelectionB?.let { sel ->
-                        PlateSelectionOverlay(sel, videoWidthPx, videoHeightPx, Modifier.fillMaxSize())
+                    // Bottoms (even index) green, tops (odd index) amber, so each rep's pair reads.
+                    selections.forEachIndexed { i, sel ->
+                        PlateSelectionOverlay(
+                            sel, videoWidthPx, videoHeightPx,
+                            color = if (i % 2 == 0) NeonGreen else PowerAmber,
+                            modifier = Modifier.fillMaxSize()
+                        )
                     }
                 }
             }
@@ -257,12 +264,13 @@ fun BarPathTrackPlaybackContent(
         }
 
         when {
-            placing && plateSelectionA != null && plateSelectionB != null -> {
+            placing && selections.size >= 2 && selections.size % 2 == 0 -> {
+                val repCount = selections.size / 2
                 SaiyanButton(
                     onClick = onConfirmTrack,
                     modifier = Modifier.fillMaxWidth().padding(16.dp)
                 ) {
-                    Text("TRACK THE PLATE  >>>", fontWeight = FontWeight.Black, fontSize = 13.sp)
+                    Text("TRACK $repCount REP${if (repCount > 1) "S" else ""}  >>>", fontWeight = FontWeight.Black, fontSize = 13.sp)
                 }
             }
             isMarked && samples.size >= 2 -> {
@@ -282,6 +290,7 @@ private fun PlateSelectionOverlay(
     selection: PlateSelectionUi,
     videoWidthPx: Int,
     videoHeightPx: Int,
+    color: Color = NeonGreen,
     modifier: Modifier = Modifier
 ) {
     Canvas(modifier) {
@@ -291,10 +300,10 @@ private fun PlateSelectionOverlay(
         val cx = rect.left + selection.centerXVideo * scaleX
         val cy = rect.top + selection.centerYVideo * scaleY
         val radius = selection.diameterVideo * ((scaleX + scaleY) / 2f) / 2f
-        drawCircle(NeonGreen, radius = radius, center = Offset(cx, cy), style = Stroke(width = 3.dp.toPx()))
+        drawCircle(color, radius = radius, center = Offset(cx, cy), style = Stroke(width = 3.dp.toPx()))
         val cross = 8.dp.toPx()
-        drawLine(NeonGreen, Offset(cx - cross, cy), Offset(cx + cross, cy), strokeWidth = 2.dp.toPx())
-        drawLine(NeonGreen, Offset(cx, cy - cross), Offset(cx, cy + cross), strokeWidth = 2.dp.toPx())
+        drawLine(color, Offset(cx - cross, cy), Offset(cx + cross, cy), strokeWidth = 2.dp.toPx())
+        drawLine(color, Offset(cx, cy - cross), Offset(cx, cy + cross), strokeWidth = 2.dp.toPx())
     }
 }
 

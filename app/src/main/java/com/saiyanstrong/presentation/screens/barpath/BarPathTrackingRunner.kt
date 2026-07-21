@@ -13,13 +13,13 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 import javax.inject.Singleton
 
-/** Everything needed to run — and later restore — a whole-clip tracking pass. */
+/** Everything needed to run — and later restore — a per-rep set tracking pass. [marks] is a flat
+ * list of taps, paired into reps: (bottom, top), (bottom, top), … */
 data class TrackRequest(
     val videoPath: String,
     val videoWidthPx: Int,
     val videoHeightPx: Int,
-    val markA: PlateMark,
-    val markB: PlateMark
+    val marks: List<PlateMark>
 )
 
 /** State of the (app-scoped) tracking pass; survives the capture ViewModel being cleared. */
@@ -54,11 +54,16 @@ class BarPathTrackingRunner @Inject constructor(
         job = scope.launch {
             val acc = ArrayList<BarPathSample>()
             var progress = 0f
+            val reps = request.marks.chunked(2).filter { it.size == 2 }.map { (bottom, top) ->
+                BarPathFrameTracker.RepMarks(
+                    bottom.tap.xPx.toDouble(), bottom.tap.yPx.toDouble(), bottom.atMs,
+                    top.tap.xPx.toDouble(), top.tap.yPx.toDouble(), top.atMs
+                )
+            }
             val samples = runCatching {
-                barPathFrameTracker.trackPlateWholeClip(
+                barPathFrameTracker.trackPlateReps(
                     videoPath = request.videoPath,
-                    tapAX = request.markA.tap.xPx.toDouble(), tapAY = request.markA.tap.yPx.toDouble(), atAMs = request.markA.atMs,
-                    tapBX = request.markB.tap.xPx.toDouble(), tapBY = request.markB.tap.yPx.toDouble(), atBMs = request.markB.atMs,
+                    reps = reps,
                     onProgress = { p -> progress = p; _state.value = TrackState.Working(request, p, acc.toList()) },
                     onSample = { s -> acc.add(s); _state.value = TrackState.Working(request, progress, acc.toList()) }
                 )

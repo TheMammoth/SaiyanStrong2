@@ -58,15 +58,22 @@ data class PlateMark(val tap: TapPoint, val atMs: Long, val selection: PlateSele
 /** One rep of a set: its 1-based number + the analysis and per-frame path over that rep's concentric. */
 data class RepResult(val index: Int, val analysis: BarPathAnalysis, val trackedFrames: List<TrackedFrame>)
 
+/** Per-rep concentric windows from paired marks: each rep = (bottom, top) → (minMs, maxMs), so the
+ * tap order within a pair doesn't matter. An incomplete trailing mark is ignored. Pure/unit-tested. */
+internal fun repWindowsFromMarks(marks: List<PlateMark>): List<Pair<Long, Long>> =
+    marks.chunked(2).filter { it.size == 2 }.map { (a, b) ->
+        minOf(a.atMs, b.atMs) to maxOf(a.atMs, b.atMs)
+    }
+
 data class BarPathCaptureUiState(
     val step: CaptureStep = CaptureStep.RECORDING,
     val videoPath: String? = null,
     val calibrationFrame: Bitmap? = null,
     /** The paused frame under the tap, for the placement magnifier loupe. */
     val placementFrame: Bitmap? = null,
-    /** Two-mark plate selection: A = bottom, B = top. Both required before TRACK. */
-    val markA: PlateMark? = null,
-    val markB: PlateMark? = null,
+    /** Per-rep marks, paired bottom→top: (rep1 bottom, rep1 top, rep2 bottom, rep2 top, …). TRACK
+     * needs an even count ≥ 2 (at least one complete rep). */
+    val marks: List<PlateMark> = emptyList(),
     val markerSamplePoint: TapPoint? = null,
     val colorProfile: MarkerColorProfile? = null,
     /** Playback time (ms) of the first (bottom) mark — used to extract the scale-step still. */
@@ -153,9 +160,8 @@ class BarPathCaptureViewModel @Inject constructor(
         videoPath = videoPath ?: req.videoPath,
         videoWidthPx = if (videoWidthPx > 0) videoWidthPx else req.videoWidthPx,
         videoHeightPx = if (videoHeightPx > 0) videoHeightPx else req.videoHeightPx,
-        markA = markA ?: req.markA,
-        markB = markB ?: req.markB,
-        markMs = markMs ?: req.markA.atMs
+        marks = marks.ifEmpty { req.marks },
+        markMs = markMs ?: req.marks.firstOrNull()?.atMs
     )
 
     private val exerciseId: Int = checkNotNull(savedStateHandle["exerciseId"])
@@ -461,7 +467,7 @@ class BarPathCaptureViewModel @Inject constructor(
                         step = CaptureStep.PLAYER, videoPath = path,
                         videoWidthPx = vw, videoHeightPx = vh, isPreparingVideo = false,
                         markMs = null, colorProfile = null, markerSamplePoint = null,
-                        markA = null, markB = null
+                        marks = emptyList()
                     )
                 } else {
                     it.copy(step = CaptureStep.ERROR, isPreparingVideo = false, errorMessage = failureMessage)
@@ -477,8 +483,8 @@ class BarPathCaptureViewModel @Inject constructor(
 
     /**
      * PLAYER — the user tapped the plate at ([videoX],[videoY]) in full-res video px at playback time
-     * [atMs]. Segments the plate ("magic wand") and stores it as the next mark: first tap = A
-     * (bottom), second tap = B (top), further taps replace B. Extracts the paused frame for the loupe.
+     * [atMs]. Segments the plate ("magic wand") and APPENDS it as the next mark. Marks pair
+     * bottom→top per rep, so taps alternate: rep1 bottom, rep1 top, rep2 bottom, rep2 top, …
      */
     fun onSegmentTap(videoX: Float, videoY: Float, atMs: Long) {
         val videoPath = _uiState.value.videoPath ?: return
@@ -494,39 +500,44 @@ class BarPathCaptureViewModel @Inject constructor(
                 } else {
                     val sel = PlateSelectionUi(hit.centerX.toFloat(), hit.centerY.toFloat(), hit.diameterPx.toFloat())
                     val mark = PlateMark(TapPoint(videoX, videoY), atMs, sel)
-                    when {
-                        st.markA == null -> st.copy(placementFrame = frame, markA = mark, markMs = atMs, errorMessage = null)
-                        else -> st.copy(placementFrame = frame, markB = mark, errorMessage = null) // fills or replaces B
-                    }
+                    st.copy(
+                        placementFrame = frame, marks = st.marks + mark,
+                        markMs = st.markMs ?: atMs, // first mark's time — for the scale-step still
+                        errorMessage = null
+                    )
                 }
             }
         }
     }
 
+    /** UNDO — remove the last mark (a mis-tap) without restarting the whole set. */
+    fun onUndoMark() {
+        _uiState.update { it.copy(marks = it.marks.dropLast(1), errorMessage = null) }
+    }
+
     /**
-     * PLAYER — TRACK confirmed (both marks set). Runs two-mark bidirectional re-detection tracking
-     * ([BarPathFrameTracker.trackPlateTwoMark]) — combined colour model + forward/backward passes
-     * merged to fill the top misses — reporting progress; the player then plays the complete path.
+     * PLAYER — TRACK confirmed (≥1 complete rep = an even number of marks ≥ 2). Tracks EACH rep with
+     * the reliable bounded two-mark path ([BarPathFrameTracker.trackPlateReps]) and stitches them
+     * into a set, on the app-scoped runner (survives leaving the screen).
      */
     fun onConfirmTrack() {
         val state = _uiState.value
         val videoPath = state.videoPath ?: return
-        val a = state.markA ?: return
-        val b = state.markB ?: return
+        val marks = state.marks
+        if (marks.size < 2 || marks.size % 2 != 0) return
         _liveSamples.value = emptyList()
         _uiState.update { it.copy(isTracking = true, trackingProgress = 0f, trackedSamples = emptyList(), errorMessage = null) }
-        // App-scoped: keeps running even if the user leaves the screen; the collector mirrors it.
-        trackingRunner.start(TrackRequest(videoPath, state.videoWidthPx, state.videoHeightPx, a, b))
+        trackingRunner.start(TrackRequest(videoPath, state.videoWidthPx, state.videoHeightPx, marks))
     }
 
-    /** RE-MARK — drop both marks/track so the user can re-mark the plate from scratch. */
+    /** RE-MARK — drop all marks/track so the user can re-mark the set from scratch. */
     fun onReMark() {
         trackingRunner.clear()
         _liveSamples.value = emptyList()
         _uiState.update {
             it.copy(
                 markMs = null, colorProfile = null, markerSamplePoint = null, trackedSamples = emptyList(),
-                placementFrame = null, markA = null, markB = null, isTracking = false, trackingProgress = 0f, errorMessage = null
+                placementFrame = null, marks = emptyList(), isTracking = false, trackingProgress = 0f, errorMessage = null
             )
         }
     }
@@ -630,14 +641,19 @@ class BarPathCaptureViewModel @Inject constructor(
         val pixelDistance = hypot((p2.xPx - p1.xPx).toDouble(), (p2.yPx - p1.yPx).toDouble())
         val pixelsPerMeter = pixelDistance / (referenceCm / 100.0)
 
+        // Per-rep windows come straight from the marks (each rep = a bottom→top pair) — no guessing.
+        val markWindows = repWindowsFromMarks(state.marks)
+
         _uiState.update { it.copy(step = CaptureStep.PROCESSING, errorMessage = null) }
         viewModelScope.launch(Dispatchers.Default) {
-            // Split the whole-set path into per-rep concentric windows; a single-rep clip yields one.
-            val windows = RepSegmenter.segment(samples).ifEmpty {
-                listOf(
-                    ConcentricDetector.detect(samples)
-                        ?: (samples.first().timestampMs to samples.last().timestampMs)
-                )
+            val windows = markWindows.ifEmpty {
+                // Fallback (e.g. a restored single window): auto-detect the concentric.
+                RepSegmenter.segment(samples).ifEmpty {
+                    listOf(
+                        ConcentricDetector.detect(samples)
+                            ?: (samples.first().timestampMs to samples.last().timestampMs)
+                    )
+                }
             }
 
             val reps = runCatching {

@@ -3324,6 +3324,33 @@ _(Claude Code appends here after each completed task)_
   wait interruptible-safe, not shorter. Minor edge: abandoning a finished track (without GET VELOCITY)
   then re-opening the feature fresh shows the old result until RE-MARK / a new recording. versionCode
   96, versionName 0.69.1.
+- [x] Sprint — per-rep marking for reliable multi-rep (v0.70.0), per SPEC.md /spec round. The v0.69.0
+  whole-clip AUTO multi-rep was fragile (real footage: drifted onto a rack plate on an OHP, stalled
+  overhead; a deadlift showed only ~1 rep) — no top anchor for reps 2+, same-colour distractors (a
+  rack plate, a red wrist wrap) over a long range, coarse sampling. The bounded two-mark SINGLE rep
+  (v0.68.0) is reliable. Chosen (clarifying qs): mark EACH rep (bottom+top), track each with the
+  proven path, stitch into a set; no physical marker.
+  (1) `BarPathFrameTracker.trackPlateReps(videoPath, reps: List<RepMarks>, ...)`: runs the existing
+  `trackPlateTwoMark` over each rep's bounded `[bottom, top]` (both ends anchored — the reliable
+  path) and concatenates per-rep samples; progress spans all reps. `trackPlateWholeClip` (v0.69.0)
+  left dormant.
+  (2) UX: taps now ALTERNATE bottom→top and APPEND (`marks: List<PlateMark>` replaces `markA`/`markB`).
+  Prompt guides "Tap rep N BOTTOM / TOP"; all selection circles drawn (bottoms green / tops amber);
+  UNDO removes the last mark, RE-MARK clears all; TRACK shows once an even count ≥2 exists, labelled
+  "TRACK n REPS". `onConfirmTrack` starts the app-scoped runner (v0.69.1) with the marks;
+  `TrackRequest`/`TrackState` + `restoredFrom` carry the marks list (leave-and-return restore intact).
+  (3) Per-rep analysis: `onConfirmScale` derives windows straight from the marks (pure
+  `repWindowsFromMarks` — pairs → ordered (min,max) ms, tap-order-within-pair normalised, incomplete
+  trailing mark ignored) — no `RepSegmenter` guessing (kept only as the restored-single-window
+  fallback). Per-rep `RepResult` + the `VelocityDropChart`/`SetResultsSection` from v0.69.0 unchanged;
+  best rep drives replay/share; onSave saves each rep.
+  3 new `repWindowsFromMarks` unit tests. Build + full suite green, zero `" lb"`, APK badged
+  versionCode 97.
+  KNOWN GAP: 2 taps/rep (the deliberate reliability trade the user chose over the fragile auto path);
+  time scales with rep count (each rep its own bounded track, but interruptible-safe via the runner);
+  a sloppy bottom/top tap shifts that rep's window (user-controlled, more predictable than
+  auto-segmentation). Not device-verified this session — per-rep circle pairs + clean per-rep paths
+  are the gate. versionCode 97, versionName 0.70.0.
 
 ## Release rules
 
