@@ -127,4 +127,26 @@ class BarPathFrameTrackerTest {
         // Skin tone (drift onto the lifter) should barely match blue.
         assertTrue(regionColorFraction(filled(w, h, rgb(210, 160, 120)), w, h, 0, 0, w, h, profile) < 0.2)
     }
+
+    // ── choosePlateBlob (drift-free re-detection) ───────────────────────────────────────
+
+    @Test
+    fun `choosePlateBlob picks the in-band blob nearest the previous position`() {
+        val near = Blob(12.0, 12.0, 100, 20.0)
+        val far = Blob(50.0, 50.0, 100, 20.0)
+        assertEquals(near, choosePlateBlob(listOf(far, near), 10.0 to 10.0, expectedDiameter = 20.0))
+    }
+
+    @Test
+    fun `choosePlateBlob rejects a size-mismatched distractor even if it is nearer`() {
+        // Band for expected diameter 20 is 8..50; a 4px speck right on the previous point is excluded.
+        val nearTiny = Blob(10.0, 10.0, 8, 4.0)
+        val farRight = Blob(40.0, 40.0, 100, 20.0)
+        assertEquals(farRight, choosePlateBlob(listOf(nearTiny, farRight), 10.0 to 10.0, 20.0))
+    }
+
+    @Test
+    fun `choosePlateBlob returns null for no blobs`() {
+        assertNull(choosePlateBlob(emptyList(), 10.0 to 10.0, 20.0))
+    }
 }

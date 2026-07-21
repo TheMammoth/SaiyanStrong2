@@ -47,12 +47,17 @@ enum class CaptureStep { RECORDING, PLAYER, PROCESSING, SCALE, RESULTS, ERROR }
 
 data class TapPoint(val xPx: Float, val yPx: Float)
 
+/** The one-tap plate selection preview (centre + apparent diameter, full-res video px). */
+data class PlateSelectionUi(val centerXVideo: Float, val centerYVideo: Float, val diameterVideo: Float)
+
 data class BarPathCaptureUiState(
     val step: CaptureStep = CaptureStep.RECORDING,
     val videoPath: String? = null,
     val calibrationFrame: Bitmap? = null,
-    /** The paused frame under the start box, for the placement magnifier loupe. */
+    /** The paused frame under the tap, for the placement magnifier loupe. */
     val placementFrame: Bitmap? = null,
+    /** The one-tap plate selection preview (null until the user taps a plate). */
+    val plateSelection: PlateSelectionUi? = null,
     val markerSamplePoint: TapPoint? = null,
     val colorProfile: MarkerColorProfile? = null,
     /** Playback time (ms) the user tapped the bar to mark it; tracking runs from here. Null = not
@@ -423,48 +428,58 @@ class BarPathCaptureViewModel @Inject constructor(
     }
 
     /**
-     * PLAYER — the user placed the start box on the plate ([centerX]/[centerY]/[sidePx] in
-     * full-resolution video-pixel space) and pressed TRACK at playback time [atMs]. Runs the WHOLE
-     * OpenCV TrackerVit pass once ([BarPathFrameTracker.trackWithVit]) from [atMs] to the end,
-     * reporting determinate progress; the player pauses on a progress bar, then plays the complete
-     * path. No colour, no calibration. Cancels any prior track.
+     * PLAYER — the user tapped the plate at ([videoX],[videoY]) in full-resolution video px, at
+     * playback time [atMs]. Extracts that paused frame (for the loupe) and runs one-tap "magic wand"
+     * segmentation ([BarPathFrameTracker.segmentPlate]) to outline the plate, exposing a selection
+     * preview (centre + diameter). Re-tapping re-segments. TRACK then confirms with [onConfirmTrack].
      */
-    fun onConfirmTrack(centerX: Float, centerY: Float, sidePx: Float, atMs: Long) {
+    fun onSegmentTap(videoX: Float, videoY: Float, atMs: Long) {
+        val videoPath = _uiState.value.videoPath ?: return
+        _uiState.update { it.copy(markMs = atMs, markerSamplePoint = TapPoint(videoX, videoY), errorMessage = null) }
+        viewModelScope.launch(Dispatchers.Default) {
+            val frame = runCatching { barPathFrameTracker.extractFrameAt(videoPath, atMs) }.getOrNull()
+            val hit = frame?.let {
+                runCatching { barPathFrameTracker.segmentPlate(it, videoX.toDouble(), videoY.toDouble()) }.getOrNull()
+            }
+            _uiState.update {
+                it.copy(
+                    placementFrame = frame,
+                    plateSelection = hit?.let { s -> PlateSelectionUi(s.centerX.toFloat(), s.centerY.toFloat(), s.diameterPx.toFloat()) },
+                    errorMessage = if (hit == null) "Couldn't select a plate there — tap a clearly coloured part of the plate (the rim)." else null
+                )
+            }
+        }
+    }
+
+    /**
+     * PLAYER — TRACK confirmed. Runs drift-free re-detection tracking
+     * ([BarPathFrameTracker.trackPlateByRedetection]) from the tapped plate to the end, reporting
+     * determinate progress; the player pauses on a progress bar, then plays the complete path.
+     */
+    fun onConfirmTrack() {
         val state = _uiState.value
         val videoPath = state.videoPath ?: return
+        val tap = state.markerSamplePoint ?: return
+        val atMs = state.markMs ?: 0L
         trackJob?.cancel()
         _liveSamples.value = emptyList()
-        _uiState.update {
-            it.copy(
-                markMs = atMs, markerSamplePoint = TapPoint(centerX, centerY),
-                isTracking = true, trackingProgress = 0f, trackedSamples = emptyList(), errorMessage = null
-            )
-        }
+        _uiState.update { it.copy(isTracking = true, trackingProgress = 0f, trackedSamples = emptyList(), errorMessage = null) }
 
         trackJob = viewModelScope.launch(Dispatchers.Default) {
-            val box = VitBarTrackerSupport.initBox(
-                centerX.toDouble(), centerY.toDouble(), sidePx.toInt(), state.videoWidthPx, state.videoHeightPx
-            )
-            if (box == null) {
-                _uiState.update { it.copy(isTracking = false, errorMessage = "Couldn't read the video frame — try re-marking.") }
-                return@launch
-            }
-
             val samples = runCatching {
-                barPathFrameTracker.trackWithVit(
+                barPathFrameTracker.trackPlateByRedetection(
                     videoPath = videoPath,
-                    initBox = box,
+                    tapVideoX = tap.xPx.toDouble(),
+                    tapVideoY = tap.yPx.toDouble(),
                     startMs = atMs,
                     onProgress = { p -> _uiState.update { it.copy(trackingProgress = p) } },
                     onSample = { s -> _liveSamples.update { it + s } }
                 )
             }.getOrElse { emptyList() }
 
-            // If nothing tracked, tell the user; stay on the player so they can re-mark rather than
-            // bouncing to a dead-end error screen.
             if (samples.size < 2) {
                 _uiState.update {
-                    it.copy(isTracking = false, errorMessage = "Couldn't track that. Re-mark and frame a weight plate in the box (not the thin bar) — the plate tracks best.")
+                    it.copy(isTracking = false, errorMessage = "Couldn't track the plate. Re-tap a clearly coloured plate (the rim), not the grey middle.")
                 }
             } else {
                 _uiState.update { it.copy(isTracking = false, trackedSamples = samples) }
@@ -472,24 +487,14 @@ class BarPathCaptureViewModel @Inject constructor(
         }
     }
 
-    /** Player placement — extract the paused frame at [atMs] so the magnifier loupe can show a
-     * zoomed crop of the region under the start box (helps land a small hub precisely). */
-    fun onPlaceFrame(atMs: Long) {
-        val videoPath = _uiState.value.videoPath ?: return
-        viewModelScope.launch(Dispatchers.Default) {
-            val frame = runCatching { barPathFrameTracker.extractFrameAt(videoPath, atMs) }.getOrNull()
-            if (frame != null) _uiState.update { it.copy(placementFrame = frame) }
-        }
-    }
-
-    /** RE-MARK — drop the current mark/track so the user can re-place the start box from scratch. */
+    /** RE-MARK — drop the current selection/track so the user can re-tap the plate from scratch. */
     fun onReMark() {
         trackJob?.cancel()
         _liveSamples.value = emptyList()
         _uiState.update {
             it.copy(
                 markMs = null, colorProfile = null, markerSamplePoint = null, trackedSamples = emptyList(),
-                placementFrame = null, isTracking = false, trackingProgress = 0f, errorMessage = null
+                placementFrame = null, plateSelection = null, isTracking = false, trackingProgress = 0f, errorMessage = null
             )
         }
     }

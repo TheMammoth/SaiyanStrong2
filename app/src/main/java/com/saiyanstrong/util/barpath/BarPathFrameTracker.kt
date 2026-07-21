@@ -110,6 +110,39 @@ internal fun chooseTrackedBlob(blobs: List<Blob>, previousCentroid: Pair<Double,
 }
 
 /**
+ * Picks which colour blob is the plate this frame, for drift-free re-detection tracking: among the
+ * blobs whose size is within a band of the plate's expected diameter (rejecting a tiny same-colour
+ * speck or a merged giant), the one nearest the previous plate position. Because it re-chooses the
+ * real plate every frame with a size gate, it can't gradually climb onto a different-coloured body
+ * the way an incremental region tracker does. Falls back to all blobs if none are in the size band
+ * (then still nearest-wins), and to the largest blob if there's no previous position. Pure/tested.
+ */
+internal fun choosePlateBlob(
+    blobs: List<Blob>,
+    previousCentroid: Pair<Double, Double>?,
+    expectedDiameter: Double,
+    minSizeFraction: Double = 0.4,
+    maxSizeFraction: Double = 2.5
+): Blob? {
+    if (blobs.isEmpty()) return null
+    val inBand = if (expectedDiameter > 0.0) {
+        blobs.filter { it.diameterPx in (expectedDiameter * minSizeFraction)..(expectedDiameter * maxSizeFraction) }
+    } else {
+        blobs
+    }
+    val pool = inBand.ifEmpty { blobs }
+    return if (previousCentroid != null) {
+        pool.minBy { blob ->
+            val dx = blob.centroidX - previousCentroid.first
+            val dy = blob.centroidY - previousCentroid.second
+            dx * dx + dy * dy
+        }
+    } else {
+        pool.maxBy { it.size }
+    }
+}
+
+/**
  * Average RGB of the sufficiently-saturated, bright pixels in the [rx,ry,rw,rh] sub-rect of an ARGB
  * grid — the anti-drift guard's COLOUR ANCHOR. Returns null when too few pixels are colourful (a
  * grey/white/chrome region has no distinct colour to anchor to, so the guard stays disabled and the
@@ -281,6 +314,103 @@ class BarPathFrameTracker @Inject constructor(
         scaled.getPixels(px, 0, w, 0, 0, w, h)
         scaled.recycle()
         return px
+    }
+
+    /** Plate centre + apparent diameter (full-resolution video px) for the selection preview. */
+    data class PlateHit(val centerX: Double, val centerY: Double, val diameterPx: Double)
+
+    /**
+     * One-tap "magic wand" plate selection on a single [frame] at ([videoX],[videoY]) in full-res
+     * video px — floods the plate's colour region ([PlateSegmenter]) and returns its centre + size
+     * for the on-screen selection preview. Null if nothing plate-like is under the tap.
+     */
+    fun segmentPlate(frame: Bitmap, videoX: Double, videoY: Double): PlateHit? {
+        val gw = (frame.width * GUARD_DOWNSCALE).toInt().coerceAtLeast(1)
+        val gh = (frame.height * GUARD_DOWNSCALE).toInt().coerceAtLeast(1)
+        val argb = scaledArgb(frame, gw, gh)
+        val sel = PlateSegmenter.segment(
+            argb, gw, gh, (videoX * GUARD_DOWNSCALE).toInt(), (videoY * GUARD_DOWNSCALE).toInt()
+        ) ?: return null
+        return PlateHit(sel.centroidX / GUARD_DOWNSCALE, sel.centroidY / GUARD_DOWNSCALE, sel.diameterPx / GUARD_DOWNSCALE)
+    }
+
+    /**
+     * Drift-free plate tracking by RE-DETECTION. On the mark frame it segments the plate at the tap
+     * ([PlateSegmenter]) to get the plate's colour model + expected size; then, every frame, it
+     * finds the colour blobs and re-picks the plate ([choosePlateBlob], size- and position-gated).
+     * Because each frame independently re-locates the real plate, drift can't accumulate and the
+     * point can't gradually climb onto a different-coloured body. Holds the last position when no
+     * plate blob qualifies (occlusion/blur), then re-detects when it reappears. Reuses the same
+     * frame extraction, [startMs], [MAX_SAMPLES] cap, [onProgress] and [onSample] as the others.
+     */
+    fun trackPlateByRedetection(
+        videoPath: String,
+        tapVideoX: Double,
+        tapVideoY: Double,
+        startMs: Long = 0L,
+        onProgress: ((Float) -> Unit)? = null,
+        onSample: ((BarPathSample) -> Unit)? = null
+    ): List<BarPathSample> {
+        val (rawIntervalMs, durationMs) = readTiming(videoPath, null)
+        if (durationMs <= 0L) return emptyList()
+        val trackedSpanMs = (durationMs - startMs).coerceAtLeast(1L)
+        val intervalMs = maxOf(rawIntervalMs, trackedSpanMs / MAX_SAMPLES).coerceAtLeast(MIN_SAMPLE_INTERVAL_MS)
+        val fromMs = startMs.coerceIn(0L, durationMs)
+
+        var profile: MarkerColorProfile? = null
+        var expectedDiameter = 0.0
+        var prevCentroid: Pair<Double, Double>? = null
+        var initialized = false
+        val samples = mutableListOf<BarPathSample>()
+
+        driveRetrieverFrames(videoPath, intervalMs, fromMs, durationMs) { frame, timestampMs ->
+            if (trackedSpanMs > 0L) {
+                onProgress?.invoke(((timestampMs - fromMs).toFloat() / trackedSpanMs).coerceIn(0f, 1f))
+            }
+            val gw = (frame.width * GUARD_DOWNSCALE).toInt().coerceAtLeast(1)
+            val gh = (frame.height * GUARD_DOWNSCALE).toInt().coerceAtLeast(1)
+            val argb = scaledArgb(frame, gw, gh)
+
+            if (!initialized) {
+                initialized = true
+                // Segment the plate ONLY on the mark frame (the tap is for this frame). If it fails,
+                // profile stays null and later frames are skipped — the caller shows a retry.
+                val sel = PlateSegmenter.segment(
+                    argb, gw, gh, (tapVideoX * GUARD_DOWNSCALE).toInt(), (tapVideoY * GUARD_DOWNSCALE).toInt()
+                ) ?: return@driveRetrieverFrames
+                profile = sel.colorProfile
+                expectedDiameter = sel.diameterPx
+                prevCentroid = sel.centroidX to sel.centroidY // downscaled space (blob space)
+                val sample = BarPathSample(
+                    timestampMs, sel.centroidX / GUARD_DOWNSCALE, sel.centroidY / GUARD_DOWNSCALE,
+                    sel.diameterPx / GUARD_DOWNSCALE
+                )
+                samples += sample; onSample?.invoke(sample)
+                return@driveRetrieverFrames
+            }
+
+            val p = profile ?: return@driveRetrieverFrames // segmentation failed — skip
+            val mask = BooleanArray(argb.size)
+            val weights = DoubleArray(argb.size)
+            for (i in argb.indices) {
+                val px = argb[i]
+                val r = (px shr 16) and 0xFF; val g = (px shr 8) and 0xFF; val b = px and 0xFF
+                if (p.matches(r, g, b)) { mask[i] = true; weights[i] = p.matchScore(r, g, b).coerceAtLeast(MIN_WEIGHT) }
+            }
+            val blobs = findBlobs(mask, weights, gw, gh).filter { it.size >= MIN_MARKER_PIXELS }
+            val chosen = choosePlateBlob(blobs, prevCentroid, expectedDiameter)
+            val sample = if (chosen != null) {
+                prevCentroid = chosen.centroidX to chosen.centroidY
+                BarPathSample(
+                    timestampMs, chosen.centroidX / GUARD_DOWNSCALE, chosen.centroidY / GUARD_DOWNSCALE,
+                    chosen.diameterPx / GUARD_DOWNSCALE
+                )
+            } else {
+                samples.lastOrNull()?.copy(timestampMs = timestampMs) // occlusion — hold
+            }
+            if (sample != null) { samples += sample; onSample?.invoke(sample) }
+        }
+        return samples
     }
 
     /**

@@ -5,7 +5,6 @@ import androidx.annotation.OptIn
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -28,7 +27,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.foundation.layout.size
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -82,9 +80,10 @@ fun BarPathTrackPlaybackContent(
     isTracking: Boolean,
     trackingProgress: Float,
     placementFrame: android.graphics.Bitmap?,
+    plateSelection: PlateSelectionUi?,
     errorMessage: String?,
-    onConfirmTrack: (centerX: Float, centerY: Float, sidePx: Float, atMs: Long) -> Unit,
-    onPlaceFrame: (atMs: Long) -> Unit,
+    onSegmentTap: (videoX: Float, videoY: Float, atMs: Long) -> Unit,
+    onConfirmTrack: () -> Unit,
     onReMark: () -> Unit,
     onGetVelocityNumbers: () -> Unit
 ) {
@@ -114,11 +113,9 @@ fun BarPathTrackPlaybackContent(
 
     var boxSize by remember { mutableStateOf(Size.Zero) }
 
-    // The adjustable start box, in VIDEO-pixel space (survives container resize; maps straight to the
-    // tracker). Null until the user taps to drop it. `placedAtMs` is the playback time it was placed
-    // at — tracking starts there. Cleared on RE-MARK (isMarked/isTracking both false).
-    var pendingBox by remember { mutableStateOf<PendingBox?>(null) }
-    var placedAtMs by remember { mutableLongStateOf(0L) }
+    // The last tap point (VIDEO-pixel space), for the magnifier loupe. The selection itself comes
+    // back from the ViewModel as `plateSelection` (the flood-fill result).
+    var lastTap by remember { mutableStateOf<Offset?>(null) }
     val placing = !isMarked && !isTracking
 
     // On tracking completion, play the finished path from the mark point.
@@ -134,15 +131,15 @@ fun BarPathTrackPlaybackContent(
             Text(
                 when {
                     isTracking -> "Tracking the plate…"
-                    isMarked -> "TRACKING — the dot on the plate centre is correct (it moves with the bar)"
-                    pendingBox != null -> "Drag the box onto the plate, pinch to fit it, then TRACK"
-                    else -> "Scrub to the lift, then tap a weight plate (not the thin bar)"
+                    isMarked -> "TRACKING — the dot on the plate is correct (it moves with the bar)"
+                    plateSelection != null -> "Plate selected — tap again to redo, or TRACK"
+                    else -> "Scrub to the lift, then tap a weight plate (the coloured rim)"
                 },
                 color = PowerAmber, fontSize = 12.sp, fontWeight = FontWeight.Black, letterSpacing = 1.sp,
                 modifier = Modifier.weight(1f)
             )
             if (isMarked) {
-                TextButton(onClick = { pendingBox = null; onReMark() }) {
+                TextButton(onClick = { lastTap = null; onReMark() }) {
                     Text("RE-MARK", color = NeonGreen, fontWeight = FontWeight.Black, fontSize = 12.sp)
                 }
             }
@@ -153,7 +150,7 @@ fun BarPathTrackPlaybackContent(
                 .fillMaxWidth()
                 .weight(1f)
                 .onSizeChanged { boxSize = Size(it.width.toFloat(), it.height.toFloat()) }
-                // Tap: drop / reposition the start box (only while placing).
+                // Tap the plate → one-tap segmentation (only while placing).
                 .pointerInput(videoWidthPx, videoHeightPx, placing) {
                     if (!placing) return@pointerInput
                     detectTapGestures { offset ->
@@ -161,27 +158,8 @@ fun BarPathTrackPlaybackContent(
                             offset.x, offset.y, boxSize.width, boxSize.height, videoWidthPx, videoHeightPx
                         ) ?: return@detectTapGestures
                         exoPlayer.pause()
-                        placedAtMs = exoPlayer.currentPosition
-                        // Plate-sized default — the tracker locks the plate well; pinch to fit it.
-                        val defaultSide = minOf(videoWidthPx, videoHeightPx) * 0.16f
-                        pendingBox = PendingBox(videoPx.first, videoPx.second, pendingBox?.side ?: defaultSide)
-                        onPlaceFrame(exoPlayer.currentPosition)
-                    }
-                }
-                // Drag to move, pinch to resize the box (only while placing and a box exists).
-                .pointerInput(videoWidthPx, videoHeightPx, placing) {
-                    if (!placing) return@pointerInput
-                    detectTransformGestures { _, pan, zoom, _ ->
-                        val box = pendingBox ?: return@detectTransformGestures
-                        val rect = computeFittedVideoRect(boxSize.width, boxSize.height, videoWidthPx, videoHeightPx)
-                        if (rect.width <= 0f || rect.height <= 0f) return@detectTransformGestures
-                        val dxVideo = pan.x * (videoWidthPx / rect.width)
-                        val dyVideo = pan.y * (videoHeightPx / rect.height)
-                        pendingBox = box.copy(
-                            cx = box.cx + dxVideo,
-                            cy = box.cy + dyVideo,
-                            side = (box.side * zoom).coerceIn(24f, minOf(videoWidthPx, videoHeightPx).toFloat())
-                        )
+                        lastTap = Offset(videoPx.first, videoPx.second)
+                        onSegmentTap(videoPx.first, videoPx.second, exoPlayer.currentPosition)
                     }
                 }
         ) {
@@ -207,18 +185,18 @@ fun BarPathTrackPlaybackContent(
                         modifier = Modifier.fillMaxSize()
                     )
                 } else if (placing) {
-                    pendingBox?.let { box ->
-                        StartBoxOverlay(box, videoWidthPx, videoHeightPx, Modifier.fillMaxSize())
+                    plateSelection?.let { sel ->
+                        PlateSelectionOverlay(sel, videoWidthPx, videoHeightPx, Modifier.fillMaxSize())
                     }
                 }
             }
-            // Magnifier loupe — zoomed crop of the paused frame under the box centre, so a small
-            // hub can be landed precisely. Pinned top-start, away from where the box usually sits.
+            // Magnifier loupe — zoomed crop of the paused frame under the tap, so a small/precise
+            // plate feature can be tapped accurately. Pinned top-start.
             if (placing && placementFrame != null) {
-                pendingBox?.let { box ->
+                lastTap?.let { tap ->
                     PlacementLoupe(
                         frame = placementFrame,
-                        centerX = box.cx, centerY = box.cy,
+                        centerX = tap.x, centerY = tap.y,
                         modifier = Modifier.align(Alignment.TopStart).padding(12.dp)
                     )
                 }
@@ -274,9 +252,9 @@ fun BarPathTrackPlaybackContent(
         }
 
         when {
-            placing && pendingBox != null -> {
+            placing && plateSelection != null -> {
                 SaiyanButton(
-                    onClick = { pendingBox?.let { onConfirmTrack(it.cx, it.cy, it.side, placedAtMs) } },
+                    onClick = onConfirmTrack,
                     modifier = Modifier.fillMaxWidth().padding(16.dp)
                 ) {
                     Text("TRACK THIS PLATE  >>>", fontWeight = FontWeight.Black, fontSize = 13.sp)
@@ -291,14 +269,12 @@ fun BarPathTrackPlaybackContent(
     }
 }
 
-/** The adjustable start box, centre + side in VIDEO-pixel space. */
-private data class PendingBox(val cx: Float, val cy: Float, val side: Float)
-
-/** Draws the movable/resizable start box over the paused frame: neon rounded-rect outline + centre
- * crosshair. Mapped from video-px through the same fitted-rect letterbox math as everything else. */
+/** Draws the one-tap plate selection over the paused frame: a neon circle at the plate's detected
+ * centre with its detected radius + a centre crosshair, so the user sees exactly what got selected.
+ * Mapped from video-px through the same fitted-rect letterbox math as everything else. */
 @Composable
-private fun StartBoxOverlay(
-    box: PendingBox,
+private fun PlateSelectionOverlay(
+    selection: PlateSelectionUi,
     videoWidthPx: Int,
     videoHeightPx: Int,
     modifier: Modifier = Modifier
@@ -307,17 +283,10 @@ private fun StartBoxOverlay(
         val rect = computeFittedVideoRect(size.width, size.height, videoWidthPx, videoHeightPx)
         val scaleX = rect.width / videoWidthPx
         val scaleY = rect.height / videoHeightPx
-        val cx = rect.left + box.cx * scaleX
-        val cy = rect.top + box.cy * scaleY
-        val halfW = box.side * scaleX / 2f
-        val halfH = box.side * scaleY / 2f
-        drawRoundRect(
-            color = NeonGreen,
-            topLeft = Offset(cx - halfW, cy - halfH),
-            size = Size(halfW * 2f, halfH * 2f),
-            cornerRadius = CornerRadius(8.dp.toPx(), 8.dp.toPx()),
-            style = Stroke(width = 3.dp.toPx())
-        )
+        val cx = rect.left + selection.centerXVideo * scaleX
+        val cy = rect.top + selection.centerYVideo * scaleY
+        val radius = selection.diameterVideo * ((scaleX + scaleY) / 2f) / 2f
+        drawCircle(NeonGreen, radius = radius, center = Offset(cx, cy), style = Stroke(width = 3.dp.toPx()))
         val cross = 8.dp.toPx()
         drawLine(NeonGreen, Offset(cx - cross, cy), Offset(cx + cross, cy), strokeWidth = 2.dp.toPx())
         drawLine(NeonGreen, Offset(cx, cy - cross), Offset(cx, cy + cross), strokeWidth = 2.dp.toPx())

@@ -109,13 +109,14 @@ fun BarPathCaptureScreen(
             samples = liveSamples,
             videoWidthPx = uiState.videoWidthPx,
             videoHeightPx = uiState.videoHeightPx,
-            isMarked = uiState.markMs != null && !uiState.isTracking,
+            isMarked = uiState.trackedSamples.size >= 2 && !uiState.isTracking,
             isTracking = uiState.isTracking,
             trackingProgress = uiState.trackingProgress,
             placementFrame = uiState.placementFrame,
+            plateSelection = uiState.plateSelection,
             errorMessage = uiState.errorMessage,
+            onSegmentTap = viewModel::onSegmentTap,
             onConfirmTrack = viewModel::onConfirmTrack,
-            onPlaceFrame = viewModel::onPlaceFrame,
             onReMark = viewModel::onReMark,
             onGetVelocityNumbers = viewModel::onGetVelocityNumbers
         )

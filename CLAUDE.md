@@ -3203,6 +3203,44 @@ _(Claude Code appends here after each completed task)_
   onto the body → lower MIN_PLATE_FRACTION or the anchor didn't catch the plate colour. Honest
   ceiling unchanged: markerless plate tracking in a tight, cluttered, backlit side-on shot is hard;
   this targets the specific colour-drift failure, not every failure mode. versionCode 92, versionName 0.66.0.
+- [x] Sprint — tap-to-segment plate + drift-free re-detection tracking (v0.67.0), per SPEC.md /spec
+  round ("make the selection like a magnetic lasso so I can select the whole plate"). Corrected the
+  idea honestly (a lasso is fiddly on a phone AND TrackerVit only takes a rectangle, so an outline
+  gives no benefit; selecting the bar too makes it worse) into the version that helps, chosen via
+  clarifying questions: ONE-TAP magic-wand selection, a RE-DETECT-EACH-FRAME engine (drift-free),
+  plate only. This is a paradigm change: TrackerVit *follows a region and accumulates drift* (climbs
+  onto the body on a deadlift); the new engine *re-detects the real plate every frame independently*,
+  so drift can't accumulate and it can't climb onto a different-coloured body.
+  (1) New pure `PlateSegmenter.segment(pixels, w, h, tapX, tapY, ...)` — BFS flood-fill from the tap
+  over the connected same-colour region (fixed-seed tolerance so it can't leak across a soft edge),
+  returns the plate's centroid/bbox/diameter + a region-sampled `MarkerColorProfile` (via the
+  existing `MarkerColorRangeBuilder` — robust, averaged over the real plate, not one pixel/a guessed
+  marker). Null under `minPixels`. 4 unit tests (floods + stops at boundary, too-small→null,
+  out-of-bounds tap clamped, colour model matches plate/rejects skin).
+  (2) New pure `choosePlateBlob(blobs, prevCentre, expectedDiameter)` — among blobs in a size band of
+  the plate's diameter (rejects a tiny same-colour speck or a merged giant), the one nearest the
+  previous position. Reuses the existing `findBlobs`. 3 unit tests.
+  (3) `BarPathFrameTracker.trackPlateByRedetection(videoPath, tapX, tapY, ...)` — segments the plate
+  on the mark frame → colour model + expected size; each frame builds the colour mask, `findBlobs`,
+  `choosePlateBlob`; emits the re-found plate centre; holds last position on occlusion then
+  re-detects. `segmentPlate(frame, x, y): PlateHit` gives the selection preview (centre+diameter).
+  Reuses `startMs`/`MAX_SAMPLES`/`onProgress`/`onSample`/`scaledArgb`. `trackWithVit` (TrackerVit +
+  colour-anchored guard) left dormant.
+  (4) UX: the placing step is now TAP-TO-SEGMENT (not the drag/pinch box). Tap the plate →
+  `onSegmentTap` floods it → a neon CIRCLE overlay (`PlateSelectionOverlay`) shows what got selected
+  (re-tap to redo); the magnifier loupe stays for precise tapping; TRACK (`onConfirmTrack`, no args)
+  runs the re-detection with the track-then-watch progress bar (reused). New
+  `BarPathCaptureUiState.plateSelection`/`PlateSelectionUi`. The box code (`PendingBox`,
+  `StartBoxOverlay`, transform gestures, `VitBarTrackerSupport.initBox`) retired from the flow
+  (dormant/git history). `onConfirmTrack` signature changed (4 args → 0); `onPlaceFrame` folded into
+  `onSegmentTap`; `isMarked` now = `trackedSamples>=2 && !isTracking`.
+  Build + full suite green, zero `" lb"`, APK badged versionCode 93.
+  KNOWN GAP: needs a real look — re-detection DEPENDS on a distinct plate colour (the user's blue
+  bumper is ideal; a gym full of that colour would struggle — TrackerVit stays dormant as a
+  fallback). Segmentation can leak if the tap lands on a low-contrast grey/chrome part (guidance: tap
+  the coloured rim). Thresholds (flood tol 22°/0.34/0.34, minPixels 60, size band 0.4–2.5×) are
+  first-pass. If the outline grabs too much/little → adjust the flood tolerance; if it jumps to a
+  same-colour object → tighten the size band or nearest gate. versionCode 93, versionName 0.67.0.
 
 ## Release rules
 
