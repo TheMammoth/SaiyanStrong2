@@ -73,10 +73,10 @@ import java.io.File
 @Composable
 fun BarPathTrackPlaybackContent(
     videoPath: String,
-    samples: List<BarPathSample>,
+    currentRepSamples: List<BarPathSample>,
     videoWidthPx: Int,
     videoHeightPx: Int,
-    isMarked: Boolean,
+    repCount: Int,
     isTracking: Boolean,
     trackingProgress: Float,
     placementFrame: android.graphics.Bitmap?,
@@ -84,9 +84,9 @@ fun BarPathTrackPlaybackContent(
     errorMessage: String?,
     onSegmentTap: (videoX: Float, videoY: Float, atMs: Long) -> Unit,
     onUndoMark: () -> Unit,
-    onConfirmTrack: () -> Unit,
+    onRedoLastRep: () -> Unit,
     onReMark: () -> Unit,
-    onGetVelocityNumbers: () -> Unit
+    onDone: () -> Unit
 ) {
     val context = LocalContext.current
     val exoPlayer = remember {
@@ -117,12 +117,14 @@ fun BarPathTrackPlaybackContent(
     // The last tap point (VIDEO-pixel space), for the magnifier loupe. The selection itself comes
     // back from the ViewModel as `plateSelection` (the flood-fill result).
     var lastTap by remember { mutableStateOf<Offset?>(null) }
-    val placing = !isMarked && !isTracking
+    // Placing the current rep (or between reps) whenever a rep isn't currently tracking.
+    val placing = !isTracking
 
-    // On tracking completion, play the finished path from the mark point.
-    LaunchedEffect(isMarked, samples.size) {
-        if (isMarked && samples.size >= 2) {
-            exoPlayer.seekTo(samples.first().timestampMs)
+    // After a rep finishes tracking, play it back so the user sees the dot follow (their "play then
+    // 2 more taps"). Keyed on rep count + whether a rep is tracking.
+    LaunchedEffect(repCount, isTracking) {
+        if (!isTracking && repCount >= 1 && currentRepSamples.size >= 2) {
+            exoPlayer.seekTo(currentRepSamples.first().timestampMs)
             exoPlayer.play()
         }
     }
@@ -131,11 +133,9 @@ fun BarPathTrackPlaybackContent(
         Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(
                 when {
-                    isTracking -> "Tracking the plate…"
-                    isMarked -> "TRACKING — the dot on the plate is correct (it moves with the bar)"
-                    selections.size % 2 == 0 -> "Tap rep ${selections.size / 2 + 1} BOTTOM (the coloured rim)" +
-                        if (selections.size >= 2) " — or TRACK" else ""
-                    else -> "Now tap rep ${selections.size / 2 + 1} TOP"
+                    isTracking -> "Tracking rep ${repCount + 1}…"
+                    selections.isEmpty() -> "Reps: $repCount   ·   Tap rep ${repCount + 1} BOTTOM (the coloured rim)"
+                    else -> "Reps: $repCount   ·   Now tap rep ${repCount + 1} TOP"
                 },
                 color = PowerAmber, fontSize = 12.sp, fontWeight = FontWeight.Black, letterSpacing = 1.sp,
                 modifier = Modifier.weight(1f)
@@ -145,9 +145,14 @@ fun BarPathTrackPlaybackContent(
                     Text("UNDO", color = PowerAmber, fontWeight = FontWeight.Black, fontSize = 12.sp)
                 }
             }
-            if (isMarked || (placing && selections.isNotEmpty())) {
+            if (placing && repCount >= 1 && selections.isEmpty()) {
+                TextButton(onClick = onRedoLastRep) {
+                    Text("REDO REP", color = DangerRed, fontWeight = FontWeight.Black, fontSize = 12.sp)
+                }
+            }
+            if (repCount >= 1 || selections.isNotEmpty()) {
                 TextButton(onClick = { lastTap = null; onReMark() }) {
-                    Text("RE-MARK", color = NeonGreen, fontWeight = FontWeight.Black, fontSize = 12.sp)
+                    Text("RESET", color = NeonGreen, fontWeight = FontWeight.Black, fontSize = 12.sp)
                 }
             }
         }
@@ -183,23 +188,24 @@ fun BarPathTrackPlaybackContent(
                 modifier = Modifier.fillMaxSize()
             )
             if (videoWidthPx > 0 && videoHeightPx > 0) {
-                if (isMarked) {
+                if (selections.isNotEmpty()) {
+                    // Placing the current rep: bottom green, top amber.
+                    selections.forEachIndexed { i, sel ->
+                        PlateSelectionOverlay(
+                            sel, videoWidthPx, videoHeightPx,
+                            color = if (i == 0) NeonGreen else PowerAmber,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
+                } else if (currentRepSamples.size >= 2) {
+                    // Tracking / just-tracked rep: show its dot + trail (played back for confirmation).
                     TrackTrailOverlay(
-                        samples = samples,
+                        samples = currentRepSamples,
                         playbackMs = playbackMs,
                         videoWidthPx = videoWidthPx,
                         videoHeightPx = videoHeightPx,
                         modifier = Modifier.fillMaxSize()
                     )
-                } else if (placing) {
-                    // Bottoms (even index) green, tops (odd index) amber, so each rep's pair reads.
-                    selections.forEachIndexed { i, sel ->
-                        PlateSelectionOverlay(
-                            sel, videoWidthPx, videoHeightPx,
-                            color = if (i % 2 == 0) NeonGreen else PowerAmber,
-                            modifier = Modifier.fillMaxSize()
-                        )
-                    }
                 }
             }
             // Magnifier loupe — zoomed crop of the paused frame under the tap, so a small/precise
@@ -263,20 +269,9 @@ fun BarPathTrackPlaybackContent(
             )
         }
 
-        when {
-            placing && selections.size >= 2 && selections.size % 2 == 0 -> {
-                val repCount = selections.size / 2
-                SaiyanButton(
-                    onClick = onConfirmTrack,
-                    modifier = Modifier.fillMaxWidth().padding(16.dp)
-                ) {
-                    Text("TRACK $repCount REP${if (repCount > 1) "S" else ""}  >>>", fontWeight = FontWeight.Black, fontSize = 13.sp)
-                }
-            }
-            isMarked && samples.size >= 2 -> {
-                SaiyanButton(onClick = onGetVelocityNumbers, modifier = Modifier.fillMaxWidth().padding(16.dp)) {
-                    Text("GET VELOCITY NUMBERS  >>>", fontWeight = FontWeight.Black, fontSize = 13.sp)
-                }
+        if (placing && repCount >= 1 && selections.isEmpty()) {
+            SaiyanButton(onClick = onDone, modifier = Modifier.fillMaxWidth().padding(16.dp)) {
+                Text("DONE — $repCount REP${if (repCount > 1) "S" else ""} · GET VELOCITY  >>>", fontWeight = FontWeight.Black, fontSize = 13.sp)
             }
         }
     }

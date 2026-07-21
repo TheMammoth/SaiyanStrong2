@@ -3351,6 +3351,31 @@ _(Claude Code appends here after each completed task)_
   a sloppy bottom/top tap shifts that rep's window (user-controlled, more predictable than
   auto-segmentation). Not device-verified this session — per-rep circle pairs + clean per-rep paths
   are the gate. versionCode 97, versionName 0.70.0.
+- [x] Sprint — incremental per-rep marking (mark a rep, auto-track, repeat) (v0.71.0), per SPEC.md
+  /spec round. v0.70.0's mark-all-reps-upfront was reliable but clunky (markers pile up). User's fix:
+  one rep at a time. Chosen (clarifying qs): after tapping a rep's bottom+top it AUTO-TRACKS that rep
+  and clears the markers; only the current rep + a "Reps: N" counter show; REDO REP fixes just the last.
+  (1) `BarPathTrackingRunner` rewritten to accumulate a set REP-BY-REP: `startRep(...)` tracks one rep
+  via the reliable `trackPlateTwoMark` and APPENDS a `CompletedRep(bottomMark, topMark, samples)` to
+  `SetTrackState.completedReps`; `redoLast()` drops the last; app-scoped (set survives leaving the
+  screen). Replaced the whole-set `TrackRequest`/`start`.
+  (2) ViewModel: `currentMarks` (0–2, the rep being placed) + `repCount` (mirrored) replace the
+  whole-set `marks`. `onSegmentTap` appends to `currentMarks`; on the 2nd tap it calls
+  `runner.startRep(...)` and clears `currentMarks` (auto-track). `onRedoLastRep`→`runner.redoLast()`;
+  `onDone`→`onGetVelocityNumbers`. `onConfirmScale` reads the runner's `completedReps` for the
+  combined samples + per-rep windows (`repWindowsFromCompleted`, replaces `repWindowsFromMarks`);
+  `onGetVelocityNumbers` no longer clears the runner (analysis needs the reps); `onSave` clears after
+  saving. The collector mirrors `SetTrackState` and restores a set-in-progress on re-entry.
+  (3) Player: prompt cycles "Reps: N · Tap rep N+1 BOTTOM/TOP"; only the current rep's 0–2 circles; a
+  progress overlay while a rep tracks; on completion it seeks+plays that rep so the dot follows (the
+  user's "play then 2 more taps"); buttons UNDO / REDO REP / RESET / DONE (≥1 rep → GET VELOCITY). The
+  old TRACK/whole-set-marker UI removed.
+  (4) 3 `repWindowsFromCompleted` unit tests. Per-rep results/velocity-drop chart unchanged.
+  `trackPlateReps`/`trackPlateWholeClip`/`RepSegmenter` dormant. Build + full suite green, zero
+  `" lb"`, APK badged versionCode 98.
+  KNOWN GAP: auto-track on the 2nd tap means a mis-tapped top tracks a wrong window (mitigated by REDO
+  REP + UNDO). Not device-verified — the tap-tap-track-repeat loop + per-rep results are the gate.
+  versionCode 98, versionName 0.71.0.
 
 ## Release rules
 

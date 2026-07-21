@@ -9,33 +9,34 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 import javax.inject.Singleton
 
-/** Everything needed to run — and later restore — a per-rep set tracking pass. [marks] is a flat
- * list of taps, paired into reps: (bottom, top), (bottom, top), … */
-data class TrackRequest(
-    val videoPath: String,
-    val videoWidthPx: Int,
-    val videoHeightPx: Int,
-    val marks: List<PlateMark>
-)
-
-/** State of the (app-scoped) tracking pass; survives the capture ViewModel being cleared. */
-sealed interface TrackState {
-    data object Idle : TrackState
-    data class Working(val request: TrackRequest, val progress: Float, val samples: List<BarPathSample>) : TrackState
-    data class Complete(val request: TrackRequest, val samples: List<BarPathSample>) : TrackState
-    data class Failed(val request: TrackRequest, val message: String) : TrackState
-}
+/** One tracked rep of a set: its bottom+top marks and the samples from the bounded two-mark track. */
+data class CompletedRep(val bottomMark: PlateMark, val topMark: PlateMark, val samples: List<BarPathSample>)
 
 /**
- * Runs the whole-clip plate tracking on an APPLICATION-scoped coroutine so it is NOT cancelled when
- * the user leaves the capture screen (which clears the ViewModel and its scope). The ViewModel just
- * observes [state] and mirrors/restores it, so navigating away and back — or backgrounding — no
- * longer interrupts a long multi-rep analysis. (It does not survive the OS killing the whole app
- * process; that would need a foreground service.)
+ * The state of a set being built rep-by-rep. Survives the capture ViewModel being cleared (the runner
+ * is app-scoped), so leaving/returning keeps the set. [partialSamples] is the rep currently being
+ * tracked (for the live dot); [videoPath]/dims are kept for the leave-and-return restore.
+ */
+data class SetTrackState(
+    val videoPath: String? = null,
+    val videoWidthPx: Int = 0,
+    val videoHeightPx: Int = 0,
+    val completedReps: List<CompletedRep> = emptyList(),
+    val trackingRep: Boolean = false,
+    val progress: Float = 0f,
+    val partialSamples: List<BarPathSample> = emptyList(),
+    val failedMessage: String? = null
+)
+
+/**
+ * Runs — and accumulates — a set ONE REP AT A TIME on an application-scoped coroutine, so the set
+ * survives the user leaving the capture screen. Each rep uses the reliable bounded two-mark tracker
+ * ([BarPathFrameTracker.trackPlateTwoMark]); a completed rep is appended to [SetTrackState.completedReps].
  */
 @Singleton
 class BarPathTrackingRunner @Inject constructor(
@@ -44,41 +45,53 @@ class BarPathTrackingRunner @Inject constructor(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var job: Job? = null
 
-    private val _state = MutableStateFlow<TrackState>(TrackState.Idle)
-    val state: StateFlow<TrackState> = _state.asStateFlow()
+    private val _state = MutableStateFlow(SetTrackState())
+    val state: StateFlow<SetTrackState> = _state.asStateFlow()
 
-    /** Start (or restart) tracking [request]. Progress + streamed samples are published to [state]. */
-    fun start(request: TrackRequest) {
+    /** Track one rep (bottom→top) and, on success, append it to the set. */
+    fun startRep(videoPath: String, videoWidthPx: Int, videoHeightPx: Int, bottom: PlateMark, top: PlateMark) {
         job?.cancel()
-        _state.value = TrackState.Working(request, 0f, emptyList())
+        _state.update {
+            it.copy(
+                videoPath = videoPath, videoWidthPx = videoWidthPx, videoHeightPx = videoHeightPx,
+                trackingRep = true, progress = 0f, partialSamples = emptyList(), failedMessage = null
+            )
+        }
         job = scope.launch {
             val acc = ArrayList<BarPathSample>()
-            var progress = 0f
-            val reps = request.marks.chunked(2).filter { it.size == 2 }.map { (bottom, top) ->
-                BarPathFrameTracker.RepMarks(
-                    bottom.tap.xPx.toDouble(), bottom.tap.yPx.toDouble(), bottom.atMs,
-                    top.tap.xPx.toDouble(), top.tap.yPx.toDouble(), top.atMs
-                )
-            }
             val samples = runCatching {
-                barPathFrameTracker.trackPlateReps(
-                    videoPath = request.videoPath,
-                    reps = reps,
-                    onProgress = { p -> progress = p; _state.value = TrackState.Working(request, p, acc.toList()) },
-                    onSample = { s -> acc.add(s); _state.value = TrackState.Working(request, progress, acc.toList()) }
+                barPathFrameTracker.trackPlateTwoMark(
+                    videoPath = videoPath,
+                    tapAX = bottom.tap.xPx.toDouble(), tapAY = bottom.tap.yPx.toDouble(), atAMs = bottom.atMs,
+                    tapBX = top.tap.xPx.toDouble(), tapBY = top.tap.yPx.toDouble(), atBMs = top.atMs,
+                    onProgress = { p -> _state.update { it.copy(progress = p, partialSamples = acc.toList()) } },
+                    onSample = { s -> acc.add(s); _state.update { it.copy(partialSamples = acc.toList()) } }
                 )
             }.getOrElse { emptyList() }
-            _state.value = if (samples.size >= 2) {
-                TrackState.Complete(request, samples)
-            } else {
-                TrackState.Failed(request, "Couldn't track the plate. Re-tap a clearly coloured plate (the rim), not the grey middle.")
+            _state.update {
+                if (samples.size >= 2) {
+                    it.copy(
+                        completedReps = it.completedReps + CompletedRep(bottom, top, samples),
+                        trackingRep = false, progress = 1f, partialSamples = samples
+                    )
+                } else {
+                    it.copy(
+                        trackingRep = false, progress = 0f, partialSamples = emptyList(),
+                        failedMessage = "Couldn't track that rep — tap the coloured rim at the bottom and the top."
+                    )
+                }
             }
         }
     }
 
-    /** Discard the current/last result (new recording, re-mark, or reset). */
+    /** Drop the most recent tracked rep (REDO LAST REP). */
+    fun redoLast() {
+        _state.update { it.copy(completedReps = it.completedReps.dropLast(1), partialSamples = emptyList(), failedMessage = null) }
+    }
+
+    /** Discard the whole set (new recording / re-mark / reset). */
     fun clear() {
         job?.cancel()
-        _state.value = TrackState.Idle
+        _state.value = SetTrackState()
     }
 }

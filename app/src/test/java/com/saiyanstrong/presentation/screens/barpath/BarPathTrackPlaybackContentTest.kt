@@ -101,25 +101,25 @@ class BarPathTrackPlaybackContentTest {
     private fun frames(vararg xy: Pair<Double, Double>): List<TrackedFrame> =
         xy.mapIndexed { i, (x, y) -> TrackedFrame(i * 100L, x, y, 0.0) }
 
-    // ── repWindowsFromMarks (per-rep marking) ──────────────────────────────────────────
+    // ── repWindowsFromCompleted (per-rep windows) ──────────────────────────────────────
 
     private fun mark(ms: Long) = PlateMark(TapPoint(0f, 0f), ms, PlateSelectionUi(0f, 0f, 10f))
+    private fun rep(bottomMs: Long, topMs: Long) = CompletedRep(mark(bottomMs), mark(topMs), emptyList())
 
     @Test
-    fun `repWindowsFromMarks pairs marks into ordered rep windows`() {
-        val windows = repWindowsFromMarks(listOf(mark(100), mark(500), mark(1200), mark(1600)))
+    fun `repWindowsFromCompleted maps each rep to an ordered window`() {
+        val windows = repWindowsFromCompleted(listOf(rep(100, 500), rep(1200, 1600)))
         assertEquals(listOf(100L to 500L, 1200L to 1600L), windows)
     }
 
     @Test
-    fun `repWindowsFromMarks normalises tap order within a pair`() {
-        // Top tapped before bottom → still (min, max).
-        assertEquals(listOf(100L to 500L), repWindowsFromMarks(listOf(mark(500), mark(100))))
+    fun `repWindowsFromCompleted normalises bottom-top order`() {
+        assertEquals(listOf(100L to 500L), repWindowsFromCompleted(listOf(rep(500, 100))))
     }
 
     @Test
-    fun `repWindowsFromMarks ignores an incomplete trailing mark`() {
-        assertEquals(listOf(100L to 500L), repWindowsFromMarks(listOf(mark(100), mark(500), mark(900))))
+    fun `repWindowsFromCompleted is empty for no reps`() {
+        assertEquals(emptyList<Pair<Long, Long>>(), repWindowsFromCompleted(emptyList()))
     }
 
     @Test

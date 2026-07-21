@@ -108,20 +108,20 @@ fun BarPathCaptureScreen(
         val liveSamples by viewModel.liveSamples.collectAsStateWithLifecycle()
         BarPathTrackPlaybackContent(
             videoPath = uiState.videoPath!!,
-            samples = liveSamples,
+            currentRepSamples = liveSamples,
             videoWidthPx = uiState.videoWidthPx,
             videoHeightPx = uiState.videoHeightPx,
-            isMarked = uiState.trackedSamples.size >= 2 && !uiState.isTracking,
+            repCount = uiState.repCount,
             isTracking = uiState.isTracking,
             trackingProgress = uiState.trackingProgress,
             placementFrame = uiState.placementFrame,
-            selections = uiState.marks.map { it.selection },
+            selections = uiState.currentMarks.map { it.selection },
             errorMessage = uiState.errorMessage,
             onSegmentTap = viewModel::onSegmentTap,
             onUndoMark = viewModel::onUndoMark,
-            onConfirmTrack = viewModel::onConfirmTrack,
+            onRedoLastRep = viewModel::onRedoLastRep,
             onReMark = viewModel::onReMark,
-            onGetVelocityNumbers = viewModel::onGetVelocityNumbers
+            onDone = viewModel::onGetVelocityNumbers
         )
         return
     }
