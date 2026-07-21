@@ -26,6 +26,7 @@ class SaiyanStrongApp : Application(), Configuration.Provider {
             .build()
 
     override fun onCreate() {
+        CrashReporter.install(this) // before super so even Hilt/startup crashes are captured
         super.onCreate()
         applicationScope.launch {
             exerciseDao.insertAll(ExerciseSeeder.DATA)
